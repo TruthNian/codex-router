@@ -489,6 +489,100 @@ test("a large initial event preserves a namespaced tool call without retrying", 
 // An empty completion used to reach the client as a clean 200 the app
 // recorded as a successful turn with no content. The router must retry the
 // identical request once and only surface the retry's completion.
+test("GLM repetition cancels a live upstream and emits incomplete without retry or completion", async () => {
+  let posts = 0;
+  let closed = false;
+  const gw = await gateway((_request, response) => {
+    posts++;
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.write('event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Starting verification."}\n\n');
+    const timer = setInterval(() => {
+      response.write(`event: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", delta: "我会继续检查并修复这个错误，然后验证结果。".repeat(40) })}\n\n`);
+    }, 10);
+    response.on("close", () => { closed = true; clearInterval(timer); });
+  });
+  const port = await openPort();
+  const router = run(routerEnv(gw.port, port));
+  try {
+    await waitFor(`${callerBaseUrl(port, CALLER_KEY)}/models`, router);
+    const result = await readRouted(port, { ...TURN_BODY, model: "commandcode/glm-5.3" });
+    assert.equal(result.complete, true, result.body);
+    assert.match(result.body, /response.incomplete/);
+    assert.match(result.body, /router_repetitive_generation/);
+    assert.doesNotMatch(result.body, /response.completed/);
+    assert.equal(posts, 1);
+    await waitForLog(router, /generation stopped: router_repetitive_generation/);
+    assert.ok(closed, "upstream generation canceled after detection");
+  } finally { await stopChild(router); await closeServer(gw.server); }
+});
+
+test("GLM accepts answers and refusals delivered only in completion or content-part events", async () => {
+  const events = [
+    { type: "response.output_text.done", text: "A complete answer." },
+    { type: "response.refusal.done", refusal: "I cannot help with that." },
+    { type: "response.content_part.done", part: { type: "output_text", text: "A complete answer." } },
+    { type: "response.content_part.done", part: { type: "refusal", refusal: "I cannot help with that." } },
+  ];
+  let posts = 0;
+  const gw = await gateway((_req, res) => {
+    const event = events[posts++];
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.end([event, { type: "response.completed", response: { status: "completed", output: [] } }]
+      .map((item) => `event: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`).join(""));
+  });
+  const port = await openPort();
+  const router = run(routerEnv(gw.port, port));
+  try {
+    await waitFor(`${callerBaseUrl(port, CALLER_KEY)}/models`, router);
+    for (let i = 0; i < events.length; i++) {
+      const result = await readRouted(port, { ...TURN_BODY, model: "commandcode/glm-5.3" });
+      assert.equal(result.status, 200, result.body);
+      assert.equal(result.complete, true, result.body);
+      assert.match(result.body, /response.completed/);
+      assert.doesNotMatch(result.body, /response.incomplete|router_empty_generation/);
+      assert.equal(posts, i + 1, "valid completion must not be retried");
+    }
+  } finally { await stopChild(router); await closeServer(gw.server); }
+});
+
+test("GLM stalled goal is rejected before sending another upstream request", async () => {
+  let posts = 0;
+  const gw = await gateway((_req, res) => { posts++; res.end(CONTENT_SSE); });
+  const port = await openPort();
+  const router = run(routerEnv(gw.port, port));
+  const goal = { role: "user", content: '<codex_internal_context source="goal">\nContinue working toward the active thread goal.' };
+  const reply = { role: "assistant", content: "已暂停测试，证据保留在工作区。" };
+  try {
+    await waitFor(`${callerBaseUrl(port, CALLER_KEY)}/models`, router);
+    const result = await readRouted(port, { ...TURN_BODY, model: "commandcode/glm-5.3", input: [goal, reply, goal, reply, goal, reply, goal] });
+    assert.equal(result.status, 400, result.body);
+    assert.match(result.body, /router_goal_no_progress/);
+    assert.equal(posts, 0);
+  } finally { await stopChild(router); await closeServer(gw.server); }
+});
+
+test("native Responses history keeps reasoning separate from assistant prose", async () => {
+  let sent;
+  const gw = await gateway(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    sent = JSON.parse(Buffer.concat(chunks));
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.end(CONTENT_SSE);
+  });
+  const port = await openPort();
+  const router = run(routerEnv(gw.port, port));
+  const thought = { type: "reasoning", summary: [{ type: "summary_text", text: "Reasoning stays separate." }] };
+  const answer = { type: "message", role: "assistant", content: [{ type: "output_text", text: "The answer is 17." }] };
+  try {
+    await waitFor(`${callerBaseUrl(port, CALLER_KEY)}/models`, router);
+    const result = await readRouted(port, { ...TURN_BODY, model: "opencode-go-responses/gpt-5.6-luna", input: [thought, answer, { role: "user", content: "Continue." }] });
+    assert.equal(result.status, 200, result.body);
+    assert.deepEqual(sent.input.find((item) => item.type === "reasoning"), thought);
+    assert.deepEqual(sent.input.find((item) => item.role === "assistant"), answer);
+  } finally { await stopChild(router); await closeServer(gw.server); }
+});
+
 test("an empty completion is retried once and the retry's content reaches the client", async () => {
   let posts = 0;
   const gw = await gateway((_request, response) => {

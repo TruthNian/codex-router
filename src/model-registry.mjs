@@ -471,6 +471,12 @@ function endpointProblem(model, provider) {
   if (!/^https?:\/\//.test(endpoint.baseUrl || "")) {
     return `model ${model.slug} endpoint requires an HTTP(S) baseUrl`;
   }
+  if (
+    endpoint.protocol !== undefined &&
+    !["openai", "anthropic", "openai-responses"].includes(endpoint.protocol)
+  ) {
+    return `model ${model.slug} endpoint has an unsupported API protocol`;
+  }
   if (endpoint.authMode !== undefined && endpoint.authMode !== "anonymous") {
     return `model ${model.slug} endpoint has an unsupported authMode`;
   }
@@ -627,7 +633,9 @@ function modelProblem(model, providers, slugs, gatewayModels) {
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }
-    const conversational = providerModelEndpoint(provider);
+    const conversational = providerModelEndpoint(provider.perModelEndpoint
+      ? { ...provider, protocol: model.endpoint?.protocol ?? "openai" }
+      : provider);
     if (!conversational && supported.includes("/embeddings")) {
       return `model ${model.slug} cannot declare OpenAI endpoints for provider protocol ${provider.protocol}`;
     }
@@ -1031,6 +1039,11 @@ export const MODEL_BY_GATEWAY_ID = new Map(
 
 export function providerForModel(model) {
   const provider = RUNTIME_PROVIDERS.get(model.provider);
+  // The custom container owns identity; each model owns its wire protocol.
+  // Do not inherit endpoint credentials or privileges into the container.
+  if (provider?.perModelEndpoint) {
+    return { ...provider, protocol: model.endpoint?.protocol ?? "openai" };
+  }
   // One credential/provider identity can serve both its legacy Chat aliases
   // and the current direct Flash model's native Responses contract.
   return usesDeepSeekResponses(model) && provider

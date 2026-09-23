@@ -1,51 +1,66 @@
 ---
 name: codex-in-app-browser
-description: Drive the Codex in-app browser (open, navigate, click, type, screenshot, read page state) through the app's own node_repl runtime. Use when the session uses a custom (non-OpenAI) model, for example deepseek-v4-flash or mimo-v2.5, and the user asks to use the in-app browser, open or navigate a page in it, test a local app in a browser, or click, type, or take a screenshot in the Codex browser panel.
+description: Drive the Codex in-app browser to open, navigate, click, type, inspect, or screenshot pages. Use when the session uses a custom (non-OpenAI) model, for example deepseek-v4-flash or mimo-v2.5, and the user asks to use the in-app browser or test a page in the Codex browser panel.
 ---
 
 # Codex In-App Browser
 
-The tool is `mcp__node_repl__js`. It is available in this session.
+Use the app-provided `mcp__cua_repl__js` tool. Its live tool instructions and
+returned documentation define the `cua` API; do not import a browser client
+or bootstrap another runtime.
 
-## First: read the official skill
+## Open or recover a tab
 
-The official skill is authoritative. Read it before any browser work:
+On the first call or after a reset, execute exactly one entry-point call
+listed in the live tool instructions, optionally assigning its result. Do not
+add other calls, waits, output helpers, or snapshots to that invocation.
+Read the returned documentation before continuing.
 
-`~/.codex/plugins/cache/openai-bundled/browser/<version>/skills/control-in-app-browser/SKILL.md`
-
-Find the latest `<version>` directory (for example `26.803.41515`).
-
-## Bootstrap (once per session)
-
-Send this as ONE line through `mcp__node_repl__js`:
-
-```js
-if (globalThis.agent?.browsers == null) { const { setupBrowserRuntime } = await import("<plugin root>/scripts/browser-client.mjs"); globalThis.agent = await setupBrowserRuntime(); }
-```
-
-Replace `<plugin root>` with the browser plugin path. Then bind the
-in-app browser and read its documentation:
+Follow the live entry-point priority: recover a user-mentioned or existing
+tab through `cua.getTab(...)` before creating a replacement. For a new URL
+in the requested in-app browser, create the tab directly:
 
 ```js
-globalThis.iab = await agent.browsers.get("iab");
-nodeRepl.write(await iab.documentation());
+let tab = await cua.createBrowserTab("iab", "https://example.com", { visible: true });
 ```
 
-Read the complete documentation output before interacting with the page.
+Use `visible: false` only when a hidden tab suits the task. If an inventory
+of enabled surfaces is needed instead:
+
+```js
+await cua.getState();
+```
+
+If context begins with a summary of existing browser work, first call:
+
+```js
+await cua.rewriteDocumentation();
+```
+
+Read that documentation before continuing. Reuse a tab binding while it
+exists; after reset or process recovery, reacquire it through a documented
+entry point using observed tab metadata. Do not assume JavaScript bindings
+survive a new process or that a tab is available to a different active task.
 
 ## Rules
 
-- Send code as ONE line, or use `@file:<path>` with a trailing newline.
-  The runtime fires on newline; input without a trailing newline silently
-  does nothing.
-- Reuse the existing `agent` and `iab` bindings on later turns. Do not
-  reinitialize.
-- `open_in_codex` only OPENS a tab. It cannot click, type, or read. Use
-  `mcp__node_repl__js` for interaction.
-- Never start your own node_repl process and never write a side-channel
-  driver. Use the tool you were given.
+- Use only APIs described in the live tool instructions or returned
+  documentation, including any mechanism for continuing work across turns.
+- The entry points display documentation or initial UI state already; do not
+  wrap them in `nodeRepl.write` or `nodeRepl.emitImage`. For other methods,
+  follow their documented output contract.
+- Keep one CUA JavaScript session for the task. Avoid duplicate state output;
+  request screenshots only when visual evidence helps the next decision and
+  prefer targeted read-only inspection when the documented API supports it.
+- If `iab` is unavailable, report that condition. Honor the user's browser
+  choice rather than silently switching to another browser.
+- Verify autofill and form completion from field state or visual evidence,
+  without exposing secret values; a click or missing error is insufficient.
+- `open_in_codex` opens a panel; it does not inspect or interact with content.
+  Use `mcp__cua_repl__js` for browser interaction.
+- Never start a side-channel REPL, driver process, or browser-control script.
 
 ## If the tool is missing
 
-Stop and report that `mcp__node_repl__js` is not in the tool list. Do not
-build workarounds.
+Report that `mcp__cua_repl__js` is unavailable for this session. Do not claim
+browser access or build a replacement driver.

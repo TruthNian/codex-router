@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import { CODEX_APP_TOOLS } from "../src/codex-app-tools.mjs";
 import {
@@ -1214,6 +1215,67 @@ test("a missing or malformed skill contract is reported as unavailable", () => {
 function skillsRoot() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "skills");
 }
+
+test("computer-use guidance uses CUA without the retired bootstrap or unverified helpers", () => {
+  for (const name of ["codex-router", "codex-computer-use", "codex-in-app-browser"]) {
+    const text = readFileSync(path.join(skillsRoot(), name, "SKILL.md"), "utf8");
+    assert.ok(text.includes("mcp__cua_repl__js"), `${name}: current CUA tool declared`);
+    assert.doesNotMatch(
+      text,
+      /mcp__node_repl__js|@oai\/sky|setupBrowserRuntime|browser-client\.mjs|cua\.getApp\(|\.markHandoff\(|disableDiffing|emit:\s*false/,
+      `${name}: no obsolete bootstrap or API assumptions`,
+    );
+  }
+});
+
+test("CUA initialization examples execute one documented call with supported arguments", async () => {
+  for (const name of ["codex-computer-use", "codex-in-app-browser"]) {
+    const text = readFileSync(path.join(skillsRoot(), name, "SKILL.md"), "utf8");
+    const examples = [...text.matchAll(/```js\r?\n([\s\S]*?)```/g)].map((match) => match[1]);
+    const exercised = new Set();
+    assert.ok(examples.length >= 2, `${name}: initialization and summary recovery examples`);
+    for (const code of examples) {
+      const calls = [];
+      const cua = Object.freeze({
+        async getState(...args) {
+          assert.equal(args.length, 0, "inventory has no undocumented options");
+          calls.push("getState");
+        },
+        async rewriteDocumentation(...args) {
+          assert.equal(args.length, 0, "summary recovery uses the documented signature");
+          calls.push("rewriteDocumentation");
+        },
+        async createBrowserTab(browser, url, options, ...extra) {
+          assert.equal(browser, "iab");
+          assert.equal(new URL(url).protocol, "https:");
+          assert.deepEqual(JSON.parse(JSON.stringify(options)), { visible: true });
+          assert.equal(extra.length, 0);
+          calls.push("createBrowserTab");
+          return Object.freeze({});
+        },
+      });
+      // No live browser, nodeRepl, imports, timers, or legacy runtime exist in
+      // this context. Extra initialization work fails instead of touching UI.
+      await runInNewContext(`(async () => {\n${code}\n})()`, { cua }, { timeout: 1000 });
+      assert.equal(calls.length, 1, `${name}: each first invocation is one API call`);
+      exercised.add(calls[0]);
+    }
+    assert.ok(exercised.has("getState"), `${name}: supported inventory example`);
+    assert.ok(exercised.has("rewriteDocumentation"), `${name}: summary recovery example`);
+    if (name === "codex-in-app-browser") assert.ok(exercised.has("createBrowserTab"));
+  }
+});
+
+test("CUA migration retains upstream worker waiting and replacement safeguards", () => {
+  const text = readFileSync(path.join(skillsRoot(), "codex-router", "SKILL.md"), "utf8");
+  const waiting = text.split("## Waiting for a routed worker")[1]?.split("\n## ")[0];
+  assert.ok(waiting, "worker lifecycle guidance survives the browser migration");
+  assert.match(waiting, /timeout or quiet stream is not a failed worker/);
+  assert.match(waiting, /keep its task ID\s+and wait again/i);
+  assert.match(waiting, /explicit terminal result, user\s+cancellation, or a task deadline/);
+  assert.match(waiting, /confirm it has stopped;\s+never overlap two writers/);
+  assert.match(waiting, /Polling never changes states or restarts a task/);
+});
 
 test("skill frontmatter accepts LF and CRLF checkouts", () => {
   const lf = "---\nname: example\ndescription: Use when testing.\n---\n";

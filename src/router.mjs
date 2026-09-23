@@ -58,6 +58,13 @@ import {
 } from "./empty-completion-guard.mjs";
 import { itemLifecycleNormalizerTransform } from "./item-lifecycle-normalizer.mjs";
 import {
+  GenerationSafetyError,
+  GenerationSafetyTransform,
+  generationSafetyEnabled,
+  prepareGenerationInput,
+  endGenerationSafetyResponse,
+} from "./generation-safety.mjs";
+import {
   leakedToolCallRecoveryTransform,
   usesHy4NonceMarkup,
   usesLeakedToolCallRecovery,
@@ -3255,10 +3262,9 @@ async function buildRoutedRequest({ request, payload, route, agedInput }) {
   const input = deepSeekResponses
     ? deepSeekResponsesInput(bridged)
     : Array.isArray(bridged) ? [...bridged] : bridged;
-  // Legacy Chat routes retain their existing reasoning carry. The native
-  // DeepSeek route already has exactly one plaintext reasoning item and must
-  // not copy it into an assistant message for Chat translation.
-  if (!deepSeekResponses) {
+  // Only translated Chat routes need reasoning carry. All native Responses
+  // routes, including DeepSeek and custom endpoints, keep reasoning separate.
+  if (chatCompletionsProvider) {
     // Three replay channels, not two. A Chat route inside the native-reasoning
     // contract carries its thinking as `thinking` parts for the forwarder to
     // restore as reasoning_content; a Chat route outside it drops the thinking
@@ -4026,9 +4032,12 @@ async function handleResponses(request, response, requestUrl) {
       // not reintroduce ambient search that this route never advertised.
       const searchSnapshot = snapshotRoutedSearch(payload, route);
       payload = searchSnapshot.payload;
+      const generationInput = generationSafetyEnabled(route)
+        ? prepareGenerationInput(payload.input)
+        : payload.input;
       normalizedInput = await normalizeRoutedAgentInput(
         request,
-        payload.input,
+        generationInput,
         controller.signal,
       );
       searchContract = routedSearchContract(searchSnapshot, normalizedInput);
@@ -4390,6 +4399,12 @@ async function handleResponses(request, response, requestUrl) {
             : undefined,
       });
       const transforms = [activity.progress.byteObserver(), usageObserver];
+      if (
+        generationSafetyEnabled(route) &&
+        String(contentType).toLowerCase().includes("text/event-stream")
+      ) {
+        transforms.push(new GenerationSafetyTransform({ repetition: true }));
+      }
       let envelopeCompat = route
         ? zaiResponsesCompatTransform(route.provider, contentType)
         : undefined;
@@ -5584,6 +5599,17 @@ async function handleRequest(request, response) {
 
 const server = http.createServer((request, response) => {
   handleRequest(request, response).catch((error) => {
+    if (error instanceof GenerationSafetyError) {
+      console.error(`[codex-router] generation stopped: ${error.code}`);
+      if (!response.headersSent) {
+        writeJson(response, 400, {
+          error: { type: "invalid_request_error", code: error.code, message: error.message },
+        });
+      } else {
+        endGenerationSafetyResponse(response, error);
+      }
+      return;
+    }
     const status = httpErrorStatus(error);
     // The bare string this used to log made every mid-stream failure
     // indistinguishable in production, and stopping at the top error was the

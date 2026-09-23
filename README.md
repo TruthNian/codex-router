@@ -1,5 +1,9 @@
 # Codex Router
 
+> This fork preserves personal customizations on the `personal` branch.
+> See [fork maintenance and recovery](docs/personal-fork.md) before updating or
+> installing. The installation links below belong to the upstream project.
+
 ## Install everything (recommended)
 
 This is the default setup: **guided provider setup + Electron Control Center +

@@ -32,3 +32,27 @@ release-rebuild*/
 # Scratch imagegen output. The campaign PNGs it produces are committed
 # under docs-site/public/campaign/, which is the copy the site serves.
 output/
+
+# Personal runtime state belongs outside this public source checkout.
+/*.secret
+/caller-secret
+/internal-secret
+/cursor-public-secret
+/auth.json
+/config.toml
+/user-models.json
+/enabled-providers.json
+/model-picker.json
+/vision-bridge.json
+/install-manifest.json
+/managed-skills.json
+/models_cache.json
+/native-models.json
+/merged-models.json
+/litellm.yaml
+/*.jsonl
+/.env
+/.env.*
+!/.env.example
+/router-state/
+/router-upgrade-backup/

@@ -1124,8 +1124,12 @@ After setup:
 3. Fully quit Codex, reopen it, and create a new task.
 4. Open the normal model picker.
 
-Codex loads `model_catalog_json` only at app startup. If models are still
-missing, run `./bin/refresh-catalog`, fully quit Codex, and reopen it.
+While the router service is running, it checks the signed-in account's native
+model catalog every five minutes and republishes changes. This lets the next
+Codex launch see newly released models without a manual catalog refresh.
+Codex loads `model_catalog_json` only at app startup. If the catalog changes
+while Codex is open, fully quit and reopen Codex to load the new list. If a
+model is still missing, run `./bin/refresh-catalog` and reopen Codex.
 
 Large compressed Codex contexts use separate safety limits for bytes received
 on the loopback socket and bytes produced after decompression. The defaults are

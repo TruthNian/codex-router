@@ -1124,12 +1124,15 @@ After setup:
 3. Fully quit Codex, reopen it, and create a new task.
 4. Open the normal model picker.
 
-While the router service is running, it checks the signed-in account's native
-model catalog every five minutes and republishes changes. This lets the next
-Codex launch see newly released models without a manual catalog refresh.
+The router checks the signed-in account's native model catalog at service
+startup and every 24 hours while running, and republishes changes. This lets
+the next Codex launch see newly released models without a manual catalog refresh.
 Codex loads `model_catalog_json` only at app startup. If the catalog changes
 while Codex is open, fully quit and reopen Codex to load the new list. If a
-model is still missing, run `./bin/refresh-catalog` and reopen Codex.
+model is still missing, run `./bin/refresh-catalog` (on Windows, run
+`node .\src\refresh-catalog.mjs` from the installed checkout) and reopen Codex.
+Manual refresh bypasses the account-cache freshness check; the daily timer does
+not delay an explicit refresh. Failed requests keep the existing cached catalog.
 
 Large compressed Codex contexts use separate safety limits for bytes received
 on the loopback socket and bytes produced after decompression. The defaults are

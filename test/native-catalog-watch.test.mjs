@@ -2,8 +2,31 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { NATIVE_ACCOUNT_CATALOG_TTL_MS } from "../src/native-account-catalog.mjs";
 import { watchNativeCatalog } from "../src/native-catalog-drift.mjs";
+
+test("native catalog checks at startup and once a day, not every five minutes", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let calls = 0;
+  const stop = watchNativeCatalog({
+    immediate: true,
+    republish: async () => { calls += 1; },
+  });
+  try {
+    assert.equal(calls, 1, "startup still checks immediately");
+    await Promise.resolve();
+    t.mock.timers.tick(5 * 60_000);
+    assert.equal(calls, 1, "five minutes must not trigger another check");
+    t.mock.timers.tick((24 * 60 - 5) * 60_000 - 1);
+    assert.equal(calls, 1, "no periodic check before a full day");
+    t.mock.timers.tick(1);
+    assert.equal(calls, 2, "check again after 24 hours");
+    await Promise.resolve();
+    t.mock.timers.tick(24 * 60 * 60_000);
+    assert.equal(calls, 3, "daily checks continue while the service runs");
+  } finally {
+    stop();
+  }
+});
 
 test("native catalog watcher refreshes periodically without overlapping passes", async () => {
   let tick;
@@ -13,7 +36,7 @@ test("native catalog watcher refreshes periodically without overlapping passes",
     clear(timer) { assert.equal(timer, 1); },
     interval(callback, delay) {
       tick = callback;
-      assert.equal(delay, NATIVE_ACCOUNT_CATALOG_TTL_MS);
+      assert.equal(delay, 86_400_000);
       return 1;
     },
     republish() {

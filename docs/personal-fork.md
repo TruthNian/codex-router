@@ -3,7 +3,7 @@
 此 fork 用来长期保存已验证的 Codex Router 定制。当前运行代码基于上游
 `v0.6.0`（`930f547d8d8861a47e18a83216e15e73a73aa97c`），定制实现提交为
 `2771abe6b93e3110a2e0079db413d60451970307`。当前维护版本为
-`personal/v0.6.0-r2`，在原定制上选择性移植目录刷新与 Windows 启动修复。
+`personal/v0.6.0-r3`，在 r2 的基础上将自动目录检查改为每天一次。
 
 ## 分支与远程
 
@@ -15,9 +15,10 @@
 | `personal` | 默认分支和个人安装来源，保留定制实现、回归测试及维护记录 |
 | `personal/v0.6.0-r1` | 2026-09-23 保存的原定制版本，继续保留用于恢复 |
 | `personal/v0.6.0-r2` | 2026-09-30 维护版本，增加周期目录刷新和 Windows 启动修复 |
+| `personal/v0.6.0-r3` | 2026-09-30 调整自动目录检查频率，保留启动检查和手动刷新 |
 
 版本标签发布后不移动、不覆盖；新的修改使用新的标签，例如
-`personal/v0.6.0-r3`。GitHub 页面默认展示 `personal`，避免把上游主线误当作
+`personal/v0.6.0-r4`。GitHub 页面默认展示 `personal`，避免把上游主线误当作
 包含个人补丁的版本。
 
 ## 需要保留的定制
@@ -41,8 +42,8 @@ GLM 保护的范围、误报边界及跨模型故障转移限制见
 ```powershell
 git clone --branch personal https://github.com/TruthNian/codex-router.git codex-router-personal
 git -C codex-router-personal remote add upstream https://github.com/duolahypercho/codex-router.git
-git -C codex-router-personal fetch origin tag personal/v0.6.0-r2
-git -C codex-router-personal show --no-patch personal/v0.6.0-r2
+git -C codex-router-personal fetch origin tag personal/v0.6.0-r3
+git -C codex-router-personal show --no-patch personal/v0.6.0-r3
 ```
 
 需要恢复特定版本时，在独立 checkout 中从该标签创建恢复分支，再按仓库安装
@@ -112,6 +113,26 @@ Windows 上须先确认计划任务能读取安装目录并运行其中的 Node/
 相关测试 90 通过、28 个按平台跳过；目录发布和技能测试 149 通过、4 跳过；
 最后的观察器与启动清理测试 5 通过。各组存在重复，不能直接相加。
 Node 语法检查通过。未运行全仓测试，也未额外发起真实付费模型生成。
+
+## 2026-09-30 每日目录检查调整
+
+`r3` 将运行期间的自动目录检查从每五分钟改为每 24 小时一次；服务启动后
+仍立即检查，缓存不足五分钟且客户端版本相同时可以复用。轮询间隔与缓存
+有效期分开，避免延长自动周期后，启动检查也被一天的缓存有效期挡住。
+网络失败继续保留旧目录，下一轮自动检查或手动刷新时重试。
+
+需要立即取得新模型时，在安装源码目录运行：
+
+```powershell
+node .\src\refresh-catalog.mjs
+```
+
+此命令强制检查官方目录，不等待每日定时器，也不受缓存有效期限制。
+目录更新后完整退出并重新打开 Codex。每个自定义模型的配置和原有定制保留。
+
+针对观察器、账户缓存、目录差异、手动刷新和启动清理的隔离测试 35 项通过。
+新增虚拟时钟测试在旧代码上于五分钟处失败，修改后验证启动、24 小时边界和
+后续每日检查；无需等待实际一天。`npm run check` 通过。未运行全仓测试。
 
 ## 源码与本机状态分别保存
 

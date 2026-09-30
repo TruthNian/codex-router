@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { NATIVE_CATALOG_PATH, CONFIG_PATH } from "./paths.mjs";
 import { nativeCatalogIsReusable, readModelsCache, routedCatalogConfigured } from "./catalog.mjs";
 import { codexBinaryFingerprint, codexVersion } from "./codex-binary.mjs";
-import { NATIVE_ACCOUNT_CATALOG_TTL_MS, refreshNativeAccountCatalog } from "./native-account-catalog.mjs";
+import { refreshNativeAccountCatalog } from "./native-account-catalog.mjs";
 import { discoveryDisabled } from "./discovery-mode.mjs";
 import { routedCodexAgentStatus } from "./codex-agent-catalog.mjs";
 import {
@@ -16,6 +16,10 @@ import { selectedConfiguredListedModels } from "./provider-selection.mjs";
 // Marker prefix config-manager.mjs writes around router-owned Codex blocks.
 // Keep this compatibility surface aligned with target-integration.mjs.
 const managedMarkerPattern = /^# BEGIN (?:kimi-)?codex-(?:router|proxy)-/m;
+
+// Automatic polling is daily; the short account-cache TTL remains independent
+// so startup checks can revalidate recent changes and manual refresh can force it.
+const NATIVE_CATALOG_POLL_INTERVAL_MS = 24 * 60 * 60_000;
 
 export function managedCodexConfigDetected(contents) {
   return typeof contents === "string" && managedMarkerPattern.test(contents);
@@ -189,7 +193,7 @@ export function watchNativeCatalog({
       running = false;
     }
   };
-  const timer = interval(refresh, NATIVE_ACCOUNT_CATALOG_TTL_MS);
+  const timer = interval(refresh, NATIVE_CATALOG_POLL_INTERVAL_MS);
   // Background maintenance must not keep a stopped supervisor alive.
   timer.unref?.();
   if (immediate) void refresh();

@@ -2,7 +2,8 @@
 
 此 fork 用来长期保存已验证的 Codex Router 定制。当前运行代码基于上游
 `v0.6.0`（`930f547d8d8861a47e18a83216e15e73a73aa97c`），定制实现提交为
-`2771abe6b93e3110a2e0079db413d60451970307`。
+`2771abe6b93e3110a2e0079db413d60451970307`。当前维护版本为
+`personal/v0.6.0-r2`，在原定制上选择性移植目录刷新与 Windows 启动修复。
 
 ## 分支与远程
 
@@ -12,10 +13,11 @@
 | `upstream` | `https://github.com/duolahypercho/codex-router.git`，读取官方更新 |
 | `main` | 上游主线的同步副本，不放个人补丁；本次创建 fork 时同步，之后按需同步 |
 | `personal` | 默认分支和个人安装来源，保留定制实现、回归测试及维护记录 |
-| `personal/v0.6.0-r1` | 本次保存的版本，包含已验证的实现和本维护说明 |
+| `personal/v0.6.0-r1` | 2026-09-23 保存的原定制版本，继续保留用于恢复 |
+| `personal/v0.6.0-r2` | 2026-09-30 维护版本，增加周期目录刷新和 Windows 启动修复 |
 
 版本标签发布后不移动、不覆盖；新的修改使用新的标签，例如
-`personal/v0.6.0-r2`。GitHub 页面默认展示 `personal`，避免把上游主线误当作
+`personal/v0.6.0-r3`。GitHub 页面默认展示 `personal`，避免把上游主线误当作
 包含个人补丁的版本。
 
 ## 需要保留的定制
@@ -39,8 +41,8 @@ GLM 保护的范围、误报边界及跨模型故障转移限制见
 ```powershell
 git clone --branch personal https://github.com/TruthNian/codex-router.git codex-router-personal
 git -C codex-router-personal remote add upstream https://github.com/duolahypercho/codex-router.git
-git -C codex-router-personal fetch origin tag personal/v0.6.0-r1
-git -C codex-router-personal show --no-patch personal/v0.6.0-r1
+git -C codex-router-personal fetch origin tag personal/v0.6.0-r2
+git -C codex-router-personal show --no-patch personal/v0.6.0-r2
 ```
 
 需要恢复特定版本时，在独立 checkout 中从该标签创建恢复分支，再按仓库安装
@@ -81,7 +83,35 @@ Windows 上须先确认计划任务能读取安装目录并运行其中的 Node/
 遇到 `EPERM`，后续停止了全套运行。上述记录不代表全仓测试通过，也不代表
 已进行真实付费模型生成或真实浏览器端到端操作。
 
-本次远程保存仅增加 README、忽略规则和本维护说明，没有改变上述运行代码。
+2026-09-23 创建 fork 时仅增加 README、忽略规则和本维护说明，没有改变上述运行代码。
+
+## 2026-09-30 维护版本
+
+`r2` 继续基于 v0.6.0，没有合并整个上游主线，也没有改变 Node/Python 依赖锁。
+以下上游提交通过带来源记录的 cherry-pick 移植：
+
+| 上游提交 | 行为 |
+| --- | --- |
+| `9b3441997374d1cdd67dd85063465834658185cb` | 服务运行时每五分钟刷新原生账户模型目录，有差异才重新发布；已打开的 Codex 仍需重启才能读取新列表 |
+| `c089d403bae613694e02fdc93d72a51a31c773fd` | Windows 启动记录的进程探测允许每次 45 秒、超时后重试一次；停止和归属校验仍使用原来的短预算 |
+| `6d45084564ae09473a8bf540ff9457fed198e526` | 补齐冷启动预算说明和变更记录 |
+| `259a04c715c75ce753c45c56012a618c0aa7091c` | 计划任务显式传入 `//E:VBScript`，避免脚本文件关联影响启动 |
+
+仅不含凭据的 `service-process.json` 在额外 ACL 加固失败时允许告警并继续，
+仍继承状态目录权限；凭据写入继续在加固失败时终止。进程停止前仍验证 PID 的
+启动身份、命令行、源码目录及状态目录。
+
+原有每模型协议、Responses 推理分离、GLM 生成保护和当前 CUA 技能全部保留。
+上游 `b6bb8cf761297314684e42c951627906d8633dfa` 已实现等效的推理分离，
+但它未包含在本次选择性移植中；未来整合主线时再移除重复实现。
+
+移植时补齐目录观察器的生命周期：关闭服务时清理定时器，后台定时器不阻止
+进程退出，启动时的首次刷新与周期刷新共用互斥状态，停止后不执行排队的回调。
+
+本次隔离验证：核心协议和 GLM 回归 100 通过；启动、进程身份、文件权限和安装
+相关测试 90 通过、28 个按平台跳过；目录发布和技能测试 149 通过、4 跳过；
+最后的观察器与启动清理测试 5 通过。各组存在重复，不能直接相加。
+Node 语法检查通过。未运行全仓测试，也未额外发起真实付费模型生成。
 
 ## 源码与本机状态分别保存
 

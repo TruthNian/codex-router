@@ -229,6 +229,7 @@ const commonEnv = {
 
 const children = [];
 let shuttingDown = false;
+let stopNativeCatalogWatch = () => {};
 
 // Every child goes through `spawnableCommand` for the one case that needs it:
 // a Windows `.cmd`/`.bat` launcher, which Node has refused to spawn without a
@@ -286,6 +287,7 @@ const SIGKILL_AFTER_MS = SHUTDOWN_DRAIN_MS + SHUTDOWN_FLUSH_MS + 2_000;
 function stopChildren() {
   if (shuttingDown) return;
   shuttingDown = true;
+  stopNativeCatalogWatch();
   for (const child of children) {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
   }
@@ -414,9 +416,9 @@ async function main() {
   // Codex Desktop is closed, so its next startup reads newly released models.
   // The immediate pass also handles an already stale cache after service boot.
   import("./native-catalog-drift.mjs")
-    .then(({ republishOnNativeDrift, watchNativeCatalog }) => {
-      watchNativeCatalog();
-      return republishOnNativeDrift();
+    .then(({ watchNativeCatalog }) => {
+      if (shuttingDown) return;
+      stopNativeCatalogWatch = watchNativeCatalog({ immediate: true });
     })
     .catch((error) => {
       console.error(`[codex-router] Native drift check failed: ${error.message}`);

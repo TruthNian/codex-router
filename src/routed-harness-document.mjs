@@ -18,10 +18,10 @@
 // line range and replaces those lines, which is why a user's comments,
 // anchors, and hand-formatting survive a publish.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import {
   scanYamlDocument,
   spliceYamlBlock,
@@ -44,18 +44,7 @@ export function readHarnessDocument(target) {
  * have created them that way itself.
  */
 export function writeHarnessDocument(target, contents) {
-  mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-  const temporary = `${target}.tmp.${process.pid}`;
-  writeFileSync(temporary, contents, { encoding: "utf8", mode: 0o600 });
-  try {
-    protectPrivateFile(temporary);
-    renameSync(temporary, target);
-    protectPrivateFile(target);
-  } catch (error) {
-    if (existsSync(temporary)) unlinkSync(temporary);
-    throw error;
-  }
-  return target;
+  return writePrivateFile(target, contents);
 }
 
 // ---------------------------------------------------------------------------

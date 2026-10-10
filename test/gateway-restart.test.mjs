@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,6 +10,66 @@ import { writePrivateJson } from "../src/file-security.mjs";
 import { freePort } from "./port-pool.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function isolatedEnvironment(directory, stateDir) {
+  const runtimeNames = new Set(["PATH", "SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "TEMP", "TMP",
+    "PSModulePath", "SystemDrive", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
+    .map((name) => name.toLowerCase()));
+  const runtime = Object.fromEntries(Object.entries(process.env).filter(([name]) => runtimeNames.has(name.toLowerCase())));
+  const user = path.join(directory, "user");
+  const home = path.join(directory, "codex");
+  for (const folder of [user, home, path.join(user, "AppData", "Roaming"), path.join(user, "AppData", "Local")]) {
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+  }
+  const registry = path.join(directory, "registry.json");
+  writeFileSync(registry, JSON.stringify({ version: 1, providers: [{ id: "custom", displayName: "Fixture custom",
+    kind: "openai-compatible", ownedBy: "fixture", perModelEndpoint: true, authMode: "per-model" }],
+    models: [{ slug: "custom/gateway-fixture", gatewayModel: "gateway-fixture", upstreamModel: "gateway-fixture",
+      provider: "custom", listed: false, endpoint: { protocol: "openai", keyless: true,
+        baseUrl: "http://127.0.0.1:9999/v1" } }] }));
+  writeFileSync(path.join(stateDir, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["custom"] }));
+  return { ...runtime, HOME: user, USERPROFILE: user, CODEX_HOME: home,
+    APPDATA: path.join(user, "AppData", "Roaming"), LOCALAPPDATA: path.join(user, "AppData", "Local"),
+    KIMI_CODE_HOME: path.join(directory, "kimi"), MODEL_ROUTER_STATE_DIR: stateDir, CODEX_ROUTER_STATE_DIR: stateDir,
+    MODEL_ROUTER_REGISTRY: registry, MODEL_ROUTER_USER_MODELS: path.join(stateDir, "user-models.json"),
+    MODEL_ROUTER_GENERIC_PROVIDERS: path.join(stateDir, "generic-providers.json"),
+    CODEX_ROUTER_SOURCE_ROOT: root, CODEX_ROUTER_NO_DISCOVERY: "0", NO_DISCOVERY: "0",
+    MODEL_ROUTER_SHOW_ALL_MODELS: "0", CODEX_ROUTER_SHOW_ALL_MODELS: "0",
+    CODEX_ROUTER_SERVICE_PLATFORM: "test-fixture", CODEX_ROUTER_NATIVE_SESSION_FALLBACK: "0" };
+}
+
+async function stopSupervisor(child, errors) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+  child.send({ type: "model-router:shutdown" });
+  let timer;
+  try {
+    const result = await Promise.race([exited, new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`supervisor did not finish IPC shutdown:\n${errors()}`)), 15_000);
+    })]);
+    assert.equal(result.signal, null, errors());
+    assert.equal(result.code, 0, errors());
+  } finally {
+    clearTimeout(timer);
+    if (child.exitCode === null && child.connected) child.disconnect();
+  }
+}
+
+async function waitForClosedPort(port) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const closed = await new Promise((resolve) => {
+      const socket = net.connect(port, "127.0.0.1");
+      const finish = (result) => { socket.destroy(); resolve(result); };
+      socket.setTimeout(2_000, () => finish(false));
+      socket.once("connect", () => finish(false));
+      socket.once("error", () => finish(true));
+    });
+    if (closed) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.fail(`owned fixture listener still owns port ${port} after supervisor shutdown`);
+}
 
 // Issue #261: LiteLLM's exception mapping raised out of the request handler on
 // an upstream 429 and the proxy exited 1. start.mjs raced every child's exit,
@@ -147,7 +208,7 @@ test("a ready stack activates its exact pending proof and survives a gateway res
   const child = spawn(process.execPath, [path.join(root, "src", "start.mjs")], {
     cwd: root,
     env: {
-      ...process.env,
+      ...isolatedEnvironment(rootDir, stateDir),
       MODEL_ROUTER_TARGET: "codex",
       MODEL_ROUTER_STATE_DIR: stateDir,
       MODEL_ROUTER_PORT: String(routerPort),
@@ -159,10 +220,8 @@ test("a ready stack activates its exact pending proof and survives a gateway res
       MODEL_ROUTER_LITELLM_BIN: gatewayBin,
       // Keep the backoff out of the run time; the sequencing is what matters.
       CODEX_ROUTER_GATEWAY_RESTART_BACKOFF_MS: "50",
-      CODEX_ROUTER_HOME: rootDir,
-      CODEX_HOME: rootDir,
     },
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
   let errors = "";
   let exited;
@@ -208,16 +267,16 @@ test("a ready stack activates its exact pending proof and survives a gateway res
     assert.doesNotMatch(errors, /gateway-restart-antigravity-access-token/);
     assert.doesNotMatch(errors, /gateway-restart-antigravity-refresh-token/);
   } finally {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-    // On Windows the service holds the cmd.exe hop, not the gateway behind it,
-    // and killing the hop orphans the stand-in -- which would keep the port and
-    // a lock on the temp directory. Ask it to leave through its own door; by now
-    // nothing is left to restart it. Harmless and already-dead on POSIX.
-    await get(`http://127.0.0.1:${gatewayPort}/quit`);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    try {
+      await stopSupervisor(child, () => errors);
+    } finally {
+      // The owned batch shim cannot forward Node IPC to its gateway child.
+      // Stop only this fixture's known endpoint after supervisor restart has
+      // ended, including when the bounded root-exit assertion failed.
+      await get(`http://127.0.0.1:${gatewayPort}/quit`);
+      await Promise.all([routerPort, gatewayPort, apiPort, antigravityPort].map(waitForClosedPort));
+      rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
   }
 });
 

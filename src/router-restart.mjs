@@ -133,7 +133,8 @@ export async function routerServiceStatus({
     if (
       typeof parsed?.installed !== "boolean" ||
       typeof parsed?.loaded !== "boolean" ||
-      typeof parsed?.state !== "string"
+      typeof parsed?.state !== "string" ||
+      (parsed.statusUnknown !== undefined && typeof parsed.statusUnknown !== "boolean")
     ) {
       return { installed: false, statusUnknown: true };
     }
@@ -141,6 +142,9 @@ export async function routerServiceStatus({
       installed: parsed.installed,
       loaded: parsed.loaded,
       state: parsed.state,
+      ...(parsed.statusUnknown === true || parsed.state === "unknown"
+        || (!parsed.installed && !parsed.loaded && parsed.state !== "stopped")
+        ? { statusUnknown: true } : {}),
     };
   } catch {
     return { installed: false, statusUnknown: true };
@@ -226,38 +230,144 @@ export function environmentPoolRemovalReminder(status) {
   );
 }
 
+function adoptionError(message) {
+  const error = new Error(message);
+  error.code = "model_overlay_adoption_failed";
+  return error;
+}
+
+async function probeRouterOwnership({ waitForHealth, signal, deadline }) {
+  assertOperationActive(signal, deadline);
+  const remaining = remainingOperationMs(deadline, signal);
+  const health = await waitForHealth({
+    timeoutMs: 0,
+    requestTimeoutMs: Math.max(1, Math.min(1_000, remaining ?? 1_000)),
+  });
+  assertOperationActive(signal, deadline);
+  return health;
+}
+
+/** Verify the registry generation a healthy running Router actually adopted. */
+export async function verifyRouterExecutionPlanAdoption({
+  expectedFingerprint,
+  allowOffline = true,
+  waitForHealth = waitForRouterHealth,
+  serviceStatus = routerServiceStatus,
+  signal,
+  deadline,
+} = {}) {
+  if (!/^[a-f0-9]{64}$/.test(expectedFingerprint || "")) {
+    throw adoptionError("A prepared model overlay has no valid execution-plan fingerprint.");
+  }
+  const health = await probeRouterOwnership({ waitForHealth, signal, deadline });
+  if (health?.ok === true && health.payload?.service === "codex-router") {
+    if (health.payload.executionPlan?.fingerprint !== expectedFingerprint) {
+      throw adoptionError(
+        "The running router has not adopted the prepared model routes; client publication was stopped. " +
+        `Restart it with \`${routerServiceRestartCommand()}\` before retrying.`,
+      );
+    }
+    return { adopted: true, offline: false };
+  }
+  if (allowOffline && health?.connectionRefused === true) {
+    const status = await serviceStatus({ signal, deadline });
+    assertOperationActive(signal, deadline);
+    if (status?.statusUnknown !== true && status?.installed === false && status?.loaded === false) {
+      // Confirm the port remains empty after the ownership probe; a failed or
+      // stopped installed job must never be reclassified as an offline setup.
+      const confirmed = await probeRouterOwnership({ waitForHealth, signal, deadline });
+      if (confirmed?.connectionRefused === true) return { adopted: false, offline: true };
+    }
+  }
+  throw adoptionError(
+    "The prepared model routes could not be verified on a healthy router; client publication was stopped. " +
+    "Repair or stop the router, then retry.",
+  );
+}
+
 export async function restartRouterServiceIfInstalled({
   spawn,
   env = process.env,
+  expectedFingerprint,
+  waitForHealth = waitForRouterHealth,
+  writeDiagnostics = (value) => process.stderr.write(value),
   signal,
   deadline,
 } = {}) {
   const operationDeadline = serviceOperationDeadline(deadline, env);
-  if (!(await routerServiceStatus({
+  const status = await routerServiceStatus({
     spawn,
     env,
     signal,
     deadline: operationDeadline,
-  })).installed) return false;
+  });
+  if (status.statusUnknown) {
+    throw adoptionError(
+      "The router service state could not be verified; client publication was stopped. " +
+      "Repair or stop the service, then retry.",
+    );
+  }
+  if (!status.installed) {
+    if (status.loaded) {
+      throw adoptionError("A loaded router job has no installed service definition and cannot safely adopt new routes.");
+    }
+    const health = await probeRouterOwnership({ waitForHealth, signal, deadline: operationDeadline });
+    if (health?.ok === true || health?.degradedPayload?.service === "codex-router") {
+      throw adoptionError(
+        "A foreground router is serving but cannot be reloaded by the background service; client publication was stopped. " +
+        "Stop the foreground router, apply the model change, then start it again.",
+      );
+    }
+    if (health?.connectionRefused !== true) {
+      throw adoptionError("The router process state could not be verified; only a confirmed empty loopback port is safe for offline publication.");
+    }
+    return false;
+  }
   assertOperationAllowance(
     signal,
     operationDeadline,
     SERVICE_RESTART_PHASE_MINIMUM_MS,
     "The service operation deadline cannot preserve the full router readiness allowance.",
   );
-  const result = await invokeService(["restart"], {
-    spawn,
-    env,
-    signal,
-    deadline: operationDeadline,
-    stdio: "inherit",
-  });
+  const relay = (output) => {
+    for (const value of [output?.stdout, output?.stderr, !output?.stderr ? output?.error?.message : undefined]) {
+      if (typeof value === "string" && value) writeDiagnostics(value.endsWith("\n") ? value : `${value}\n`);
+    }
+  };
+  let result;
+  try {
+    // The caller may own a machine-readable stdout response (for example a
+    // provider removal). Service progress belongs to stderr at that boundary.
+    result = await invokeService(["restart"], {
+      spawn, env, signal, deadline: operationDeadline, stdio: "capture",
+    });
+  } catch (error) {
+    relay(error);
+    throw error;
+  }
+  relay(result);
   assertOperationActive(signal, operationDeadline);
   if (result.error || result.status !== 0) {
-    throw new Error(
+    const error = new Error(
       "The router service could not be restarted; routes requiring fresh process state " +
         `will not go live until it is. Retry with \`${routerServiceRestartCommand()}\`.`,
+      result.error ? { cause: result.error } : undefined,
     );
+    error.status = result.status ?? result.error?.status;
+    error.stdout = result.stdout ?? result.error?.stdout ?? "";
+    error.stderr = result.stderr ?? result.error?.stderr ?? "";
+    error.output = result.output || result.error?.output || [null, error.stdout, error.stderr];
+    if (result.signal || result.error?.signal) error.signal = result.signal || result.error.signal;
+    throw error;
+  }
+  if (expectedFingerprint !== undefined) {
+    await verifyRouterExecutionPlanAdoption({
+      expectedFingerprint,
+      allowOffline: false,
+      waitForHealth,
+      signal,
+      deadline: operationDeadline,
+    });
   }
   return true;
 }

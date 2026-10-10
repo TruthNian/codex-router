@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import test from "node:test";
 
 import {
@@ -143,6 +144,25 @@ test("a replacement that never becomes healthy is stopped and counted", async ()
     supervisor.logs.find((line) => line.includes("did not come back")) ?? "",
     /did not come back: LiteLLM gateway exited before becoming healthy/,
   );
+});
+
+test("a healthy replacement's fatal finalization error reaches its service owner without a restart", async () => {
+  const fatal = Object.assign(new Error("proof rollback was not confirmed"), {
+    code: "antigravity_activation_rollback_failed",
+  });
+  let finalizations = 0;
+  const supervisor = harness({ limits: { onHealthy: async () => {
+    finalizations += 1;
+    throw fatal;
+  } } });
+  const rejected = assert.rejects(supervisor.done, (error) => error === fatal);
+  supervisor.spawned[0].exit(1);
+  await rejected;
+  assert.equal(finalizations, 1);
+  assert.equal(supervisor.spawned.length, 2);
+  assert.deepEqual(supervisor.spawned[1].killed, [], "a healthy dependency must not be killed for a fatal application write");
+  assert.ok(!supervisor.logs.some((line) => line.includes("did not come back")));
+  supervisor.spawned[1].exit(0);
 });
 
 test("shutting down is not a crash and never respawns", async () => {
@@ -420,4 +440,73 @@ test("a replacement still starting after one budget is waited on, not killed", a
   supervisor.shutDown();
   supervisor.spawned[1].exit(0);
   await supervisor.done;
+});
+
+test("the default 15-second watchdog wait cannot keep its finished supervisor process alive", { timeout: 10_000 }, async (t) => {
+  for (const ending of ["child exit", "shutdown abort", "child exit without watchdog cancellation"]) {
+    await t.test(ending, async (subtest) => {
+      const moduleUrl = new URL("../src/gateway-supervisor.mjs", import.meta.url).href;
+      const removeCancellation = ending === "child exit without watchdog cancellation";
+      const fixture = `
+        import { spawn } from "node:child_process";
+        import { registerHooks } from "node:module";
+        if (${removeCancellation}) registerHooks({ load(url, context, nextLoad) {
+          const result = nextLoad(url, context);
+          if (url !== ${JSON.stringify(moduleUrl)}) return result;
+          const source = Buffer.from(result.source).toString();
+          const changed = source.replace("watchdogController.abort();", "");
+          if (changed === source) throw new Error("The watchdog negative control did not apply.");
+          return { ...result, source: changed };
+        }});
+        const { superviseGateway } = await import(${JSON.stringify(moduleUrl)});
+        const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 100)"], {
+          stdio: "ignore", windowsHide: true
+        });
+        const controller = new AbortController();
+        let shuttingDown = false;
+        let healthChecks = 0;
+        const done = superviseGateway({
+          child, start: () => { throw new Error("A finished fixture must not restart."); },
+          waitForExit: (owned, label) => new Promise((resolve) =>
+            owned.once("exit", (code, signal) => resolve({ label, code, signal }))),
+          waitForHealth: async () => {}, healthCheck: async () => { healthChecks += 1; },
+          isShuttingDown: () => shuttingDown, signal: controller.signal,
+          maxRestarts: 0, log: () => {}
+        });
+        if (${JSON.stringify(ending)} === "shutdown abort") setTimeout(() => {
+          shuttingDown = true; controller.abort(); child.kill("SIGTERM");
+        }, 50);
+        await done;
+        console.log(JSON.stringify({ settled: true, healthChecks }));
+      `;
+      const child = spawn(process.execPath, ["--input-type=module", "-e", fixture], {
+        env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+      });
+      const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+      subtest.after(async () => {
+        if (child.exitCode === null && child.signalCode === null) { child.kill("SIGKILL"); await exited; }
+      });
+      let output = "";
+      let errors = "";
+      let settled;
+      const observedSettlement = new Promise((resolve) => { settled = resolve; });
+      child.stdout.on("data", (chunk) => { output += chunk; if (output.includes('"settled":true')) settled(); });
+      child.stderr.on("data", (chunk) => { errors += chunk; });
+      const bounded = async (promise, message) => {
+        let timer;
+        try { return await Promise.race([promise, new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${message}: ${errors}`)), 2_000);
+        })]); } finally { clearTimeout(timer); }
+      };
+      await bounded(observedSettlement, "supervisor did not settle");
+      if (removeCancellation) {
+        const exitedNaturally = await Promise.race([exited.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 500))]);
+        assert.equal(exitedNaturally, false, "removing epoch cancellation must retain the default watchdog's referenced timer");
+      } else {
+        const result = await bounded(exited, "the finished supervisor leaked its referenced 15-second watchdog sleep");
+        assert.deepEqual(result, { code: 0, signal: null }, errors);
+      }
+      assert.deepEqual(JSON.parse(output.trim()), { settled: true, healthChecks: 0 });
+    });
+  }
 });

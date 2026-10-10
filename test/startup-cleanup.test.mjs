@@ -11,6 +11,66 @@ import { freePort } from "./port-pool.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+function isolatedEnvironment(directory, stateDir) {
+  const runtimeNames = new Set(["PATH", "SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "TEMP", "TMP",
+    "PSModulePath", "SystemDrive", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
+    .map((name) => name.toLowerCase()));
+  const runtime = Object.fromEntries(Object.entries(process.env).filter(([name]) => runtimeNames.has(name.toLowerCase())));
+  const user = path.join(directory, "user");
+  const home = path.join(directory, "codex-home");
+  for (const folder of [user, home, path.join(user, "AppData", "Roaming"), path.join(user, "AppData", "Local")]) {
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+  }
+  const registry = path.join(directory, "registry.json");
+  writeFileSync(registry, JSON.stringify({ version: 1, providers: [{ id: "custom", displayName: "Fixture custom",
+    kind: "openai-compatible", ownedBy: "fixture", perModelEndpoint: true, authMode: "per-model" }],
+    models: [{ slug: "custom/gateway-fixture", gatewayModel: "gateway-fixture", upstreamModel: "gateway-fixture",
+      provider: "custom", listed: false, endpoint: { protocol: "openai", keyless: true,
+        baseUrl: "http://127.0.0.1:9999/v1" } }] }));
+  writeFileSync(path.join(stateDir, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["custom"] }));
+  return { ...runtime, HOME: user, USERPROFILE: user, CODEX_HOME: home,
+    APPDATA: path.join(user, "AppData", "Roaming"), LOCALAPPDATA: path.join(user, "AppData", "Local"),
+    KIMI_CODE_HOME: path.join(directory, "kimi"), MODEL_ROUTER_STATE_DIR: stateDir, CODEX_ROUTER_STATE_DIR: stateDir,
+    MODEL_ROUTER_REGISTRY: registry, MODEL_ROUTER_USER_MODELS: path.join(stateDir, "user-models.json"),
+    MODEL_ROUTER_GENERIC_PROVIDERS: path.join(stateDir, "generic-providers.json"),
+    CODEX_ROUTER_SOURCE_ROOT: root, CODEX_ROUTER_NO_DISCOVERY: "0", NO_DISCOVERY: "0",
+    MODEL_ROUTER_SHOW_ALL_MODELS: "0", CODEX_ROUTER_SHOW_ALL_MODELS: "0",
+    CODEX_ROUTER_SERVICE_PLATFORM: "test-fixture", CODEX_ROUTER_NATIVE_SESSION_FALLBACK: "0" };
+}
+
+async function waitForDegraded(child, routerPort, readErrors) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    assert.equal(child.exitCode, null, readErrors());
+    try {
+      const health = await fetch(`http://127.0.0.1:${routerPort}/health`, { signal: AbortSignal.timeout(2_000) });
+      const live = await fetch(`http://127.0.0.1:${routerPort}/health/live`, { signal: AbortSignal.timeout(2_000) });
+      if (health.status === 503 && live.status === 200 && /serving independent routes/.test(readErrors())) {
+        return health.json();
+      }
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.fail(`degraded service did not stay live:\n${readErrors()}`);
+}
+
+async function stopSupervisor(child, readErrors) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+  child.send({ type: "model-router:shutdown" });
+  let timer;
+  try {
+    const result = await Promise.race([exited, new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`IPC shutdown did not finish:\n${readErrors()}`)), 15_000);
+    })]);
+    assert.equal(result.signal, null, readErrors());
+    assert.equal(result.code, 0, readErrors());
+  } finally {
+    clearTimeout(timer);
+    if (child.exitCode === null && child.connected) child.disconnect();
+  }
+}
+
 // On loopback this settles either way in microseconds: a live listener accepts,
 // and a closed port refuses. A socket that does neither is not a third answer
 // this test can interpret, so bound it rather than letting it hang until the
@@ -30,71 +90,7 @@ async function portIsClosed(port) {
   });
 }
 
-// Startup spawns five children — the three forwarders in parallel, then the
-// gateway and frontend in sequence — each gated on an HTTP
-// health probe that backs off from 200 ms to a 2 s cap between refused probes
-// and widens the probe window itself from 1 s to a 10 s cap. That makes the run
-// time depend on how fast this machine can fork and schedule processes, not on
-// the behaviour under test: measured end-to-end at ~1.2 s idle, ~1.5 s under 2x
-// CPU oversubscription, and ~18.6 s when a concurrent fork storm made spawns
-// slow enough that live-but-starved servers kept blowing the probe abort. (That
-// fork-storm figure predates the widening window, which is what stopped those
-// starved servers being declared dead outright -- but the run time still tracks
-// machine speed.) A single fixed budget for the whole pipeline therefore races
-// machine speed, which is why 10 s failed on a busy machine while startup was
-// working perfectly.
-//
-// Progress, not elapsed time, separates "slow" from "stuck": every stage
-// announces itself on the child's stderr ("[kimi-oauth] listening", the
-// gateway's spawn error, "startup failed"). Waiting on that observable signal
-// and failing only once it stops arriving keeps the guard against a hang while
-// letting a loaded machine take as long as it needs, and the budget no longer
-// accumulates across stages.
-//
-// 30 s is ~2x the worst single-stage silence observed in a run that still
-// produced the correct result (16.3 s, under the fork storm above). It stays
-// meaningful because start.mjs self-limits every wait -- 30 s per forwarder,
-// 300 s for the gateway -- so the only silence this can catch is the gateway's,
-// and it reports it 270 s sooner than start.mjs would.
-const STARTUP_STALL_MS = 30_000;
-
-// Fails only if the child produces no output at all for STARTUP_STALL_MS and
-// has not exited. Resolves as soon as it exits, however long that takes.
-function waitForStartupExit(child, readErrors) {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    let lastOutput = started;
-    const onProgress = () => {
-      lastOutput = Date.now();
-    };
-    child.stderr.on("data", onProgress);
-    const finish = () => {
-      clearInterval(watchdog);
-      child.stderr.off("data", onProgress);
-    };
-    const watchdog = setInterval(() => {
-      const idleMs = Date.now() - lastOutput;
-      if (idleMs < STARTUP_STALL_MS) return;
-      finish();
-      reject(
-        new Error(
-          `startup stalled: no output for ${idleMs} ms after waiting ${Date.now() - started} ms in total; stderr so far:\n${readErrors()}`,
-        ),
-      );
-    }, 250);
-    child.once("exit", (code, signal) => {
-      finish();
-      resolve({ code, signal });
-    });
-  });
-}
-
-// The stall watchdog is the real guard and gives a diagnosable message; this
-// outer timeout only backstops a child that hangs while still chattering. It
-// has to clear a loaded run (~19 s) plus one full stall window (30 s), so 20 s
-// was actually below the floor for reporting a stall at all. A passing run is
-// unaffected -- this bound is only reached when something is already broken.
-test("startup failure cleans up children and leaves a pending Antigravity proof inactive", { timeout: 120_000 }, async () => {
+test("a degraded gateway preserves independent routes and leaves its pending Antigravity proof inactive", { timeout: 120_000 }, async () => {
   const ports = await Promise.all(Array.from({ length: 6 }, () => freePort()));
   assert.equal(new Set(ports).size, ports.length);
   const [routerPort, gatewayPort, oauthPort, apiPort, grokOauthPort, antigravityPort] = ports;
@@ -130,7 +126,7 @@ test("startup failure cleans up children and leaves a pending Antigravity proof 
   const child = spawn(process.execPath, [path.join(root, "src", "start.mjs")], {
     cwd: root,
     env: {
-      ...process.env,
+      ...isolatedEnvironment(rootDir, stateDir),
       MODEL_ROUTER_TARGET: "codex",
       MODEL_ROUTER_STATE_DIR: stateDir,
       MODEL_ROUTER_PORT: String(routerPort),
@@ -141,7 +137,7 @@ test("startup failure cleans up children and leaves a pending Antigravity proof 
       MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: String(antigravityPort),
       MODEL_ROUTER_LITELLM_BIN: process.execPath,
     },
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
   let errors = "";
   child.stderr.setEncoding("utf8");
@@ -150,13 +146,12 @@ test("startup failure cleans up children and leaves a pending Antigravity proof 
   });
 
   try {
-    const exit = await waitForStartupExit(child, () => errors);
-    assert.equal(exit.signal, null);
-    assert.equal(exit.code, 1, errors);
-    assert.match(errors, /\[model-router\] startup failed/);
+    const health = await waitForDegraded(child, routerPort, () => errors);
+    assert.ok(health.degraded.includes("gateway"));
+    assert.deepEqual(health.executionPlan.services, ["antigravity", "api", "gateway"]);
     assert.match(
       errors,
-      /startup failed: LiteLLM gateway exited before becoming healthy\./,
+      /dependency unavailable: LiteLLM gateway exited before becoming healthy\./,
     );
     assert.match(errors, /\[antigravity-oauth\] listening/);
     assert.doesNotMatch(errors, /startup-internal-key-with-sufficient-length/);
@@ -170,12 +165,13 @@ test("startup failure cleans up children and leaves a pending Antigravity proof 
       state: "pending_activation",
       generation: activationGeneration,
     });
-    for (const port of [oauthPort, apiPort, grokOauthPort, antigravityPort]) {
+    await stopSupervisor(child, () => errors);
+    for (const port of [routerPort, oauthPort, apiPort, grokOauthPort, antigravityPort]) {
       assert.equal(await portIsClosed(port), true, `orphaned child still owns port ${port}`);
     }
   } finally {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-    rmSync(rootDir, { recursive: true, force: true });
+    try { await stopSupervisor(child, () => errors); }
+    finally { rmSync(rootDir, { recursive: true, force: true }); }
   }
 });
 
@@ -200,8 +196,7 @@ test("the foreground supervisor boots past the Windows service-process record", 
   const child = spawn(process.execPath, [path.join(root, "src", "foreground-start.mjs")], {
     cwd: root,
     env: {
-      ...process.env,
-      CODEX_HOME: codexHome,
+      ...isolatedEnvironment(rootDir, stateDir),
       MODEL_ROUTER_TARGET: "codex",
       MODEL_ROUTER_STATE_DIR: stateDir,
       MODEL_ROUTER_PORT: String(routerPort),
@@ -212,7 +207,7 @@ test("the foreground supervisor boots past the Windows service-process record", 
       MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: String(antigravityPort),
       MODEL_ROUTER_LITELLM_BIN: process.execPath,
     },
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
   let errors = "";
   child.stderr.setEncoding("utf8");
@@ -221,13 +216,12 @@ test("the foreground supervisor boots past the Windows service-process record", 
   });
 
   try {
-    const exit = await waitForStartupExit(child, () => errors);
-    assert.equal(exit.signal, null);
-    assert.equal(exit.code, 1, errors);
+    const health = await waitForDegraded(child, routerPort, () => errors);
+    assert.ok(health.degraded.includes("gateway"));
     assert.doesNotMatch(errors, /could not verify its own start\.mjs process identity/);
-    assert.match(errors, /startup failed: LiteLLM gateway exited before becoming healthy\./);
+    assert.match(errors, /dependency unavailable: LiteLLM gateway exited before becoming healthy\./);
   } finally {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-    rmSync(rootDir, { recursive: true, force: true });
+    try { await stopSupervisor(child, () => errors); }
+    finally { rmSync(rootDir, { recursive: true, force: true }); }
   }
 });

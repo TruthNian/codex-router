@@ -157,6 +157,7 @@ function accountCatalogDispatcher({
 async function refreshNativeAccountCatalogUnlocked({
   cachePath = MODELS_CACHE_PATH,
   force = false,
+  conditional = true,
   now = Date.now(),
   version,
   versionProvider = codexClientVersion,
@@ -170,7 +171,7 @@ async function refreshNativeAccountCatalogUnlocked({
   if (!clientVersion) return { status: "unavailable" };
 
   const current = readModelsCache(cachePath);
-  if (!force && cacheIsFresh(current.catalog, clientVersion, now)) {
+  if (!force && conditional && cacheIsFresh(current.catalog, clientVersion, now)) {
     return { status: "fresh", fingerprint: current.fingerprint };
   }
 
@@ -196,7 +197,7 @@ async function refreshNativeAccountCatalogUnlocked({
   // this one would receive, so replaying it invites a 304 that pins the
   // picker to the pre-upgrade catalog for good. Revalidate only within the
   // version that issued the validator; across a version change, ask outright.
-  const etag = safeCurrent && current.catalog.client_version === clientVersion
+  const etag = conditional && safeCurrent && current.catalog.client_version === clientVersion
     ? safeEtag(current.catalog.etag)
     : undefined;
   // Keep the credential sink fixed. Tests replace the transport, never the
@@ -248,7 +249,9 @@ async function refreshNativeAccountCatalogUnlocked({
     const fingerprint = modelsFingerprint(parsed.models);
     const responseEtag = safeEtag(response.headers.get("etag"));
     if (
-      safeCurrent
+      conditional
+      && safeCurrent
+      && current.catalog.client_version === clientVersion
       && fingerprint === current.fingerprint
       && (!responseEtag || responseEtag === etag)
     ) {

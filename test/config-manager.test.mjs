@@ -102,6 +102,7 @@ function run(
         ...process.env,
         CODEX_BIN: scalarAcceptingCodex,
         CODEX_HOME: codexHome,
+        MODEL_ROUTER_STATE_DIR: stateDir,
         CODEX_ROUTER_STATE_DIR: stateDir,
         CODEX_ROUTER_PORT: "46192",
         ...env,
@@ -111,10 +112,24 @@ function run(
 }
 
 function runWithBlockedAtomicWrite(command, codexHome, stateDir) {
+  const relativeHome = path.relative(os.tmpdir(), path.resolve(codexHome));
+  assert.ok(relativeHome && !relativeHome.startsWith("..") && !path.isAbsolute(relativeHome));
+  assert.ok(path.basename(codexHome).startsWith("codex-router-login-free-rollback-"));
+  const relativeState = path.relative(path.resolve(codexHome), path.resolve(stateDir));
+  assert.ok(relativeState && !relativeState.startsWith("..") && !path.isAbsolute(relativeState));
+  const configPath = path.resolve(codexHome, "config.toml");
   const driver = `
-import { mkdirSync } from "node:fs";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const rename = fs.renameSync;
+fs.renameSync = (temporary, target) => {
+  if (target === ${JSON.stringify(configPath)}) {
+    throw Object.assign(new Error("Injected config replacement failure"), { code: "EACCES" });
+  }
+  return rename(temporary, target);
+};
+syncBuiltinESMExports();
 process.argv = [process.execPath, ${JSON.stringify(manager)}, ${JSON.stringify(command)}];
-mkdirSync(${JSON.stringify(path.join(codexHome, "config.toml.tmp."))} + process.pid);
 await import(${JSON.stringify(pathToFileURL(manager).href)} + "?blocked-write=" + process.pid);
 `;
   return execFileSync(
@@ -127,6 +142,7 @@ await import(${JSON.stringify(pathToFileURL(manager).href)} + "?blocked-write=" 
         ...process.env,
         CODEX_BIN: scalarAcceptingCodex,
         CODEX_HOME: codexHome,
+        MODEL_ROUTER_STATE_DIR: stateDir,
         CODEX_ROUTER_STATE_DIR: stateDir,
         CODEX_ROUTER_PORT: "46192",
       },
@@ -848,7 +864,10 @@ base_url = "https://rollback.invalid/v1"
     const beforeConfig = readFileSync(configPath, "utf8");
     const beforeState = readFileSync(providerModePath, "utf8");
 
-    assert.throws(() => runWithBlockedAtomicWrite("enable", codexHome, stateDir));
+    assert.throws(
+      () => runWithBlockedAtomicWrite("enable", codexHome, stateDir),
+      /Injected config replacement failure/,
+    );
     assert.equal(readFileSync(configPath, "utf8"), beforeConfig);
     assert.equal(
       readFileSync(providerModePath, "utf8"),
@@ -1405,6 +1424,7 @@ test("config manager fails closed when the caller capability is missing", () => 
           env: {
             ...process.env,
             CODEX_HOME: codexHome,
+            MODEL_ROUTER_STATE_DIR: stateDir,
             CODEX_ROUTER_STATE_DIR: stateDir,
             CODEX_ROUTER_PORT: "46192",
           },
@@ -1540,6 +1560,7 @@ test("config manager adopts and restores a prepared user-owned native catalog", 
         env: {
           ...process.env,
           CODEX_HOME: codexHome,
+          MODEL_ROUTER_STATE_DIR: stateDir,
           CODEX_ROUTER_STATE_DIR: stateDir,
         },
       },

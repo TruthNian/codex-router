@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -9,11 +8,15 @@ import { fileURLToPath } from "node:url";
 import { freeModelIds, modelIds } from "../src/model-discovery.mjs";
 import { LISTED_MODELS, PROVIDERS } from "../src/model-registry.mjs";
 
+import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
+import { startProviderControlRuntime, runProviderFixtureNode } from "./fixtures/provider-control-runtime.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function isolatedEnvironment(testRoot) {
   return {
-    ...process.env,
+    ...setupFixtureEnvironment(testRoot, path.join(testRoot, "state")),
+    MODEL_ROUTER_TARGET: "codex",
     HOME: testRoot,
     CODEX_HOME: path.join(testRoot, "codex"),
     CODEX_ROUTER_STATE_DIR: path.join(testRoot, "state"),
@@ -119,8 +122,9 @@ test("OrcaRouter discovery keeps callable chat models and identifies the free su
   ]);
 });
 
-test("a configured OrcaRouter provider enables cleanly and doctor requests curation", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "orcarouter-enable-test-"));
+test("a configured OrcaRouter provider enables cleanly and doctor requests curation", async () => {
+  const testRoot = setupFixtureRoot("orcarouter-enable-test-");
+  const runtime = await startProviderControlRuntime(testRoot);
   try {
     writeCredential(testRoot);
     const stateDir = path.join(testRoot, "state");
@@ -129,13 +133,19 @@ test("a configured OrcaRouter provider enables cleanly and doctor requests curat
       `${JSON.stringify({ version: 1, providers: [] })}\n`,
       { mode: 0o600 },
     );
-    const env = isolatedEnvironment(testRoot);
-    const enabled = runNode(["src/providers.mjs", "enable", "orca"], env);
+    const env = { ...isolatedEnvironment(testRoot), ...runtime.environment };
+    const enabled = await runProviderFixtureNode(["src/providers.mjs", "enable", "orca"], env);
     assert.equal(enabled.status, 0, enabled.stderr);
     assert.match(enabled.stdout, /OrcaRouter is enabled, but ships no preselected models/);
     assert.match(enabled.stdout, /curate-models orca/);
 
-    const doctor = runNode(["src/doctor.mjs", "--json"], env);
+    const phases = runtime.events().map((event) => event.phase);
+    assert.equal(phases.indexOf("prepare") < phases.indexOf("service-restart"), true);
+    assert.equal(phases.indexOf("service-restart") < phases.indexOf("health-adoption"), true);
+    assert.equal(phases.indexOf("health-adoption") < phases.indexOf("publish"), true);
+    for (const phase of ["dependencies", "prepare", "service-restart", "health-adoption", "publish"]) assert.equal(phases.includes(phase), true, phase);
+
+    const doctor = await runProviderFixtureNode(["src/doctor.mjs", "--json"], env);
     assert.equal(doctor.status, 1, doctor.stderr);
     const report = JSON.parse(doctor.stdout);
     const byName = Object.fromEntries(report.checks.map((check) => [check.name, check]));
@@ -143,12 +153,13 @@ test("a configured OrcaRouter provider enables cleanly and doctor requests curat
     assert.equal(byName["OrcaRouter models"].status, "warn");
     assert.match(byName["OrcaRouter models"].fix, /curate-models orca/);
   } finally {
+    await runtime.close();
     rmSync(testRoot, { recursive: true, force: true });
   }
 });
 
 test("--free-only additively curates the live free OrcaRouter catalog", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "orcarouter-curation-test-"));
+  const testRoot = setupFixtureRoot("orcarouter-curation-test-");
   try {
     const fixture = path.join(testRoot, "models.json");
     const userModels = path.join(testRoot, "user-models.json");

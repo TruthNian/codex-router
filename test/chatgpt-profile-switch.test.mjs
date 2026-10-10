@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync as rawWriteFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync as rawWriteFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 import {
@@ -37,6 +37,22 @@ import {
   clearChatGPTLoginLease,
   createChatGPTLoginLease,
 } from "../src/chatgpt-login-lease.mjs";
+import { CODEX_HOME, STATE_DIR } from "../src/paths.mjs";
+
+// Static imports above freeze paths. Refuse discovery until the test runner
+// has supplied a synthetic home/state inside temporary or workspace storage.
+const fixtureWorkspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+for (const target of [CODEX_HOME, STATE_DIR]) {
+  assert.ok([os.tmpdir(), fixtureWorkspace].some((base) => {
+    const relative = path.relative(path.resolve(base), path.resolve(target));
+    return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+  }), "profile fixtures require an isolated outer runner");
+}
+process.env.CODEX_ROUTER_NO_DISCOVERY = "0";
+process.env.KIMI_CODE_HOME = path.join(STATE_DIR, "kimi");
+process.env.GROK_AUTH_PATH = path.join(STATE_DIR, "grok", "auth.json");
+process.env.DEVIN_CREDENTIALS_PATH = path.join(STATE_DIR, "devin", "credentials.toml");
+process.env.GCLOUD_BIN = path.join(STATE_DIR, "missing-gcloud");
 
 function writeFileSync(target, contents, options) {
   rawWriteFileSync(target, contents, options);
@@ -1394,6 +1410,8 @@ test("profile detection fails closed across desktop process names", () => {
 
 test("profile switching rejects symlinked login files before mutating the active profile", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "codex-profile-symlink-"));
+  assert.equal(path.dirname(root), path.resolve(os.tmpdir()));
+  assert.ok(path.basename(root).startsWith("codex-profile-symlink-"));
   const primaryHome = path.join(root, "primary");
   const homesDir = path.join(root, "accounts");
   const filePath = path.join(root, "pool.json");
@@ -1406,13 +1424,31 @@ test("profile switching rejects symlinked login files before mutating the active
   writeFileSync(path.join(primaryHome, "auth.json"), firstAuth, { mode: 0o600 });
   writeFileSync(chatGPTSubscriptionAccountAuthPath(first.id, { homesDir }), firstAuth, { mode: 0o600 });
   writeFileSync(secondAuth, JSON.stringify({ tokens: { access_token: "second-token", account_id: "second" } }), { mode: 0o600 });
-  symlinkSync(secondAuth, chatGPTSubscriptionAccountAuthPath(second.id, { homesDir }));
-  await assert.rejects(
-    requestChatGPTProfileSwitch(second.id, { filePath, homesDir, primaryHome, switchPath, platform: "darwin", processList: "", refreshCatalog: false }),
-    /unavailable|symbolic-link/i,
-  );
-  assert.equal(readFileSync(path.join(primaryHome, "auth.json"), "utf8"), firstAuth);
-  assert.equal(readChatGPTProfileSwitchState(switchPath).active, first.id);
+  const established = await ensureChatGPTProfileAccounts({ filePath, homesDir, primaryHome, switchPath });
+  assert.equal(established.currentAccountId, first.id);
+  const savedAuth = chatGPTSubscriptionAccountAuthPath(second.id, { homesDir });
+  let linkedPath = savedAuth;
+  if (process.platform === "win32") {
+    // A junction exercises the actual Windows no-follow guard without needing
+    // administrator rights to create file symbolic links.
+    const outsideHome = path.join(root, "outside-account");
+    mkdirSync(outsideHome);
+    writeFileSync(path.join(outsideHome, "auth.json"), readFileSync(secondAuth), { mode: 0o600 });
+    linkedPath = path.dirname(savedAuth);
+    rmdirSync(linkedPath);
+    symlinkSync(outsideHome, linkedPath, "junction");
+  } else symlinkSync(secondAuth, savedAuth);
+  try {
+    await assert.rejects(
+      requestChatGPTProfileSwitch(second.id, { filePath, homesDir, primaryHome, switchPath, platform: "darwin", processList: "", refreshCatalog: false }),
+      /unavailable|symbolic-link/i,
+    );
+    assert.equal(readFileSync(path.join(primaryHome, "auth.json"), "utf8"), firstAuth);
+    assert.equal(readChatGPTProfileSwitchState(switchPath).active, first.id);
+  } finally {
+    rmSync(linkedPath);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a catalog refresh failure restores the previous auth and catalog atomically", async () => {

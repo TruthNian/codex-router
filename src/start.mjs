@@ -21,9 +21,10 @@ import { clearStartupTimeouts, runtimeChildEnvironment, startupTimeoutMs } from 
 import { waitForHealth as pollHealth } from "./health-probe.mjs";
 import { describeChildExit, fatalExitFollowUp } from "./fatal-exit.mjs";
 import { gatewaySupervisorLimits, superviseGateway } from "./gateway-supervisor.mjs";
+import { stopServiceChildren } from "./service-shutdown.mjs";
 import { writeLiteLlmConfig } from "./litellm-config.mjs";
-import { MODELS } from "./model-registry.mjs";
-import { readLocalModelSelection } from "./local-models.mjs";
+import { MODELS, RUNTIME_PROVIDERS, providerForModel } from "./model-registry.mjs";
+import { createExecutionPlan } from "./route-execution-plan.mjs";
 import { antigravityOAuthStartupState } from "./antigravity-oauth-status.mjs";
 import { attemptAntigravityProbePromotionAfterReadiness } from "./antigravity-probe-activation.mjs";
 import { spawnableCommand } from "./spawnable-command.mjs";
@@ -51,8 +52,7 @@ import {
 } from "./proxy-environment.mjs";
 import { antigravityOAuthStatus } from "./antigravity-oauth-status.mjs";
 import { cursorTunnelRunSpec } from "./cursor-cloudflare-tunnel.mjs";
-import { pruneUnconfiguredProviders } from "./provider-selection.mjs";
-import { targetCli } from "./target-integration.mjs";
+import { readProviderSelection } from "./provider-selection.mjs";
 
 // The foreground entry marks itself before importing this module. Direct
 // start.mjs remains the OS payload; only it consumes managed retry state.
@@ -102,6 +102,20 @@ if (Object.keys(restoredProxy).length > 0) {
 
 const dependencyFix = dependencyRepairHint();
 
+const selectedProviders = new Set(readProviderSelection());
+// A pending explicit probe needs its listener even before provider selection.
+// A verified but unselected account still contributes no ordinary route.
+const antigravityStartup = antigravityOAuthStartupState();
+const executionPlan = createExecutionPlan({
+  models: MODELS,
+  providerForModel,
+  routeEnabled: (model) => RUNTIME_PROVIDERS.get(model.provider)?.generic === true
+    || selectedProviders.has(model.provider),
+  pendingAntigravity: Boolean(antigravityStartup.pendingActivationGeneration),
+});
+const requiredServices = new Set(executionPlan.services);
+let gatewayStartupError;
+
 const litellm =
   process.env.MODEL_ROUTER_LITELLM_BIN ||
   (TARGET === "codex"
@@ -113,8 +127,8 @@ const litellm =
     process.platform === "win32" ? "Scripts" : "bin",
     process.platform === "win32" ? "litellm.exe" : "litellm",
   );
-if (!existsSync(litellm)) {
-  throw new Error(`LiteLLM is not installed at ${litellm}. ${dependencyFix}.`);
+if (executionPlan.needsGateway && !existsSync(litellm)) {
+  gatewayStartupError = new Error(`LiteLLM is not installed at ${litellm}. ${dependencyFix}.`);
 }
 
 // A launcher file that exists on disk is not proof the venv works: an
@@ -132,7 +146,7 @@ if (!existsSync(litellm)) {
 const usesBundledVenv = !process.env.MODEL_ROUTER_LITELLM_BIN &&
   !(TARGET === "codex" &&
     (process.env.CODEX_ROUTER_LITELLM_BIN || process.env.KIMI_LITELLM_BIN));
-if (usesBundledVenv) {
+if (executionPlan.needsGateway && !gatewayStartupError && usesBundledVenv) {
   const venvPython = path.join(
     SOURCE_ROOT,
     ".venv",
@@ -143,7 +157,7 @@ if (usesBundledVenv) {
   if (venvOutcome.kind === "timeout") {
     console.warn(`The LiteLLM virtual environment probe did not finish (${venvOutcome.message}); continuing with the bounded gateway readiness check.`);
   } else if (venvOutcome.kind !== "ok") {
-    throw new Error(
+    gatewayStartupError = new Error(
       `The LiteLLM virtual environment is broken at ${venvPython} (${venvOutcome.message}). ` +
         `${dependencyFix}.`,
     );
@@ -160,32 +174,16 @@ if (!internalKey) throw new Error("Internal service key is empty.");
 const callerKey = assertCallerSecret(
   readFileSync(CALLER_SECRET_PATH, "utf8").trim(),
 );
-writeLiteLlmConfig();
+if (executionPlan.needsGateway) writeLiteLlmConfig();
 
-// Drop enabled providers this build cannot authenticate (missing credential,
-// retired/unknown id). Without this, enabled-providers.json accrues dead
-// entries and the next turn against them returns provider_api_key_missing
-// while the picker can still advertise a stale catalog row. Runs after the
-// gateway config write so a prune that rewrites selection cannot race a
-// concurrent config reader mid-start; forwarders spawned below see the
-// reconciled file.
-const prunedProviders = pruneUnconfiguredProviders();
-if (prunedProviders.length) {
-  console.error(
-    `[codex-router] pruned ${prunedProviders.length} provider(s) from ${PROVIDER_SELECTION_PATH}: ${
-      prunedProviders.map(({ id, reason }) => `${id} (${reason})`).join(", ")
-    }`,
-  );
-  console.error(
-    `[codex-router] restore with: ${targetCli("setup --guided")} or ${targetCli("providers enable <id>")} after storing a credential`,
-  );
-}
+// Missing credentials are an actionable route error, not permission to erase
+// an operator's selection. The client catalog still applies credential gates.
 
 // A checked local model means the operator intends to route through Ollama,
 // so keep its daemon available for the gateway. This never installs software
 // or pulls a model during service startup; a missing runtime remains a doctor
 // warning, while a present runtime is started as a detached, headless server.
-if (readLocalModelSelection().enabled.length) {
+if (requiredServices.has("ollama")) {
   try {
     await ensureOllamaHeadless({ install: false });
   } catch (error) {
@@ -206,10 +204,11 @@ if (readLocalModelSelection().enabled.length) {
 // model but has not run `devin auth login` should get the forwarder's 401
 // naming that command, not a bare connection error from a port nobody is
 // listening on.
-const devinCliRouted = MODELS.some((model) => model.provider === "devin-cli");
 const cursorInstalled = existsSync(CURSOR_CATALOG_PATH);
 
 const commonEnv = {
+  MODEL_ROUTER_EXECUTION_PLAN_FINGERPRINT: executionPlan.fingerprint,
+  MODEL_ROUTER_PENDING_ANTIGRAVITY: antigravityStartup.pendingActivationGeneration ? "1" : "0",
   MODEL_ROUTER_TARGET: TARGET,
   MODEL_ROUTER_STATE_DIR: STATE_DIR,
   MODEL_ROUTER_CALLER_KEY: callerKey,
@@ -266,7 +265,27 @@ const commonEnv = {
 
 const children = [];
 let shuttingDown = false;
+let frontendChild;
+let shutdownPromise;
+const shutdownController = new AbortController();
 let stopNativeCatalogWatch = () => {};
+let nativeCatalogWatchStarted = false;
+
+async function startNativeCatalogWatch() {
+  if (shuttingDown || nativeCatalogWatchStarted) return;
+  nativeCatalogWatchStarted = true;
+  try {
+    const [{ watchNativeCatalog }, { subscribeNativeCatalogEvents }] = await Promise.all([
+      import("./native-catalog-drift.mjs"), import("./native-catalog-events.mjs"),
+    ]);
+    if (!shuttingDown) stopNativeCatalogWatch = watchNativeCatalog({
+      immediate: true, subscribeEvents: subscribeNativeCatalogEvents,
+    });
+  } catch (error) {
+    nativeCatalogWatchStarted = false;
+    console.error(`[codex-router] Native drift check failed: ${error.message}`);
+  }
+}
 
 // Every child goes through `spawnableCommand` for the one case that needs it:
 // a Windows `.cmd`/`.bat` launcher, which Node has refused to spawn without a
@@ -278,13 +297,14 @@ let stopNativeCatalogWatch = () => {};
 // the reason. Our own Node children resolve to `process.execPath`, so they are
 // pass-through on every platform.
 function run(command, args, extraEnv = {}) {
+  if (shuttingDown) throw new Error("Service shutdown has started; no new child can be launched.");
   const spawnable = spawnableCommand(command, args);
   const child = spawn(spawnable.command, spawnable.args, {
     cwd: SOURCE_ROOT,
     // Only this supervisor consumes startup allowances. Request handlers,
     // diagnostic subprocesses, and restarted children keep normal runtime bounds.
     env: runtimeChildEnvironment({ ...process.env, ...commonEnv, ...extraEnv }),
-    stdio: "inherit",
+    stdio: command === process.execPath ? ["inherit", "inherit", "inherit", "ipc"] : "inherit",
     ...spawnable.options,
   });
   children.push(child);
@@ -314,31 +334,27 @@ function waitForHealth(label, url, headers = {}, timeoutMs = 30_000, expectedSer
   });
 }
 
-// Each child answers SIGTERM by draining what is in flight for up to
-// SHUTDOWN_DRAIN_MS and then ending those responses cleanly, so this backstop
-// has to outlast that. It used to fire at three seconds flat, which killed a
-// router still holding a streaming turn open -- and a SIGKILLed socket is an
-// RST, which Codex reports as `error decoding response body` rather than as
-// the restart it was. Derive the deadline from the drain so the two cannot
-// drift apart; the margin covers the exit itself.
-const SIGKILL_AFTER_MS = SHUTDOWN_DRAIN_MS + SHUTDOWN_FLUSH_MS + 2_000;
-
 function stopChildren() {
-  if (shuttingDown) return;
+  if (shuttingDown) return shutdownPromise;
   shuttingDown = true;
+  shutdownController.abort();
   stopNativeCatalogWatch();
-  for (const child of children) {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-  }
-  setTimeout(() => {
-    for (const child of children) {
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-    }
-  }, SIGKILL_AFTER_MS).unref();
+  shutdownPromise = stopServiceChildren({
+    frontend: frontendChild,
+    children,
+    drainMs: SHUTDOWN_DRAIN_MS,
+    flushMs: SHUTDOWN_FLUSH_MS,
+  });
+  return shutdownPromise;
 }
 
 const FRONTEND = { script: "router.mjs", service: "codex-router", label: "Codex router" };
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, stopChildren);
+if (process.connected) {
+  process.on("message", (message) => {
+    if (message?.type === "model-router:shutdown") stopChildren();
+  });
+}
 
 // Boot-health allowance for spawned children (forwarders, router frontend).
 // Slow hosts (VDI Task Scheduler ancestry adds ~60 s per spawn level) raise
@@ -351,97 +367,72 @@ const STARTUP_GATEWAY_HEALTH_TIMEOUT_MS =
   startupTimeoutMs("CODEX_ROUTER_GATEWAY_HEALTH_TIMEOUT_MS", 300_000);
 
 async function main() {
-  // These forwarders use separate ports and do not depend on one another.
-  // Start all of them before waiting so a cold service does not pay their
-  // startup times one after another.
-  const kimiForwarder = run(process.execPath, [path.join(SOURCE_ROOT, "src", "oauth-forwarder.mjs")]);
-  const api = run(process.execPath, [path.join(SOURCE_ROOT, "src", "api-forwarder.mjs")]);
-  const grokForwarder = run(process.execPath, [path.join(SOURCE_ROOT, "src", "grok-oauth-forwarder.mjs")]);
-  // An unverified account has no routable Antigravity model. A successful
-  // probe writes a nonpublishable pending generation, which is the sole
-  // exception to the active-proof gate: startup may boot and health-check its
-  // forwarder, then atomically promote that exact generation only after the
-  // whole local stack is ready. An unrelated listener on this otherwise-unused
-  // port therefore cannot take down an account that has never passed proof.
-  const antigravityStartup = antigravityOAuthStartupState();
-  const antigravityForwarder = antigravityStartup.startForwarder
-    ? run(process.execPath, [path.join(SOURCE_ROOT, "src", "antigravity-oauth-forwarder.mjs")])
-    : undefined;
-  const devinForwarder = devinCliRouted
-    ? run(process.execPath, [path.join(SOURCE_ROOT, "src", "devin-cli-forwarder.mjs")])
-    : undefined;
-  await Promise.all([
-    waitForHealth(
-      "OAuth forwarder",
-      loopback(PORTS.oauth, "/health"),
-      { Authorization: `Bearer ${internalKey}` },
-      STARTUP_CHILD_HEALTH_TIMEOUT_MS,
-      undefined,
-      kimiForwarder,
-    ),
-    waitForHealth(
-      "API forwarder",
-      loopback(PORTS.api, "/health"),
-      { Authorization: `Bearer ${internalKey}` },
-      STARTUP_CHILD_HEALTH_TIMEOUT_MS,
-      undefined,
-      api,
-    ),
-    waitForHealth(
-      "Grok OAuth forwarder",
-      loopback(PORTS.grokOauth, "/health"),
-      { Authorization: `Bearer ${internalKey}` },
-      STARTUP_CHILD_HEALTH_TIMEOUT_MS,
-      undefined,
-      grokForwarder,
-    ),
-    ...(antigravityForwarder
-      ? [
-        waitForHealth(
-          "Antigravity OAuth forwarder",
-          loopback(PORTS.antigravityOauth, "/health"),
-          { Authorization: `Bearer ${internalKey}` },
-          STARTUP_CHILD_HEALTH_TIMEOUT_MS,
-          undefined,
-          antigravityForwarder,
-        ),
-      ]
-      : []),
-    // Spread rather than a conditional inside the wait: an unrouted Devin adds
-    // no entry at all, so it cannot add latency. A routed one is waited on
-    // exactly as the other three are, and a forwarder that cannot bind still
-    // aborts startup by name instead of being skipped quietly.
-    ...(devinForwarder
-      ? [
-        waitForHealth(
-          "Devin CLI forwarder",
-          loopback(PORTS.devinCli, "/health"),
-          { Authorization: `Bearer ${internalKey}` },
-          STARTUP_CHILD_HEALTH_TIMEOUT_MS,
-          undefined,
-          devinForwarder,
-        ),
-      ]
-      : []),
-  ]);
-
+  // Bind the common plane before optional dependencies finish cold-starting.
+  // Liveness means this process can serve independent routes; /health retains
+  // the stricter readiness/adoption contract for all selected dependencies.
+  const frontend = FRONTEND;
+  const frontendService = frontend.service;
+  // `children` retains every handle for shutdown ownership. Readiness instead
+  // follows each required service's current handle, including a replacement
+  // that has not passed its own health check yet.
+  const currentChildren = new Map();
+  const track = (service, child, healthy = false) => {
+    currentChildren.set(service, { child, healthy });
+    return child;
+  };
+  const markHealthy = (service, child) => {
+    const current = currentChildren.get(service);
+    if (current?.child === child) current.healthy = true;
+  };
+  const router = run(process.execPath, [path.join(SOURCE_ROOT, "src", frontend.script)]);
+  track("router", router);
+  frontendChild = router;
+  await waitForHealth(
+    frontend.label,
+    loopback(PORTS.router, "/health/live"),
+    {},
+    STARTUP_CHILD_HEALTH_TIMEOUT_MS,
+    frontendService,
+    router,
+  );
+  markHealthy("router", router);
+  const specs = [
+    ["kimi", "OAuth forwarder", "oauth-forwarder.mjs", PORTS.oauth, "codex-router-oauth-forwarder"],
+    ["api", "API forwarder", "api-forwarder.mjs", PORTS.api, "codex-router-api-forwarder"],
+    ["grok", "Grok OAuth forwarder", "grok-oauth-forwarder.mjs", PORTS.grokOauth, "codex-router-grok-oauth-forwarder"],
+    ["antigravity", "Antigravity OAuth forwarder", "antigravity-oauth-forwarder.mjs", PORTS.antigravityOauth, "codex-router-antigravity-oauth-forwarder"],
+    ["devin", "Devin CLI forwarder", "devin-cli-forwarder.mjs", PORTS.devinCli, "codex-router-devin-cli-forwarder"],
+  ].filter(([service]) => requiredServices.has(service));
+  const forwarders = specs.map(([service, label, script, port, expectedService]) => {
+    const start = () => track(service, run(process.execPath, [path.join(SOURCE_ROOT, "src", script)]));
+    return {
+      service, label, start, child: start(),
+      waitForHealth: async (child) => {
+        await waitForHealth(label, loopback(port, "/health"),
+          { Authorization: `Bearer ${internalKey}` }, STARTUP_CHILD_HEALTH_TIMEOUT_MS,
+          expectedService, child);
+        markHealthy(service, child);
+      },
+    };
+  });
+  if (executionPlan.needsGateway) track("gateway", undefined);
   const startGateway = () =>
-    run(litellm, [
+    track("gateway", run(litellm, [
       "--config",
       LITELLM_CONFIG_PATH,
       "--host",
       "127.0.0.1",
       "--port",
       String(PORTS.gateway),
-    ]);
+    ]));
   // LiteLLM cold starts can take minutes when launchd starves the job under
   // system load; killing it mid-import restarts the import from scratch and
   // the service loops forever, so wait long enough for a starved import.
   // Slow hosts (VDI Task Scheduler ancestry plus a saturated CPU) raise this
   // via CODEX_ROUTER_GATEWAY_HEALTH_TIMEOUT_MS; the default is unchanged.
   // This is a boot-health allowance, not an inference or request timeout.
-  const gatewayHealthy = (child) =>
-    waitForHealth(
+  const gatewayHealthy = async (child) => {
+    await waitForHealth(
       "LiteLLM gateway",
       loopback(PORTS.gateway, "/health/liveliness"),
       { Authorization: `Bearer ${internalKey}` },
@@ -449,6 +440,8 @@ async function main() {
       undefined,
       child,
     );
+    markHealthy("gateway", child);
+  };
   // The watchdog's probe is deliberately short: it runs on a timer while the
   // gateway is otherwise idle, so it must never park the supervisor for the
   // cold-start budget `gatewayHealthy` is allowed.
@@ -459,59 +452,84 @@ async function main() {
       {},
       4_000,
     );
-  const gateway = startGateway();
-  await gatewayHealthy(gateway);
-
-  const frontend = FRONTEND;
-  const frontendService = frontend.service;
-  const router = run(process.execPath, [path.join(SOURCE_ROOT, "src", frontend.script)]);
-  await waitForHealth(
-    frontend.label,
-    loopback(PORTS.router, "/health"),
-    {},
-    STARTUP_CHILD_HEALTH_TIMEOUT_MS,
-    frontendService,
-    router,
-  );
-
-  if (antigravityStartup.pendingActivationGeneration) {
-    const promoted = await attemptAntigravityProbePromotionAfterReadiness({
-      generation: antigravityStartup.pendingActivationGeneration,
-      sessionGeneration: antigravityStartup.pendingSessionGeneration,
-      children,
-    });
-    if (!promoted) {
-      // Never log the generation or any credential material. A concurrent
-      // replacement/disconnect, a newer probe, or a child death all leave the
-      // pending proof nonpublishable; the service can still serve every other
-      // provider while the initiating command reports that exact activation
-      // was not confirmed.
-      console.error(
-        "[codex-router] Antigravity live-proof activation was superseded or startup lost a child; the route remains disabled.",
-      );
+  const gateway = executionPlan.needsGateway && !gatewayStartupError ? startGateway() : undefined;
+  if (gatewayStartupError) console.error(`[${frontendService}] gateway unavailable: ${gatewayStartupError.message}`);
+  const readiness = await Promise.allSettled([
+    ...forwarders.map((forwarder) => forwarder.waitForHealth(forwarder.child)),
+    ...(gateway ? [gatewayHealthy(gateway)] : []),
+  ]);
+  for (const result of readiness) {
+    if (result.status === "rejected" && !shuttingDown) {
+      console.error(`[${frontendService}] dependency unavailable: ${result.reason.message}`);
     }
   }
-
-  // Pending activation is the last supervisor bootstrap write. Retire startup
-  // settings only after it settles, before publishers can perform runtime writes.
-  clearStartupTimeouts(process.env);
-
-  // Keep the native catalog fresh while the service is alive, including while
-  // Codex Desktop is closed, so its next startup reads newly released models.
-  // The immediate pass also handles an already stale cache after service boot.
-  import("./native-catalog-drift.mjs")
-    .then(({ watchNativeCatalog }) => {
-      if (shuttingDown) return;
-      stopNativeCatalogWatch = watchNativeCatalog({ immediate: true });
-    })
-    .catch((error) => {
-      console.error(`[codex-router] Native drift check failed: ${error.message}`);
+  let finalization = Promise.resolve();
+  let finalizationFailure;
+  let antigravityPromoted = false;
+  const finalizeHealthyGeneration = (healthTimeoutMs) => {
+    const next = finalization.then(async () => {
+      if (finalizationFailure) throw finalizationFailure;
+      if (shuttingDown) return false;
+      try {
+        await waitForHealth(frontend.label, loopback(PORTS.router, "/health"), {},
+          healthTimeoutMs, frontendService, router);
+      } catch (error) {
+        if (!shuttingDown) console.error(`[${frontendService}] dependency readiness unavailable: ${error.message}`);
+        return false;
+      }
+      if (shuttingDown) return false;
+      // Read the slots after the aggregate probe: another recovery may have
+      // replaced a child while it was in flight. Never omit a dead/missing
+      // required child to make the activation appear ready.
+      const current = [...currentChildren.values()];
+      if (current.some(({ child, healthy }) => !healthy || !child || child.exitCode !== null || child.signalCode !== null)) {
+        console.error(`[${frontendService}] dependency readiness lost its current child; activation remains pending.`);
+        return false;
+      }
+      if (!antigravityPromoted && antigravityStartup.pendingActivationGeneration) {
+        antigravityPromoted = await attemptAntigravityProbePromotionAfterReadiness({
+          generation: antigravityStartup.pendingActivationGeneration,
+          sessionGeneration: antigravityStartup.pendingSessionGeneration,
+          children: current.map(({ child }) => child),
+        });
+        if (!antigravityPromoted && !shuttingDown) {
+          console.error("[codex-router] Antigravity live-proof activation was superseded or startup lost a child; the route remains disabled.");
+        }
+      }
+      if (shuttingDown) return false;
+      const latest = [...currentChildren.values()];
+      if (latest.length !== current.length || latest.some((value, index) =>
+        value !== current[index] || !value.healthy || !value.child ||
+        value.child.exitCode !== null || value.child.signalCode !== null)) {
+        console.error(`[${frontendService}] dependency changed during activation; readiness must be confirmed again.`);
+        return false;
+      }
+      // Promotion is the last bootstrap write. Both initial readiness and
+      // later recovery retire startup allowances before catalog publication.
+      clearStartupTimeouts(process.env);
+      startupReady = true;
+      if (automaticStartup) {
+        try { clearStartupAttempts(); } catch { /* Operational cache only. */ }
+      }
+      await startNativeCatalogWatch();
+      return true;
     });
+    finalization = next.catch((error) => { finalizationFailure = error; });
+    return next;
+  };
+  const ready = !gatewayStartupError && readiness.every((result) => result.status === "fulfilled")
+    ? await finalizeHealthyGeneration(STARTUP_CHILD_HEALTH_TIMEOUT_MS)
+    : false;
+
+  // A degraded initial attempt also retires its bootstrap environment. A
+  // later recovery uses runtime bounds and the captured exact proof generation.
+  clearStartupTimeouts(process.env);
 
   const cursorEdge = cursorInstalled
     ? run(process.execPath, [path.join(SOURCE_ROOT, "src", "cursor-public-edge.mjs")])
     : undefined;
   if (cursorEdge) {
+    track("cursor-edge", cursorEdge);
     await waitForHealth(
       "Cursor public edge",
       loopback(PORTS.cursorPublic, "/health"),
@@ -520,6 +538,7 @@ async function main() {
       "codex-router-cursor-edge",
       cursorEdge,
     );
+    markHealthy("cursor-edge", cursorEdge);
   }
   // Cursor App sends BYOK requests from Cursor's backend, so its loopback edge
   // is paired with a user-owned named tunnel when one has been provisioned.
@@ -528,50 +547,52 @@ async function main() {
   const cursorTunnel = cursorTunnelSpec
     ? run(cursorTunnelSpec.command, cursorTunnelSpec.args)
     : undefined;
+  if (cursorTunnel) track("cursor-tunnel", cursorTunnel, true);
 
-  console.error(`[${frontendService}] ready (authenticated loopback endpoint)`);
-  startupReady = true;
-  // The service is serving, so the previous failures are over: clear the
-  // back-off record rather than leaving it to delay the next legitimate start.
-  if (automaticStartup) {
-    try {
-      clearStartupAttempts();
-    } catch {
-      // The operational cache must not interrupt a healthy stack.
+  console.error(ready
+    ? `[${frontendService}] ready (authenticated loopback endpoint)`
+    : `[${frontendService}] serving independent routes; selected dependencies are degraded.`);
+  startupReady = ready;
+  // A dependency may exhaust its bounded restart allowance without ending
+  // independent native/direct routes. Readiness stays degraded and publication
+  // fails closed; a manual service restart starts a new bounded recovery epoch.
+  const keepIndependentRoutes = async (supervision) => {
+    const result = await supervision;
+    // A canceled recovery can carry an old dependency exit status. During
+    // intentional shutdown only the frontend's actual exit settles main().
+    if (shuttingDown) return new Promise(() => {});
+    if (!shuttingDown && result.exhausted) {
+      console.error(`[${frontendService}] ${result.label} recovery exhausted; independent routes remain available.`);
+      return new Promise(() => {});
     }
-  }
-  // Only the gateway is supervised. The forwarders and the router are ours and
-  // are restarted by rebuilding the whole service; the gateway is a third-party
-  // Python process that can end itself on a single bad upstream response
-  // (issue #261, a 429 raised out of LiteLLM's exception mapping), and taking
-  // the router down with it turned one failed request into a dead session.
+    return result;
+  };
+  const supervisionOptions = {
+    waitForExit,
+    isShuttingDown: () => shuttingDown,
+    signal: shutdownController.signal,
+    onHealthy: () => finalizeHealthyGeneration(4_000),
+    log: (message) => console.error(`[${frontendService}] ${message}`),
+    ...gatewaySupervisorLimits(),
+  };
   const result = await Promise.race([
-    waitForExit(kimiForwarder, "OAuth forwarder"),
-    waitForExit(api, "API forwarder"),
-    waitForExit(grokForwarder, "Grok OAuth forwarder"),
-    ...(antigravityForwarder
-      ? [waitForExit(antigravityForwarder, "Antigravity OAuth forwarder")]
-      : []),
-    // Only when it is actually running. A forwarder of ours that dies is a bug
-    // report, and the rule above is that the service exits so the OS supervisor
-    // rebuilds it -- leaving this one out of the race would instead strand a
-    // Devin user on connection errors with nothing to notice them. An install
-    // that never spawned it adds no entry, so this cannot end anyone else's
-    // session.
-    ...(devinForwarder ? [waitForExit(devinForwarder, "Devin CLI forwarder")] : []),
-    ...(cursorEdge ? [waitForExit(cursorEdge, "Cursor public edge")] : []),
-    ...(cursorTunnel ? [waitForExit(cursorTunnel, "Cursor named tunnel")] : []),
-    superviseGateway({
+    ...forwarders.map((forwarder) => keepIndependentRoutes(superviseGateway({
+      ...supervisionOptions,
+      label: forwarder.label,
+      child: forwarder.child,
+      start: forwarder.start,
+      waitForHealth: forwarder.waitForHealth,
+    }))),
+    ...(gateway ? [keepIndependentRoutes(superviseGateway({
+      ...supervisionOptions,
       label: "LiteLLM gateway",
       child: gateway,
       start: startGateway,
-      waitForExit,
       waitForHealth: gatewayHealthy,
       healthCheck: gatewayLivenessCheck,
-      isShuttingDown: () => shuttingDown,
-      log: (message) => console.error(`[${frontendService}] ${message}`),
-      ...gatewaySupervisorLimits(),
-    }),
+    }))] : []),
+    ...(cursorEdge ? [waitForExit(cursorEdge, "Cursor public edge")] : []),
+    ...(cursorTunnel ? [waitForExit(cursorTunnel, "Cursor named tunnel")] : []),
     waitForExit(router, frontend.label),
   ]);
   if (!shuttingDown) {
@@ -620,8 +641,8 @@ try {
     exitCode = 1;
   }
 } finally {
-  stopChildren();
-  await Promise.all(children.map((child) => waitForExit(child, "child")));
+  const shutdown = await stopChildren();
+  if (shutdown.timedOut) console.error("[model-router] owned-child shutdown exceeded its graceful allowance; force-stop was requested.");
   if (serviceProcessRecorded) {
     try {
       clearServiceProcessState();
@@ -630,6 +651,9 @@ try {
       // the next Windows stop re-validates identity before it can signal one.
     }
   }
+  // Receiving shutdown through IPC keeps that channel referenced. Release it
+  // only after owned-child shutdown, so the supervisor can drain and exit.
+  if (process.connected) process.disconnect();
 }
 // All children have exited, so let Node drain its own child-process bookkeeping
 // before terminating. A synchronous process.exit() here races libuv's Windows

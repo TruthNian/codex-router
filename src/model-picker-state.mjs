@@ -3,12 +3,10 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import { STATE_DIR } from "./paths.mjs";
 
 export const MODEL_PICKER_STATE_PATH =
@@ -119,9 +117,8 @@ function writePickerState({
   const stateDir = path.dirname(MODEL_PICKER_STATE_PATH);
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   chmodSync(stateDir, 0o700);
-  const temporary = `${MODEL_PICKER_STATE_PATH}.tmp.${process.pid}`;
-  writeFileSync(
-    temporary,
+  writePrivateFile(
+    MODEL_PICKER_STATE_PATH,
     `${JSON.stringify(
       {
         version: 1,
@@ -137,11 +134,7 @@ function writePickerState({
       null,
       2,
     )}\n`,
-    { encoding: "utf8", mode: 0o600 },
   );
-  protectPrivateFile(temporary);
-  renameSync(temporary, MODEL_PICKER_STATE_PATH);
-  protectPrivateFile(MODEL_PICKER_STATE_PATH);
   return modelPickerSnapshot();
 }
 

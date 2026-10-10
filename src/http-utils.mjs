@@ -409,7 +409,12 @@ export function installGracefulShutdown(
     signals = ["SIGINT", "SIGTERM"],
     drainMs = SHUTDOWN_DRAIN_MS,
     flushMs = SHUTDOWN_FLUSH_MS,
-    exit = (code) => process.exit(code),
+    exit = (code) => {
+      // Let libuv retire the IPC handle before Node terminates. Synchronous
+      // exit from a Windows IPC shutdown callback can assert HANDLE_CLOSING.
+      process.exitCode = code;
+      if (process.connected) process.disconnect();
+    },
   } = {},
 ) {
   const live = new Set();
@@ -474,6 +479,14 @@ export function installGracefulShutdown(
     drainTimer.unref();
   };
   for (const signal of signals) process.on(signal, shutdown);
+  // Windows ChildProcess.kill('SIGTERM') terminates the process immediately.
+  // The supervisor's private IPC channel asks the same bounded drain handler
+  // to run before its absolute force-stop deadline, on every platform.
+  if (process.connected) {
+    process.on("message", (message) => {
+      if (message?.type === "model-router:shutdown") shutdown();
+    });
+  }
   return server;
 }
 

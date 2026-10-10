@@ -604,7 +604,8 @@ test("set-apply keeps provider mutation, publication, and rollback in one transa
   assert.match(atomic, /transactModelOverlayMutation\(\{/);
   assert.match(atomic, /files: \[PROVIDER_SELECTION_PATH\]/);
   assert.match(atomic, /mutate: \(\) => setProviderSelectionForTargets/);
-  assert.match(atomic, /applyProviderSelectionForTargets\(TARGETS, \{ activate \}\)/);
+  assert.match(atomic, /restart: true/);
+  assert.match(atomic, /applyProviderSelectionForTargets\(TARGETS, \{ activate, \.\.\.operation \}\)/);
   assert.match(atomic, /const activate = args\.includes\("--activate"\)/);
   assert.match(source, /args\[0\] === "set-apply"[\s\S]{0,260}runSetApply\(args\[1\], args\[2\]\)/);
 });

@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { executeStartupFixture, startupFixturePaths } from "./startup-attempts-fixture.mjs";
+import { createExecutionPlan } from "../src/route-execution-plan.mjs";
+import { stopServiceChildren } from "../src/service-shutdown.mjs";
 
 const root = process.env.PR895_REVIEW_SOURCE_DIR
   || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -65,6 +67,10 @@ async function run({ foreground = false, disabled = false, mode = "healthy", see
     Date: class extends Date { static now() { return now; } },
     setTimeout: () => ({ unref() {} }), clearTimeout: () => {},
   };
+  // Select a real gateway route so optional-dependency planning cannot bypass
+  // the supervision and runtime-failure oracles below.
+  const fixtureProvider = { id: "fixture", kind: "openai-compatible", protocol: "openai" };
+  const fixtureModel = { slug: "fixture/chat", provider: "fixture", upstreamModel: "fixture-chat" };
   const deps = {
     "node:fs": fs, "node:path": { default: fixturePath },
     "node:child_process": { spawn: () => {
@@ -103,8 +109,13 @@ async function run({ foreground = false, disabled = false, mode = "healthy", see
       if (mode === "runtime-shutdown") fakeProcess.emit("SIGTERM");
       return { label: "fixture gateway", code: 0 };
     } },
+    "./service-shutdown.mjs": { stopServiceChildren },
     "./litellm-config.mjs": { writeLiteLlmConfig: () => {} },
-    "./model-registry.mjs": { MODELS: [] },
+    "./model-registry.mjs": {
+      MODELS: [fixtureModel], RUNTIME_PROVIDERS: new Map([["fixture", fixtureProvider]]),
+      providerForModel: () => fixtureProvider,
+    },
+    "./route-execution-plan.mjs": { createExecutionPlan },
     "./local-models.mjs": { readLocalModelSelection: () => ({ enabled: [] }) },
     "./antigravity-oauth-status.mjs": { antigravityOAuthStartupState: () => ({ startForwarder: false }), antigravityOAuthStatus: () => ({}) },
     "./antigravity-probe-activation.mjs": { attemptAntigravityProbePromotionAfterReadiness: async () => true },
@@ -114,7 +125,10 @@ async function run({ foreground = false, disabled = false, mode = "healthy", see
     "./dependency-repair.mjs": { dependencyRepairHint: () => "fixture repair hint" },
     "./proxy-environment.mjs": { environmentProxyOptedIn: () => false, inheritedProxyEnvironment: () => ({}), redactProxyCredentials: (value) => value },
     "./cursor-cloudflare-tunnel.mjs": { cursorTunnelRunSpec: () => undefined },
-    "./provider-selection.mjs": { pruneUnconfiguredProviders: () => [] },
+    "./provider-selection.mjs": {
+      readProviderSelection: () => ["fixture"],
+      pruneUnconfiguredProviders: () => [], // Retain the older-source comparison fixture.
+    },
     "./target-integration.mjs": { targetCli: (command) => command },
     "./service-write-guard.mjs": { assertServiceWriteIsolated: () => {} },
     "./service-operation-lock.mjs": { withServiceOperationLock: async (fn) => fn() },
@@ -130,6 +144,7 @@ async function run({ foreground = false, disabled = false, mode = "healthy", see
       processStartIdentityProbe: () => ({ state: "alive", identity: "fixture|node" }),
     },
     "./native-catalog-drift.mjs": { watchNativeCatalog: () => () => {} },
+    "./native-catalog-events.mjs": { subscribeNativeCatalogEvents: () => () => {} },
   };
   const modules = new Map();
   async function dependency(specifier) {

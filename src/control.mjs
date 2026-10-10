@@ -9,6 +9,7 @@ import { readControlActivity } from "./control-activity.mjs";
 import { nativeSubagentCertification, promoteNativeMultiAgent } from "./catalog.mjs";
 import {
   applyModelOverlayPublication,
+  publishAdoptedModelOverlayFresh,
   transactModelOverlayMutation,
 } from "./model-overlay-publication.mjs";
 import { withModelOverlayLock } from "./model-overlay-lock.mjs";
@@ -93,6 +94,7 @@ const boundedAntigravityOperation =
 const restartBearingOverlayOperation = new Set([
   "set-apply",
   "credential",
+  "key-pool",
   "auth-mode",
   "subagents",
   "picker",
@@ -106,13 +108,13 @@ const restartBearingOverlayOperation = new Set([
 const selfReplacingControl =
   args[0] === "maintenance" ||
   (args[0] === "tray" && ["refresh", "rebuild"].includes(args[1]));
-// Restart-bearing overlay transactions may use two complete 640-second
-// forward/rollback epochs. The control owner retains another ten seconds to
+// Restart-bearing overlay transactions may prepare missing dependencies and
+// use complete forward/rollback readiness epochs. The owner retains ten seconds to
 // retire the inner process tree before a desktop watchdog may intervene.
 const maximumControlOperationMs = boundedAntigravityOperation
   ? 610_000
   : restartBearingOverlayOperation
-    ? 1_310_000
+    ? 45 * 60_000 + 10_000
     : 850_000;
 if (!selfReplacingControl && !boundedOperationChild(process.env, {
   maximumMs: maximumControlOperationMs,
@@ -725,37 +727,27 @@ function refreshActiveTarget(target) {
   if (result.status !== 0) throw new Error(`${target}: refresh failed`);
 }
 
-// Active routers read provider selection on each request, so only their picker
-// catalog needs refreshing. The full enable path is reserved for inactive targets.
-async function applyProviderSelectionForTargets(selected, { activate = false } = {}) {
-  const applied = [];
-  const skipped = [];
-  for (const target of selected) {
-    if (!targetIsActive(target) && !activate) {
-      skipped.push(target);
-      continue;
-    }
-    if (targetIsActive(target)) {
-      refreshActiveTarget(target);
-    } else {
-      // `bin/enable` is a POSIX shell script; spawning it on Windows failed
-      // with ENOEXEC and reported it as a plain "apply failed". The shared
-      // helper already knows each platform's checkout entry point and is unit
-      // tested, so this branch is no longer a second untested copy.
-      const { currentCheckoutInstaller } = await import("./update.mjs");
-      const enable = currentCheckoutInstaller(process.platform, target, {
-        posixScript: "enable",
-      });
-      const result = spawnSync(enable.command, enable.args, {
-        cwd: REPO_ROOT,
-        env: { ...process.env, MODEL_ROUTER_TARGET: target },
-        stdio: "inherit",
-      });
-      if (result.status !== 0) throw new Error(`${target}: apply failed`);
-    }
+// Readiness adoption precedes every installed client's publication. An
+// inactive client may then use the full enable installer when explicitly
+// requested; active clients are refreshed once by the shared publisher.
+async function applyProviderSelectionForTargets(selected, { activate = false, ...operation } = {}) {
+  const applied = selected.filter(targetIsActive);
+  const inactive = selected.filter((target) => !targetIsActive(target));
+  await applyModelOverlayPublication({ ...operation, restart: true });
+  if (!activate) return { applied, skipped: inactive };
+  for (const target of inactive) {
+    const { currentCheckoutInstaller } = await import("./update.mjs");
+    const enable = currentCheckoutInstaller(process.platform, target, { posixScript: "enable" });
+    const result = spawnSync(enable.command, enable.args, {
+      cwd: REPO_ROOT,
+      env: { ...process.env, MODEL_ROUTER_TARGET: target },
+      stdio: "inherit",
+      windowsHide: true,
+    });
+    if (result.status !== 0) throw new Error(`${target}: apply failed`);
     applied.push(target);
   }
-  return { applied, skipped };
+  return { applied, skipped: [] };
 }
 
 async function runApply() {
@@ -785,10 +777,11 @@ async function runSetApply(provider, desired) {
   await transactModelOverlayMutation({
     files: [PROVIDER_SELECTION_PATH],
     mutate: () => setProviderSelectionForTargets(provider, desired, selected),
+    restart: true,
     // Selection belongs to the shared router plane. Republish every installed
     // client even when the initiating UI named only its own target.
-    applyPublication: async () => {
-      publication = await applyProviderSelectionForTargets(TARGETS, { activate });
+    applyPublication: async (operation) => {
+      publication = await applyProviderSelectionForTargets(TARGETS, { activate, ...operation });
       return publication;
     },
   });
@@ -870,7 +863,7 @@ async function loginProvider(providerId) {
     // A re-login intentionally clears the previous live proof. Republish now
     // so installed clients cannot keep advertising the route while it is in
     // that fail-closed state; the provider selection itself is preserved.
-    await withModelOverlayLock(() => refreshTargetPickerIfInstalled());
+    await publishAdoptedModelOverlayFresh({ deadline });
   }
   process.stdout.write(`${JSON.stringify(providerOnboardingSnapshot())}\n`);
 }
@@ -912,7 +905,7 @@ async function probeProvider(providerId, flags) {
     signal?.throwIfAborted();
     await forgetProviderCatalogFamilyCache(providerId);
     signal?.throwIfAborted();
-    return refreshTargetPickerIfInstalled({ signal, deadline: operationDeadline });
+    return publishAdoptedModelOverlayFresh({ lock: false, signal, deadline: operationDeadline });
   }, { waitMs: remainingLockWaitMs(operationDeadline) });
   try {
     await activateAntigravityProbe({
@@ -957,55 +950,113 @@ async function readSecretFromStdin() {
 
 async function saveProviderCredential(providerId) {
   const { providerOnboardingSnapshot, saveApiCredential } = await import("./provider-onboarding.mjs");
-  const { apiProvider } = await import("./provider-credentials.mjs");
+  const { apiProvider, credentialPaths } = await import("./provider-credentials.mjs");
   const provider = apiProvider(providerId);
   if (provider.credential?.resolver) {
     throw new Error(`${provider.displayName} does not accept API keys.`);
   }
   const value = await readSecretFromStdin();
-  // The control-center sends this command before it refreshes its provider
-  // snapshot. Keep credential persistence, selection, and target publication
-  // together so a concurrent remove cannot create an enabled credentialless
-  // provider between the child processes.
-  await withModelOverlayLock(async () => {
-    const { withProviderCatalogCacheTransaction } = await import("./model-catalog-cache.mjs");
-    const { providerCatalogFamilyCacheIds } = await import("./provider-catalogs.mjs");
-    await withProviderCatalogCacheTransaction((catalog) => {
-      saveApiCredential(providerId, value);
-      // One credential can expose several account catalogs. The same lock
-      // discovery uses for snapshot+commit makes write+invalidation one
-      // generation boundary rather than a race with an old in-flight fetch.
-      catalog.forget(providerCatalogFamilyCacheIds(providerId));
-    });
-    const { enableProvider } = await import("./provider-selection.mjs");
-    enableProvider(providerId);
-    const { refreshTargetPickerIfInstalled } = await import("./target-integration.mjs");
-    await refreshTargetPickerIfInstalled();
+  const deadline = operationDeadlineFromEnvironment(process.env, {
+    timeoutMs: 45 * 60_000, maximumMs: 45 * 60_000,
   });
+  const { PROVIDER_CATALOG_CACHE_PATH } = await import("./paths.mjs");
+  const { lstatSync } = await import("node:fs");
+  const { withProviderCatalogCacheTransaction } = await import("./model-catalog-cache.mjs");
+  const { providerCatalogFamilyCacheIds } = await import("./provider-catalogs.mjs");
+  const files = [...credentialPaths(provider), PROVIDER_SELECTION_PATH, PROVIDER_CATALOG_CACHE_PATH];
+  // Keep model -> catalog -> service ordering. The cache lock spans adoption
+  // and rollback so restoring its exact bytes cannot erase a concurrent fetch.
+  await withModelOverlayLock(() => withProviderCatalogCacheTransaction((catalog) => {
+    for (const file of files) {
+      try {
+        const entry = lstatSync(file);
+        if (!entry.isFile() || entry.isSymbolicLink()) {
+          throw new Error(`Managed provider state contains an incompatible file entry at ${file}; inspect it before changing the credential.`);
+        }
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    }
+    return transactModelOverlayMutation({
+      files,
+      mutate: async () => {
+        saveApiCredential(providerId, value);
+        catalog.forget(providerCatalogFamilyCacheIds(providerId));
+        const { enableProvider } = await import("./provider-selection.mjs");
+        enableProvider(providerId);
+      },
+      restart: true,
+      lock: false,
+      deadline,
+    });
+  }));
   process.stdout.write(`${JSON.stringify(providerOnboardingSnapshot())}\n`);
 }
 
 async function deleteProviderCredential(providerId) {
   const { providerOnboardingSnapshot, removeApiCredential } = await import("./provider-onboarding.mjs");
-  // Removing a managed credential also withdraws its provider selection. Keep
-  // that low-level write under the same cross-process lock as the picker and
-  // local-model mutations; status reads remain outside the lock.
-  let removal;
-  await withModelOverlayLock(async () => {
-    const { withProviderCatalogCacheTransaction } = await import("./model-catalog-cache.mjs");
-    const { providerCatalogFamilyCacheIds } = await import("./provider-catalogs.mjs");
-    removal = await withProviderCatalogCacheTransaction(async (catalog) => {
-      const result = await removeApiCredential(providerId);
-      if (result.removedFiles) catalog.forget(providerCatalogFamilyCacheIds(providerId));
-      return result;
-    });
-    if (removal.removedFiles || providerId === "antigravity-oauth") {
-      const { refreshTargetPickerIfInstalled } = await import("./target-integration.mjs");
-      await refreshTargetPickerIfInstalled();
-    }
+  const deadline = operationDeadlineFromEnvironment(process.env, {
+    timeoutMs: 45 * 60_000, maximumMs: 45 * 60_000,
   });
+  const { withProviderCatalogCacheTransaction } = await import("./model-catalog-cache.mjs");
+  const { providerCatalogFamilyCacheIds } = await import("./provider-catalogs.mjs");
+  let removal;
+  let publicationWarnings;
+  await withModelOverlayLock(() => withProviderCatalogCacheTransaction(async (catalog) => {
+    if (providerId === "antigravity-oauth") {
+      // Disconnect replaces a durable fence and removes incompatible entries
+      // without reading them. Never resurrect a prior token or its stale fence
+      // when runtime adoption fails after that irreversible physical action.
+      removal = await removeApiCredential(providerId);
+      publicationWarnings = {};
+      try {
+        if (removal.removedFiles) catalog.forget(providerCatalogFamilyCacheIds(providerId));
+      } catch {
+        publicationWarnings.catalogError = "The disconnected account's cached model catalog could not be invalidated.";
+      }
+      try {
+        Object.assign(publicationWarnings, await applyModelOverlayPublication({
+          restart: true, warningOnly: true, deadline,
+        }));
+      } catch {
+        publicationWarnings.catalogError ||= "The disconnected model routes could not be republished.";
+      }
+      if (publicationWarnings.catalogError || publicationWarnings.restartError) {
+        process.stderr.write("Antigravity remains disconnected; its model routes could not be fully republished. Restart the router and retry apply.\n");
+      }
+      return;
+    }
+    const { apiProvider, credentialPaths } = await import("./provider-credentials.mjs");
+    const { PROVIDER_CATALOG_CACHE_PATH } = await import("./paths.mjs");
+    const { lstatSync } = await import("node:fs");
+    const files = [...credentialPaths(apiProvider(providerId)), PROVIDER_SELECTION_PATH, PROVIDER_CATALOG_CACHE_PATH];
+    for (const file of files) {
+      try {
+        const entry = lstatSync(file);
+        if (!entry.isFile() || entry.isSymbolicLink()) {
+          throw new Error(`Managed provider state contains an incompatible file entry at ${file}; inspect it before removing the credential.`);
+        }
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    }
+    let noChange = false;
+    await transactModelOverlayMutation({
+      files,
+      mutate: async () => {
+        removal = await removeApiCredential(providerId);
+        noChange = removal.removedFiles === 0;
+        if (!noChange) catalog.forget(providerCatalogFamilyCacheIds(providerId));
+      },
+      applyPublication: (operation) => noChange ? undefined : applyModelOverlayPublication(operation),
+      restart: true,
+      lock: false,
+      deadline,
+    });
+  }));
   process.stdout.write(
-    `${JSON.stringify({ ...providerOnboardingSnapshot(), removal })}\n`,
+    `${JSON.stringify({ ...providerOnboardingSnapshot(), removal,
+      ...(publicationWarnings ? { publicationWarnings } : {}) })}\n`,
   );
 }
 
@@ -1027,6 +1078,9 @@ async function handleProviderKeyPool(providerId, action, value) {
     process.stdout.write(`${JSON.stringify(storedCredentialPoolStatus(providerId), null, 2)}\n`);
     return;
   }
+  const deadline = operationDeadlineFromEnvironment(process.env, {
+    timeoutMs: 45 * 60_000, maximumMs: 45 * 60_000,
+  });
   let mutation;
   if (action === "add" && value) {
     mutation = () => addStoredCredentialToPool(providerId, value);
@@ -1048,61 +1102,66 @@ async function handleProviderKeyPool(providerId, action, value) {
   let environmentBacked = false;
   let serviceEnvironmentStatus;
   let result;
-  // Pool readiness decides whether this provider's models are routable. Treat
-  // its two metadata files, the gateway, and every installed client as one
-  // publication: a failed rebuild restores the exact previous pool/store and
-  // republishes that state rather than leaving a half-adopted credential.
+  // Ordinary pools resolve credentials per request. Prepare and verify the
+  // existing route fingerprint before clients; metadata needs no service restart.
+  // Environment-backed pools are deliberately staged:
+  // restarting cannot persist or retire a managed service's inherited vars.
+  // Keep their exact metadata rollback, but publish no new client routes until
+  // the operator reinstalls/restarts from the intended environment.
   const transact = (lock = true) => transactModelOverlayMutation({
     files: [PROVIDER_API_KEY_POOL_PATH, PROVIDER_CREDENTIAL_STORE_PATH],
     mutate: async () => { result = await mutation(); },
+    ...(environmentBacked ? { applyPublication: async () => undefined } : {}),
+    restart: false,
     lock,
+    deadline,
   });
-  if (addition || removal) {
-    // Classify against the same pool/store generation the transaction will
-    // change. In particular, a concurrent pause/remove must not turn an opaque
-    // remove id from environment-backed into apparently ordinary metadata.
-    await withModelOverlayLock(async () => {
-      environmentBacked = action === "add-env" || (
-        action === "add" && storedCredentialRequiresServiceEnvironment(providerId, value)
-      ) || (
-        removal && storedCredentialPoolUsesServiceEnvironment(providerId, {
-          ...(action === "remove" ? { credentialId: value } : {}),
-        })
-      );
-      if (!environmentBacked) {
-        await transact(false);
-        return;
-      }
+  await withModelOverlayLock(async () => {
+    // Classify the exact pool/store generation before any mutation. Policy,
+    // pause and resume also change readiness and inherit the staging contract.
+    environmentBacked = action === "add-env" || (
+      action === "add" && storedCredentialRequiresServiceEnvironment(providerId, value)
+    ) || (
+      !addition && storedCredentialPoolUsesServiceEnvironment(providerId, {
+        ...(action === "remove" || action === "pause" || action === "resume"
+          ? { credentialId: value } : {}),
+      })
+    );
+    if (!environmentBacked) {
+      await transact(false);
+      return;
+    }
 
-      // Keep lock ordering consistent with model-overlay operations that
-      // restart the service: publication ownership first, service ownership
-      // second. The service lock stays held through publication, serializing
-      // both a new variable and removal of a retired one with service renders.
-      const { withServiceOperationLock } = await import("./service-operation-lock.mjs");
-      await withServiceOperationLock(async () => {
-        const {
-          environmentPoolMutationServiceStatus,
-          routerServiceStatus,
-        } = await import("./router-restart.mjs");
-        serviceEnvironmentStatus = addition
-          ? await environmentPoolMutationServiceStatus()
-          : await routerServiceStatus();
-        await transact(false);
-      });
+    // Model ownership precedes service ownership. Metadata is staged while the
+    // service lock excludes installer environment renders of another generation.
+    const { withServiceOperationLock } = await import("./service-operation-lock.mjs");
+    await withServiceOperationLock(async () => {
+      const {
+        environmentPoolMutationServiceStatus,
+        routerServiceStatus,
+      } = await import("./router-restart.mjs");
+      serviceEnvironmentStatus = addition
+        ? await environmentPoolMutationServiceStatus({ deadline })
+        : await routerServiceStatus({ deadline });
+      await transact(false);
     });
-  } else {
-    await transact();
-  }
+  });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (environmentBacked) {
     if (removal) {
       const { environmentPoolRemovalReminder } = await import("./router-restart.mjs");
       process.stderr.write(environmentPoolRemovalReminder(serviceEnvironmentStatus));
-    } else {
+    } else if (addition) {
       process.stderr.write(
         serviceEnvironmentStatus.serviceReinstallRequired
           ? "Environment-backed pool entry staged. Rerun the installer from this same environment; a service restart alone will not persist the variable.\n"
           : "Environment-backed pool entry registered. Start the foreground router from this environment, or install the managed service from it.\n",
+      );
+    } else {
+      process.stderr.write(
+        "Environment-backed pool metadata staged; client routes were not republished. " +
+        "Rerun the installer from the intended environment for a managed service, " +
+        "or restart the foreground router from that environment, then apply.\n",
       );
     }
   }
@@ -1436,13 +1495,13 @@ async function refreshModelSettingsCatalog() {
   }
 }
 
-async function restartRouterForLocalRoutes({ signal, deadline } = {}) {
+async function restartRouterForLocalRoutes({ signal, deadline, expectedFingerprint } = {}) {
   // User-model routes live in files the running router only reads at startup,
   // so a local model toggle needs the same service reload curated-model apply
-  // performs. Foreground/dev routers have no service and are skipped.
+  // performs. A running foreground router must explicitly adopt the generation.
   const { restartRouterServiceIfInstalled } = await import("./router-restart.mjs");
   signal?.throwIfAborted();
-  const restarted = await restartRouterServiceIfInstalled({ signal, deadline });
+  const restarted = await restartRouterServiceIfInstalled({ signal, deadline, expectedFingerprint });
   signal?.throwIfAborted();
   if (restarted) {
     process.stderr.write("Router service restarted so routes with fresh process state are live.\n");

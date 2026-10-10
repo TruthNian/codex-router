@@ -18,7 +18,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-import { privateFileIsProtected, protectPrivateFile, writePrivateJson } from "./file-security.mjs";
+import { privateFileIsProtected, protectPrivateFile, removeOwnedPrivateTemporary, replacePrivateFile, writePrivateFile, writePrivateJson } from "./file-security.mjs";
 import {
   assertChatGPTLoginLeaseInactive,
   chatGPTLoginAuthChanged,
@@ -28,6 +28,7 @@ import {
   clearChatGPTLoginLease,
 } from "./chatgpt-login-lease.mjs";
 import { withCatalogPublicationLock } from "./catalog-publication-lock.mjs";
+import { withModelOverlayLock } from "./model-overlay-lock.mjs";
 import { discoveryDisabled } from "./discovery-mode.mjs";
 import {
   CHATGPT_ACCOUNT_HOMES_DIR,
@@ -86,7 +87,12 @@ function catalogLockOptions(options = {}) {
 }
 
 function withProfileCatalogLock(operation, options = {}) {
-  return withCatalogPublicationLock(operation, catalogLockOptions(options));
+  const lockOptions = catalogLockOptions(options);
+  // Shared mutations always own model-overlay before catalog-publication.
+  // The account lock, held by callers, is independent of route publication.
+  return withModelOverlayLock(
+    () => withCatalogPublicationLock(operation, lockOptions), lockOptions,
+  );
 }
 
 function transactionDirectory(switchPath = CHATGPT_PROFILE_SWITCH_PATH) {
@@ -517,6 +523,18 @@ async function refreshActiveCatalog(options = {}) {
     await options.refreshCatalog();
     return;
   }
+  const {
+    verifyAdoptedModelOverlayFresh, verifyAdoptedModelOverlayPublication,
+  } = await import("./model-overlay-publication.mjs");
+  const fresh = await verifyAdoptedModelOverlayFresh({ lock: false, allowOffline: true });
+  // control.mjs can have loaded a registry before waiting for these locks.
+  // Approving fresh state cannot authorize publication from that older module.
+  const loaded = await verifyAdoptedModelOverlayPublication({ allowOffline: true });
+  if (fresh.expectedFingerprint !== loaded.expectedFingerprint) {
+    const error = new Error("The profile publisher has a stale routing generation; retry the account switch from a fresh process.");
+    error.code = "model_overlay_adoption_failed";
+    throw error;
+  }
   // The profile transaction already owns the catalog publication lock. Calling
   // catalog.mjs as a child would try to acquire that same cross-process lock
   // and deadlock; invoke its exported publication body inside this lease.
@@ -626,20 +644,34 @@ export function atomicPrivateCopy(source, destination, { protect = protectPrivat
   mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
   ensureNoSymlinkParents(path.dirname(destination));
   const temporary = `${destination}.tmp-${process.pid}-${randomUUID()}`;
+  let temporaryIdentity;
+  let replacementFailed = false;
+  let replacementError;
   try {
     copyFileSync(source, temporary, fsConstants.COPYFILE_EXCL);
-    protect(temporary);
-    ensureNoSymlinkParents(path.dirname(destination));
-    if (existsSync(destination) && lstatSync(destination).isSymbolicLink()) {
-      throw new Error("Refusing to replace a symbolic-link login profile.");
-    }
-    renameSync(temporary, destination);
-    // rename preserves the temporary file's DACL on Windows, but protect the
-    // final path as well so every OAuth credential replacement is verified at
-    // the name Codex will open. POSIX remains an owner-only chmod.
-    protect(destination);
+    temporaryIdentity = lstatSync(temporary);
+    replacePrivateFile(temporary, destination, {
+      protect,
+      beforeReplace() {
+        ensureNoSymlinkParents(path.dirname(destination));
+        if (existsSync(destination) && lstatSync(destination).isSymbolicLink()) {
+          throw new Error("Refusing to replace a symbolic-link login profile.");
+        }
+      },
+    });
+  } catch (error) {
+    replacementFailed = true;
+    replacementError = error;
+    throw error;
   } finally {
-    rmSync(temporary, { force: true });
+    if (temporaryIdentity) {
+      try {
+        removeOwnedPrivateTemporary(temporary, temporaryIdentity);
+      } catch (cleanupError) {
+        if (!replacementFailed) throw cleanupError;
+        try { replacementError.cleanupError = cleanupError; } catch {}
+      }
+    }
   }
 }
 
@@ -652,19 +684,15 @@ function atomicPrivateContents(contents, destination, { protect = protectPrivate
   }
   mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
   ensureNoSymlinkParents(path.dirname(destination));
-  const temporary = `${destination}.tmp-${process.pid}-${randomUUID()}`;
-  try {
-    writeFileSync(temporary, contents, { mode: 0o600, flag: "wx" });
-    protect(temporary);
-    ensureNoSymlinkParents(path.dirname(destination));
-    if (existsSync(destination) && lstatSync(destination).isSymbolicLink()) {
-      throw new Error("Refusing to replace a symbolic-link login profile.");
-    }
-    renameSync(temporary, destination);
-    protect(destination);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
+  writePrivateFile(destination, contents, {
+    protect,
+    beforeReplace() {
+      ensureNoSymlinkParents(path.dirname(destination));
+      if (existsSync(destination) && lstatSync(destination).isSymbolicLink()) {
+        throw new Error("Refusing to replace a symbolic-link login profile.");
+      }
+    },
+  });
 }
 
 function syncAuthProfile(source, destination) {

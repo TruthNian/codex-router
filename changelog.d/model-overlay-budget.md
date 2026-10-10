@@ -1,0 +1,1 @@
+- Model overlay transactions retain a 45-minute ceiling with a 60-second mutation allowance checked when synchronous I/O returns and snapshot-based file restoration allowances, preserving complete preparation, restart readiness, publication and rollback budgets while rejecting transactions that cannot fit before changing state.

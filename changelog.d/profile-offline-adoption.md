@@ -1,0 +1,1 @@
+- Preserve native ChatGPT account switching without an installed Router through explicit, read-only offline verification; service-query failures never establish absence, automatic catalog refresh still requires healthy route adoption, and service restart diagnostics no longer mix into JSON command output.

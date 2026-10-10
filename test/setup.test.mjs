@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("automatic selection-only setup exposes only configured providers", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-setup-"));
+  const testRoot = setupFixtureRoot("codex-router-setup-");
   const codexHome = path.join(testRoot, "codex");
   const stateDir = path.join(testRoot, "state");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -25,7 +26,7 @@ test("automatic selection-only setup exposes only configured providers", () => {
         cwd: root,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...setupFixtureEnvironment(testRoot, stateDir, codexHome),
           CODEX_HOME: codexHome,
           CODEX_ROUTER_STATE_DIR: stateDir,
           KIMI_CODE_HOME: path.join(testRoot, "kimi-code"),
@@ -53,7 +54,7 @@ test("automatic selection-only setup exposes only configured providers", () => {
 });
 
 test("--no-provider --no-discovery writes an empty selection and the discovery marker", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-setup-idle-"));
+  const testRoot = setupFixtureRoot("codex-router-setup-idle-");
   const codexHome = path.join(testRoot, "codex");
   const stateDir = path.join(testRoot, "state");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -71,7 +72,7 @@ test("--no-provider --no-discovery writes an empty selection and the discovery m
         cwd: root,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...setupFixtureEnvironment(testRoot, stateDir, codexHome),
           CODEX_HOME: codexHome,
           CODEX_ROUTER_STATE_DIR: stateDir,
           KIMI_CODE_HOME: path.join(testRoot, "kimi-code"),
@@ -92,7 +93,7 @@ test("--no-provider --no-discovery writes an empty selection and the discovery m
 });
 
 test("re-running setup without the idle flags clears the discovery marker", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-setup-exit-idle-"));
+  const testRoot = setupFixtureRoot("codex-router-setup-exit-idle-");
   const codexHome = path.join(testRoot, "codex");
   const stateDir = path.join(testRoot, "state");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -118,7 +119,7 @@ test("re-running setup without the idle flags clears the discovery marker", () =
         cwd: root,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...setupFixtureEnvironment(testRoot, stateDir, codexHome),
           CODEX_HOME: codexHome,
           CODEX_ROUTER_STATE_DIR: stateDir,
           KIMI_CODE_HOME: path.join(testRoot, "kimi-code"),
@@ -139,7 +140,7 @@ test("re-running setup without the idle flags clears the discovery marker", () =
 });
 
 test("ensure-configured does not auto-select anonymous providers", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-ensure-configured-"));
+  const testRoot = setupFixtureRoot("codex-router-ensure-configured-");
   const stateDir = path.join(testRoot, "state");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   writeFileSync(path.join(stateDir, "deepseek-api-key.secret"), "TEST_SETUP_KEY\n", {
@@ -153,7 +154,7 @@ test("ensure-configured does not auto-select anonymous providers", () => {
         cwd: root,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...setupFixtureEnvironment(testRoot, stateDir),
           CODEX_HOME: path.join(testRoot, "codex"),
           CODEX_ROUTER_STATE_DIR: stateDir,
           KIMI_CODE_HOME: path.join(testRoot, "kimi-code"),
@@ -177,7 +178,7 @@ test("ensure-configured does not auto-select anonymous providers", () => {
 });
 
 test("ensure-configured accepts an explicitly empty selection as idle", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-ensure-idle-"));
+  const testRoot = setupFixtureRoot("codex-router-ensure-idle-");
   const stateDir = path.join(testRoot, "state");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   // The state an idle --no-provider install (or an operator who hid the last
@@ -196,7 +197,7 @@ test("ensure-configured accepts an explicitly empty selection as idle", () => {
         cwd: root,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...setupFixtureEnvironment(testRoot, stateDir),
           CODEX_HOME: path.join(testRoot, "codex"),
           CODEX_ROUTER_STATE_DIR: stateDir,
           KIMI_CODE_HOME: path.join(testRoot, "kimi-code"),
@@ -211,7 +212,7 @@ test("ensure-configured accepts an explicitly empty selection as idle", () => {
 });
 
 test("configured setup mode also excludes anonymous providers by default", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-setup-configured-"));
+  const testRoot = setupFixtureRoot("codex-router-setup-configured-");
   const stateDir = path.join(testRoot, "state");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   writeFileSync(path.join(stateDir, "deepseek-api-key.secret"), "TEST_SETUP_KEY\n", {
@@ -225,7 +226,7 @@ test("configured setup mode also excludes anonymous providers by default", () =>
         cwd: root,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...setupFixtureEnvironment(testRoot, stateDir),
           CODEX_HOME: path.join(testRoot, "codex"),
           CODEX_ROUTER_STATE_DIR: stateDir,
           KIMI_CODE_HOME: path.join(testRoot, "kimi-code"),

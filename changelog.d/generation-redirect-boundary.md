@@ -1,0 +1,1 @@
+- Reject generation redirects without following or relaying their Location: a later refused redirect connection cannot prove that the first origin never received the POST. Native, API and vision generation paths return a local failure and require the configured final endpoint.

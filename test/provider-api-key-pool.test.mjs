@@ -565,7 +565,7 @@ test("attempts never retry origin 500 and cap an explicit large attempt request"
   assert.equal(calls, 3);
 });
 
-test("oversized maps and symlink state fail closed without truncation", async () => {
+test("oversized maps fail closed without truncation", async () => {
   const oversizedPath = path.join(root, "oversized.json");
   const credentials = Object.fromEntries(Array.from({ length: 257 }, (_, index) => {
     const id = `cred_over_${String(index).padStart(8, "0")}`;
@@ -576,14 +576,32 @@ test("oversized maps and symlink state fail closed without truncation", async ()
     providers: { openrouter: { providerId: "openrouter", credentials } },
   }));
   assert.equal(readProviderApiKeyPoolState(oversizedPath).valid, false);
+  const original = readFileSync(oversizedPath);
   await assert.rejects(
     upsertProviderApiKey("openrouter", metadata(credential("extra", "EXTRA")), { filePath: oversizedPath }),
     /invalid; refusing to overwrite/i,
   );
+  assert.deepEqual(readFileSync(oversizedPath), original);
+});
 
+test("symlink state fails closed without reading or overwriting its target", async (t) => {
+  const target = path.join(root, "symlink-target.json");
   const linkedPath = path.join(root, "linked.json");
-  symlinkSync(oversizedPath, linkedPath);
+  // A valid target distinguishes symlink refusal from merely rejecting an
+  // already-invalid document. No writer may follow the link to change it.
+  const original = '{"version":1,"providers":{}}\n';
+  writeFileSync(target, original);
+  try { symlinkSync(target, linkedPath, "file"); }
+  catch (error) {
+    if (process.platform === "win32" && error.code === "EPERM") {
+      t.skip("Windows file symlink creation requires developer mode or symlink privileges");
+      return;
+    }
+    throw error;
+  }
   assert.equal(readProviderApiKeyPoolState(linkedPath).valid, false);
+  await assert.rejects(upsertProviderApiKey("openrouter", metadata(credential("symlink", "EXTRA")), { filePath: linkedPath }), /invalid; refusing to overwrite/i);
+  assert.equal(readFileSync(target, "utf8"), original);
 });
 
 test("credential and pool removal clean bindings but preserve external credential references", async () => {

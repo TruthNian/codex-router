@@ -1,0 +1,1 @@
+- Native catalog maintenance now locks model state and verifies the running router adopted the current routes before refreshing installed clients, preserving catalogs when route changes are staged or required services are unavailable.

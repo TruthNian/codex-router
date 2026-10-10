@@ -3,13 +3,10 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import { STATE_DIR } from "./paths.mjs";
 
 export const VERTEX_STATE_PATH =
@@ -103,27 +100,7 @@ function writeSettings(settings) {
   const directory = path.dirname(VERTEX_STATE_PATH);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
-  const temporary = `${VERTEX_STATE_PATH}.tmp.${process.pid}`;
-  writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  try {
-    protectPrivateFile(temporary);
-    renameSync(temporary, VERTEX_STATE_PATH);
-    protectPrivateFile(VERTEX_STATE_PATH);
-  } catch (error) {
-    if (existsSync(temporary)) {
-      // The temporary file contains only project metadata, but removing a
-      // failed atomic write still avoids leaving stale state beside the target.
-      try {
-        unlinkSync(temporary);
-      } catch {
-        // Best-effort cleanup; the next write uses a distinct process suffix.
-      }
-    }
-    throw error;
-  }
+  writePrivateFile(VERTEX_STATE_PATH, `${JSON.stringify(settings, null, 2)}\n`);
   return settings;
 }
 

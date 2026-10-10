@@ -102,7 +102,7 @@ test("foreground supervisor waits for existing lifecycle ownership before bootin
       child.once("exit", resolve);
     });
     assert.equal(code, 1);
-    assert.match(stderr, /LiteLLM is not installed/i);
+    assert.match(stderr, /Internal service key is missing/i);
   } finally {
     if (child?.exitCode === null) child.kill();
     rmSync(stateDir, { recursive: true, force: true });

@@ -1,8 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import { grokGatewayStreamTimeoutSeconds } from "./grok-stream-timeouts.mjs";
 import { localTimeoutSeconds } from "./local-timeouts.mjs";
 import { LITELLM_CONFIG_PATH } from "./paths.mjs";
@@ -144,22 +144,13 @@ export function writeLiteLlmConfig(target = LITELLM_CONFIG_PATH) {
   if (target === LITELLM_CONFIG_PATH) {
     assertStateOwnership("write the gateway routing config");
   }
-  mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   // LiteLLM resolves configured callbacks beside its YAML. Publish only these
   // repository-owned modules, atomically and privately, before referencing them.
   for (const name of ["grok_service_tier_callback.py", "litellm_stream_cleanup_callback.py"]) {
     const callbackPath = path.join(path.dirname(target), name);
-    const callbackTemp = `${callbackPath}.tmp.${process.pid}`;
-    writeFileSync(callbackTemp, readFileSync(new URL(`./${name}`, import.meta.url)), { mode: 0o600 });
-    protectPrivateFile(callbackTemp);
-    renameSync(callbackTemp, callbackPath);
-    protectPrivateFile(callbackPath);
+    writePrivateFile(callbackPath, readFileSync(new URL(`./${name}`, import.meta.url)));
   }
-  const temporary = `${target}.tmp.${process.pid}`;
-  writeFileSync(temporary, renderLiteLlmConfig(), { encoding: "utf8", mode: 0o600 });
-  protectPrivateFile(temporary);
-  renameSync(temporary, target);
-  protectPrivateFile(target);
+  writePrivateFile(target, renderLiteLlmConfig());
   return target;
 }
 

@@ -52,7 +52,7 @@ function child(script, args, env) {
 }
 
 function stageIdleHome() {
-  const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-router-doctor-idle-"));
+  const codexHome = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "codex-router-doctor-idle-"));
   const stateDir = path.join(codexHome, "router-state");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   writeFileSync(path.join(codexHome, "config.toml"), 'model = "gpt-5.6-sol"\n', {
@@ -75,6 +75,12 @@ function stageIdleHome() {
     ...process.env,
     CODEX_BIN: writeCodexStub(codexHome, loginSentinel, codexHome, accountSentinel),
     CODEX_HOME: codexHome,
+    HOME: codexHome,
+    USERPROFILE: codexHome,
+    APPDATA: path.join(codexHome, "AppData", "Roaming"),
+    LOCALAPPDATA: path.join(codexHome, "AppData", "Local"),
+    CODEX_ROUTER_SERVICE_PLATFORM: "test-fixture",
+    CODEX_ROUTER_NO_DISCOVERY: "0",
     CODEX_ROUTER_PORT: "46193",
     CODEX_ROUTER_STATE_DIR: stateDir,
     MODEL_ROUTER_STATE_DIR: stateDir,

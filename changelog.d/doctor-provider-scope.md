@@ -1,0 +1,1 @@
+- Diagnose enabled providers by default without opening disabled provider credentials; `doctor --all` retains the complete provider inventory and selected or invalid authoritative pool failures remain visible.

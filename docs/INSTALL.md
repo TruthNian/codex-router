@@ -17,9 +17,9 @@ This page covers the Codex target:
 Required software:
 
 - Node.js 22.19+ (Node.js 24 LTS recommended)
-- `uv`, or Python 3.10+ with `venv`
+- `uv`, or Python 3.10+ with `venv`, when a selected callable route needs the LiteLLM gateway
 - Git for managed one-command installation and rollback
-- At least one Kimi OAuth, Kimi API, or DeepSeek API credential
+- A native ChatGPT session or the credential required by the selected provider; keyless local routes retain their own runtime prerequisites
 - On Windows, Windows PowerShell in `FullLanguage` mode with application-control
   policy that permits `Add-Type`. The bounded process-tree owner fails before
   launching a mutation command when that host capability is unavailable.
@@ -325,18 +325,19 @@ Setup performs these operations in order:
 1. Validates provider selection and credential presence.
 2. Detects other model-catalog owners and earlier Codex Router variants.
 3. With approval, snapshots and stops only recognized older variants.
-4. Installs locked Node dependencies and pinned LiteLLM in `.venv`.
+4. Installs locked Node dependencies, plus pinned LiteLLM in `.venv` only when the execution plan needs it.
 5. Generates separate random Codex caller and internal-service keys.
-6. Captures the native Codex model catalog and adds only selected provider models.
-7. Generates gateway routes from the split registry tree under `config/`.
-8. Adds the marked capability-bearing base URL and catalog block. When the user
-   has not set an agent concurrency limit, it also configures six spawned-agent
-   slots so native Kimi/Grok/GPT collaboration does not remain on Codex's small
-   v2 default. Existing `[agents]` limits are preserved.
-9. Protects the Codex config and its backup for the current user.
-10. Installs the platform's per-user background service.
-11. Waits for every local layer to report its expected service identity.
-12. Records the installed commit and provider selection.
+6. Captures the native Codex model catalog when applicable.
+7. Generates gateway routes from `config/` when the execution plan needs them.
+   PrepareOnly ends here, before service adoption or client publication.
+8. Records checkout ownership and installation provenance before service startup.
+9. Installs the platform's per-user background service.
+10. Waits for the selected dependencies and Router readiness.
+11. Publishes selected model catalogs and the client's routing configuration.
+    Codex config and its backup receive current-user protection. When the user
+    has not set an agent concurrency limit, installation also configures six
+    spawned-agent slots; existing `[agents]` limits are preserved.
+12. Rebuilds an already installed desktop companion when supported.
 13. Runs the doctor.
 
 If config or service installation fails, the new service and marked config block

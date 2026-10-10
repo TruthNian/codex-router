@@ -18,6 +18,9 @@ process.env.MODEL_ROUTER_TARGET = "codex";
 
 const { nativeCatalogDriftDetected } = await import("../src/native-catalog-drift.mjs");
 const { CONFIG_PATH, NATIVE_CATALOG_PATH } = await import("../src/paths.mjs");
+assert.equal(CONFIG_PATH, path.join(codexHome, "config.toml"));
+assert.equal(NATIVE_CATALOG_PATH, path.join(stateDir, "native-models.json"));
+process.env.CODEX_ROUTER_NO_DISCOVERY = "0";
 
 test.after(() => rmSync(tempDir, { recursive: true, force: true }));
 

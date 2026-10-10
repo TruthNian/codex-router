@@ -2220,7 +2220,7 @@ test("provider writes republish all installed targets and roll selection back on
 
 test("catalog-backed mutations preserve complete forward and rollback restart epochs", async () => {
   const source = await readFile(new URL("../apps/control-center/electron/ipc.mjs", import.meta.url), "utf8");
-  assert.match(source, /const CATALOG_MUTATION_TIMEOUT_MS = 1_320_000/);
+  assert.match(source, /const CATALOG_MUTATION_TIMEOUT_MS = 45 \* 60_000 \+ 20_000/);
   assert.match(source, /\["set-apply"[\s\S]{0,180}timeoutMs: CATALOG_MUTATION_TIMEOUT_MS/);
   assert.match(source, /handleAction\("setSubagentMode"[\s\S]{0,280}CATALOG_MUTATION_TIMEOUT_MS/);
   assert.match(source, /handleAction\("setSubagentEffort"[\s\S]{0,320}\["subagents", "effort", model, effort\][\s\S]{0,120}CATALOG_MUTATION_TIMEOUT_MS/);

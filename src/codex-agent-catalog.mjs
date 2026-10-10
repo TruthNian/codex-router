@@ -3,15 +3,13 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  renameSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
 import {
   privateFileIsProtected,
-  protectPrivateFile,
+  writePrivateFile,
 } from "./file-security.mjs";
 import { subagentEffort } from "./multi-agent-state.mjs";
 import { CODEX_AGENTS_DIR } from "./paths.mjs";
@@ -40,11 +38,7 @@ function managedAgentFiles(agentsDir) {
 }
 
 function writeManagedAgent(target, contents) {
-  const temporary = `${target}.tmp.${process.pid}`;
-  writeFileSync(temporary, contents, { encoding: "utf8", mode: 0o600 });
-  protectPrivateFile(temporary);
-  renameSync(temporary, target);
-  protectPrivateFile(target);
+  writePrivateFile(target, contents);
 }
 
 // `effort` is the operator's per-model subagent depth (`subagentEffort`). Codex

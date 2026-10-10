@@ -1,6 +1,7 @@
-// Polling cadence is independent of account-cache freshness. Keep the shipped
-// five-minute cadence unless the operator explicitly chooses a slower one.
-export const DEFAULT_NATIVE_CATALOG_POLL_INTERVAL_MS = 5 * 60_000;
+// Identity changes refresh immediately. Remote entitlement changes need a
+// bounded fallback because they need not produce any local filesystem event.
+export const DEFAULT_NATIVE_CATALOG_POLL_INTERVAL_MS = 24 * 60 * 60_000;
+export const MIN_NATIVE_CATALOG_POLL_INTERVAL_MS = 5 * 60_000;
 export const MAX_NATIVE_CATALOG_POLL_INTERVAL_MS = 2 ** 31 - 1;
 const POLL_INTERVAL_ENV = "CODEX_ROUTER_NATIVE_CATALOG_POLL_INTERVAL_MS";
 
@@ -11,7 +12,7 @@ export function nativeCatalogPollIntervalMs(environment = process.env) {
   // Node turns an overflowing interval into 1 ms; reject it rather than
   // accidentally hammering the account endpoint or drift comparison.
   return Number.isSafeInteger(milliseconds) &&
-    milliseconds >= DEFAULT_NATIVE_CATALOG_POLL_INTERVAL_MS &&
+    milliseconds >= MIN_NATIVE_CATALOG_POLL_INTERVAL_MS &&
     milliseconds <= MAX_NATIVE_CATALOG_POLL_INTERVAL_MS
     ? milliseconds
     : DEFAULT_NATIVE_CATALOG_POLL_INTERVAL_MS;

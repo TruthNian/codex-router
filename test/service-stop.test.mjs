@@ -65,7 +65,11 @@ async function run(command, mode, { missingTask = false, queryFailure = false, r
   const context = {
     ...shared, ...ownershipModule, CODEX_HOME: "fixture-codex", LOG_PATH: "fixture.log", TARGET: "codex",
     ensureCheckoutReadable: () => { if (earlyFailure === "acl") throw new Error("fixture checkout ACL failed"); },
-    protectPrivateFile: () => {},
+    writePrivateFile: (file, contents) => {
+      assert.equal(path.dirname(file), stateDir, "launcher writes must remain in the simulated state directory");
+      assert.ok(Buffer.isBuffer(contents), "launcher encodings must reach the shared writer as bytes");
+      if (earlyFailure === "launcher") throw new Error("fixture launcher write failed");
+    },
     providerApiKeyServiceEnvironment: () => ({}), serviceZaiCodingStreamEnvironment: () => ({}),
     responsesWsServiceEnvironment: () => ({}),
     serviceNativeCatalogEnvironment: () => ({}),

@@ -428,7 +428,7 @@ async function configureProvider(provider) {
       throw incomplete(`${provider.displayName} setup was cancelled.`);
     }
     await ensureNodeDependencies();
-    run(process.execPath, [path.join(SOURCE_ROOT, "src", "provider-key.mjs"), provider.id, "set"]);
+    run(process.execPath, [path.join(SOURCE_ROOT, "src", "provider-key.mjs"), provider.id, "set", "--stage"]);
   }
 }
 

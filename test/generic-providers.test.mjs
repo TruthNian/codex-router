@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const testRoot = mkdtempSync(path.join(os.tmpdir(), "generic-provider-test-"));
+import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
+import { startProviderControlRuntime, runProviderFixtureNode } from "./fixtures/provider-control-runtime.mjs";
+
+const testRoot = setupFixtureRoot("generic-provider-test-");
+Object.assign(process.env, setupFixtureEnvironment(testRoot, path.join(testRoot, "state")));
+process.env.MODEL_ROUTER_TARGET = "codex";
 process.env.HOME = testRoot;
 process.env.CODEX_HOME = path.join(testRoot, "codex");
 process.env.CODEX_ROUTER_STATE_DIR = path.join(testRoot, "state");
@@ -507,9 +511,13 @@ test("public APIs confine a generic credential to its permitted endpoint", async
   }
 });
 
-test("providers CLI exposes generic CRUD with sanitized JSON", () => {
+test("providers CLI exposes generic CRUD with sanitized JSON", async (t) => {
+  const runtime = await startProviderControlRuntime(testRoot);
+  t.after(() => runtime.close());
   const env = {
-    ...process.env,
+    ...setupFixtureEnvironment(testRoot, path.join(testRoot, "state-cli"), path.join(testRoot, "codex-cli")),
+    ...runtime.environment,
+    MODEL_ROUTER_TARGET: "codex",
     HOME: testRoot,
     CODEX_HOME: path.join(testRoot, "codex-cli"),
     CODEX_ROUTER_STATE_DIR: path.join(testRoot, "state-cli"),
@@ -557,13 +565,26 @@ test("providers CLI exposes generic CRUD with sanitized JSON", () => {
   assert.match(unsafeDrift.stderr, /--no-apply is unsafe/);
   assert.equal(JSON.parse(readFileSync(path.join(env.CODEX_ROUTER_STATE_DIR, "generic-providers.json"), "utf8")).providers[0].enabled, true);
 
-  const remove = spawnSync(
-    process.execPath,
-    ["src/providers.mjs", "generic", "remove", "cli-test", "--json"],
-    { cwd: root, env, encoding: "utf8" },
+  const protectedFiles = [path.join(env.CODEX_ROUTER_STATE_DIR, "generic-providers.json"), env.MODEL_ROUTER_USER_MODELS, env.MODEL_ROUTER_MODEL_PICKER_STATE];
+  const original = protectedFiles.map((file) => readFileSync(file));
+  const failed = await runProviderFixtureNode(["src/providers.mjs", "generic", "remove", "cli-test", "--json"], {
+    ...env, FIXTURE_PROVIDER_FAIL_PHASE: "publish",
+  });
+  assert.equal(failed.status, 1);
+  assert.match(failed.stderr, /Synthetic publish failure/);
+  assert.deepEqual(protectedFiles.map((file) => readFileSync(file)), original);
+  assert.equal(runtime.events().filter((event) => event.phase === "publish").length, 2, "failed candidate must be followed by real restored publication");
+
+  const remove = await runProviderFixtureNode(
+    ["src/providers.mjs", "generic", "remove", "cli-test", "--json"], env,
   );
   assert.equal(remove.status, 0, remove.stderr);
   assert.equal(JSON.parse(remove.stdout).removed, "cli-test");
+  const phases = runtime.events().map((event) => event.phase);
+  for (const phase of ["dependencies", "prepare", "service-restart", "health-adoption", "publish"]) assert.equal(phases.includes(phase), true, phase);
+  assert.equal(phases.indexOf("prepare") < phases.indexOf("service-restart"), true);
+  assert.equal(phases.indexOf("service-restart") < phases.indexOf("health-adoption"), true);
+  assert.equal(phases.indexOf("health-adoption") < phases.indexOf("publish"), true);
   assert.deepEqual(JSON.parse(readFileSync(env.MODEL_ROUTER_USER_MODELS, "utf8")).models, []);
   const picker = JSON.parse(readFileSync(env.MODEL_ROUTER_MODEL_PICKER_STATE, "utf8"));
   assert.deepEqual(picker.visible, []);

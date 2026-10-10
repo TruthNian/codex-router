@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -8,236 +9,190 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { freePort } from "./port-pool.mjs";
 import { userModelEntry } from "../src/user-models.mjs";
+import { callerBaseUrl } from "../src/caller-auth.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const INTERNAL_KEY = "devin-gate-internal-key-with-sufficient-length";
+const CALLER_KEY = "devin-gate-caller-key-with-sufficient-length";
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Devin ships catalog-only, so an unconfigured install has no `devin-cli` model
-// and start.mjs must not spend a process or a port on its forwarder. The gate
-// is the curated model rather than the stored credential, because a curated
-// model is exactly what puts a `DEVIN_CLI_FORWARD_BASE_URL` route in the
-// gateway config -- gate and route are computed from the same MODELS array on
-// the same boot, so a live route can never point at a port nobody bound.
-//
-// Every case here drives the real start.mjs. `MODEL_ROUTER_LITELLM_BIN` points
-// at node, which exits immediately when handed LiteLLM's arguments, so startup
-// always fails at the gateway -- the stage *after* the forwarders. That makes
-// "reached the gateway" a positive assertion that the forwarder stage
-// completed, and it is the same trick startup-cleanup.test.mjs uses.
+// Drive the real supervisor and selected forwarders. Node deliberately fails
+// LiteLLM's command line on selected Devin routes. The Router must still serve
+// an independent native turn, while /health reports the missing dependencies.
+// A native-only generation needs no gateway process at all.
 
-// See startup-cleanup.test.mjs: progress, not elapsed time, separates a slow
-// machine from a stuck one, so the watchdog fires only on silence.
-const STARTUP_STALL_MS = 30_000;
-
-function waitForStartupExit(child, readErrors) {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    let lastOutput = started;
-    const onProgress = () => {
-      lastOutput = Date.now();
-    };
-    child.stderr.on("data", onProgress);
-    const finish = () => {
-      clearInterval(watchdog);
-      child.stderr.off("data", onProgress);
-    };
-    const watchdog = setInterval(() => {
-      const idleMs = Date.now() - lastOutput;
-      if (idleMs < STARTUP_STALL_MS) return;
-      finish();
-      reject(
-        new Error(
-          `startup stalled: no output for ${idleMs} ms after waiting ${Date.now() - started} ms in total; stderr so far:\n${readErrors()}`,
-        ),
-      );
-    }, 250);
-    child.once("exit", (code, signal) => {
-      finish();
-      resolve({ code, signal });
-    });
-  });
-}
-
-// Holds a port for the duration of a test so a forwarder that tries to bind it
-// fails with EADDRINUSE. Occupying the port is how "nothing was spawned" is
-// proved positively: an unspawned forwarder cannot collide with the squatter,
-// so startup walks past it to the gateway.
 async function squat(port) {
-  const server = net.createServer();
-  // Hang up on anything that connects. A squatter that accepted and held the
-  // socket would leave the health probe waiting for a response that never came
-  // and would keep `server.close()` from ever completing; destroying the socket
-  // makes a probe of this port fail the way a dead listener does, which is what
-  // the port being unavailable is meant to look like.
-  server.on("connection", (socket) => socket.destroy());
+  const server = net.createServer((socket) => socket.destroy());
   await new Promise((resolve, reject) => {
-    // Named, because this bind failing is a failure of the *fixture*, not of
-    // the gate under test, and the two read identically in CI otherwise: both
-    // arrive as `EADDRINUSE 127.0.0.1:<port>` with nothing saying which end
-    // wanted the port.
-    server.once("error", (error) =>
-      reject(
-        new Error(
-          `the test could not hold 127.0.0.1:${port} for the Devin forwarder to collide with: ${error.code || error.message}`,
-          { cause: error },
-        ),
-      ),
-    );
+    server.once("error", reject);
     server.listen(port, "127.0.0.1", resolve);
   });
-  return {
-    listening: () => server.listening,
-    close: () =>
-      new Promise((resolve) => {
-        server.close(resolve);
-        server.unref();
-      }),
-  };
+  return { server, close: () => new Promise((resolve) => server.close(resolve)) };
+}
+
+async function eventually(read, accepts, child, errors) {
+  const deadline = Date.now() + 10_000;
+  let value;
+  while (Date.now() < deadline) {
+    assert.equal(child.exitCode, null, `owned supervisor exited early: ${errors()}`);
+    try {
+      value = await read();
+      if (accepts(value)) return value;
+    } catch { /* The owned listener may still be starting. */ }
+    await delay(25);
+  }
+  throw new Error(`owned stack did not settle: ${JSON.stringify(value)} ${errors()}`);
+}
+
+async function controlledStop(child, exited) {
+  if (child.exitCode !== null || child.signalCode !== null) return exited;
+  child.send({ type: "model-router:shutdown" });
+  let timer;
+  try {
+    return await Promise.race([
+      exited,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("owned supervisor did not drain after IPC shutdown")), 5_000); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function runStartup({ curatedDevinModel = false, occupyDevinPort = false } = {}) {
-  const ports = await Promise.all(Array.from({ length: 6 }, () => freePort()));
+  const ports = await Promise.all(Array.from({ length: 7 }, () => freePort()));
   assert.equal(new Set(ports).size, ports.length);
-  const [routerPort, gatewayPort, oauthPort, apiPort, grokOauthPort, devinPort] = ports;
-
-  const rootDir = mkdtempSync(path.join(os.tmpdir(), "model-router-devin-gate-"));
-  const stateDir = path.join(rootDir, "state");
+  const [routerPort, gatewayPort, oauthPort, apiPort, grokOauthPort, devinPort, antigravityPort] = ports;
+  const directory = mkdtempSync(path.join(os.tmpdir(), "model-router-devin-gate-"));
+  const stateDir = path.join(directory, "state");
+  const codexHome = path.join(directory, "codex");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  writeFileSync(path.join(stateDir, "internal-secret"), "devin-gate-internal-key-with-sufficient-length\n", {
-    mode: 0o600,
-  });
-  writeFileSync(path.join(stateDir, "caller-secret"), "devin-gate-caller-key-with-sufficient-length\n", {
-    mode: 0o600,
-  });
-  if (curatedDevinModel) {
-    // Built through the same helper `bin/curate-models` uses, so this stays a
-    // real curated entry rather than a hand-written shape that could drift.
-    writeFileSync(
-      path.join(stateDir, "user-models.json"),
-      JSON.stringify(
-        {
-          version: 1,
-          models: [
-            userModelEntry({ providerId: "devin-cli", upstreamId: "gate-test-model", priority: 900 }),
-          ],
-        },
-        null,
-        2,
-      ),
-      { mode: 0o600 },
-    );
-  }
+  mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(stateDir, "internal-secret"), `${INTERNAL_KEY}\n`, { mode: 0o600 });
+  writeFileSync(path.join(stateDir, "caller-secret"), `${CALLER_KEY}\n`, { mode: 0o600 });
+  writeFileSync(path.join(stateDir, "enabled-providers.json"), JSON.stringify({ version: 1,
+    providers: curatedDevinModel ? ["devin-cli"] : [] }), { mode: 0o600 });
+  writeFileSync(path.join(stateDir, "user-models.json"), JSON.stringify({ version: 1,
+    models: curatedDevinModel ? [userModelEntry({ providerId: "devin-cli", upstreamId: "gate-test-model", priority: 900 })] : [] }), { mode: 0o600 });
 
+  const nativeRequests = [];
+  const native = http.createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    nativeRequests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks).toString()) });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ id: "resp_independent_native", object: "response", status: "completed",
+      model: "gpt-6.1-sol", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "INDEPENDENT_NATIVE_OK" }] }] }));
+  });
+  await new Promise((resolve) => native.listen(0, "127.0.0.1", resolve));
+  const nativePort = native.address().port;
   const squatter = occupyDevinPort ? await squat(devinPort) : undefined;
-
+  const env = { ...process.env };
+  for (const name of Object.keys(env)) {
+    if (/^(MODEL_ROUTER_|CODEX_ROUTER_|ROUTER_PLANE_)/.test(name) || /(?:API_KEY|TOKEN|SECRET)$/i.test(name)) delete env[name];
+  }
+  Object.assign(env, {
+    CODEX_HOME: codexHome, HOME: directory, USERPROFILE: directory,
+    APPDATA: path.join(directory, "AppData", "Roaming"), LOCALAPPDATA: path.join(directory, "AppData", "Local"),
+    MODEL_ROUTER_TARGET: "codex", MODEL_ROUTER_STATE_DIR: stateDir, CODEX_ROUTER_STATE_DIR: stateDir,
+    MODEL_ROUTER_PORT: String(routerPort), MODEL_ROUTER_GATEWAY_PORT: String(gatewayPort),
+    MODEL_ROUTER_OAUTH_PORT: String(oauthPort), MODEL_ROUTER_API_PORT: String(apiPort),
+    MODEL_ROUTER_GROK_OAUTH_PORT: String(grokOauthPort), MODEL_ROUTER_DEVIN_CLI_PORT: String(devinPort),
+    MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: String(antigravityPort), MODEL_ROUTER_LOCAL_BASE_URL: "http://127.0.0.1:9/v1",
+    // Native forwarding is deliberately disabled by --no-discovery, even for
+    // an explicit local base. Enable it only inside these synthetic homes;
+    // all transport/health ports and the sole upstream are fixture-owned.
+    CODEX_ROUTER_SHOW_ALL_MODELS: "0", CODEX_ROUTER_NO_DISCOVERY: "0", CODEX_ROUTER_SERVICE_PLATFORM: "test-fixture",
+    CODEX_NATIVE_BASE_URL: `http://127.0.0.1:${nativePort}/native`, MODEL_ROUTER_NATIVE_TRANSPORT: "http",
+    MODEL_ROUTER_LITELLM_BIN: process.execPath, CODEX_ROUTER_GATEWAY_RESTARTS: "0",
+    MODEL_ROUTER_SHUTDOWN_DRAIN_MS: "100", MODEL_ROUTER_SHUTDOWN_FLUSH_MS: "100", NODE_USE_ENV_PROXY: "0",
+  });
   const child = spawn(process.execPath, [path.join(root, "src", "start.mjs")], {
-    cwd: root,
-    env: {
-      ...process.env,
-      MODEL_ROUTER_TARGET: "codex",
-      MODEL_ROUTER_STATE_DIR: stateDir,
-      MODEL_ROUTER_PORT: String(routerPort),
-      MODEL_ROUTER_GATEWAY_PORT: String(gatewayPort),
-      MODEL_ROUTER_OAUTH_PORT: String(oauthPort),
-      MODEL_ROUTER_API_PORT: String(apiPort),
-      MODEL_ROUTER_GROK_OAUTH_PORT: String(grokOauthPort),
-      MODEL_ROUTER_DEVIN_CLI_PORT: String(devinPort),
-      MODEL_ROUTER_LITELLM_BIN: process.execPath,
-    },
-    stdio: ["ignore", "ignore", "pipe"],
+    cwd: root, env, stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true,
   });
   let errors = "";
   child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk) => {
-    errors += chunk;
-  });
-
+  child.stderr.on("data", (chunk) => { errors += chunk; });
+  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
   try {
-    const exit = await waitForStartupExit(child, () => errors);
-    // Read the squatter before the teardown below closes it: the caller runs
-    // after this function returns, by which point it is gone either way.
-    return { exit, errors, devinPort, squatterHeldPort: squatter ? squatter.listening() : undefined };
+    const health = await eventually(async () => {
+      const response = await fetch(`${callerBaseUrl(routerPort, CALLER_KEY)}/health`, { signal: AbortSignal.timeout(500) });
+      return { status: response.status, body: await response.json() };
+    }, (value) => value.body.executionPlan && (curatedDevinModel
+      ? value.status === 503 && value.body.degraded.includes("gateway") && value.body.devinCli.reachable === !occupyDevinPort
+      : value.status === 200), child, () => errors);
+    await eventually(async () => errors, (value) => curatedDevinModel
+      ? value.includes("serving independent routes") : value.includes("ready (authenticated loopback endpoint)"), child, () => errors);
+    let devinHealth;
+    if (curatedDevinModel && !occupyDevinPort) {
+      const response = await fetch(`http://127.0.0.1:${devinPort}/health`, {
+        headers: { Authorization: `Bearer ${INTERNAL_KEY}` }, signal: AbortSignal.timeout(500),
+      });
+      assert.equal(response.status, 200);
+      devinHealth = await response.json();
+      assert.equal(devinHealth.service, "codex-router-devin-cli-forwarder");
+    }
+    const independent = await fetch(`${callerBaseUrl(routerPort, CALLER_KEY)}/responses`, {
+      method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer synthetic-native-credential" },
+      body: JSON.stringify({ model: "gpt-6.1-sol", input: "show independent route availability", stream: false }),
+      signal: AbortSignal.timeout(2_000),
+    });
+    assert.equal(independent.status, 200, errors);
+    assert.match(await independent.text(), /INDEPENDENT_NATIVE_OK/);
+    assert.equal(nativeRequests.length, 1);
+    assert.equal(nativeRequests[0].url, "/native/responses");
+    assert.equal(nativeRequests[0].body.model, "gpt-6.1-sol");
+    assert.equal(child.exitCode, null, "degraded dependencies must leave the owned supervisor serving");
+    const squatterHeldPort = squatter?.server.listening;
+    const exit = await controlledStop(child, exited);
+    assert.deepEqual(exit, { code: 0, signal: null }, errors);
+    await assert.rejects(fetch(`http://127.0.0.1:${routerPort}/health/live`, { signal: AbortSignal.timeout(500) }), "owned Router must release its listener after shutdown");
+    if (curatedDevinModel && !occupyDevinPort) {
+      await assert.rejects(fetch(`http://127.0.0.1:${devinPort}/health`, { signal: AbortSignal.timeout(500) }), "owned Devin child must release its listener after shutdown");
+    }
+    return { exit, errors, health, devinHealth, squatterHeldPort };
   } finally {
-    // start.mjs writes into `stateDir` and re-creates it on the way (every
-    // state writer here does `mkdirSync` with `recursive` before it appends),
-    // so removing the tree while it is still winding down races its own
-    // teardown: `rmSync` unlinks the children, the child re-creates one, and
-    // the final `rmdir` fails with ENOTEMPTY. Wait for it to be gone first.
-    await stopChild(child);
+    if (child.exitCode === null && child.signalCode === null) {
+      try { await controlledStop(child, exited); } catch { child.kill("SIGKILL"); await exited; }
+    }
     if (squatter) await squatter.close();
-    rmSync(rootDir, { recursive: true, force: true });
+    native.closeAllConnections();
+    await new Promise((resolve) => native.close(resolve));
+    const resolved = path.resolve(directory);
+    assert.ok(resolved.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`) && path.basename(resolved).startsWith("model-router-devin-gate-"));
+    rmSync(resolved, { recursive: true, force: true });
   }
 }
 
-// SIGTERM is not a signal on Windows: Node emulates it with TerminateProcess,
-// so a process that is already exiting on its own may never be reachable. Fall
-// back to SIGKILL rather than waiting out a run.
-async function stopChild(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGTERM");
-  const exited = new Promise((resolve) => child.once("exit", resolve));
-  let hardStop;
-  await Promise.race([
-    exited,
-    new Promise((resolve) => {
-      hardStop = setTimeout(resolve, 5_000);
-    }),
-  ]);
-  clearTimeout(hardStop);
-  if (child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGKILL");
-    await exited;
-  }
-}
+test("an install with no curated Devin model spawns no forwarder and binds no port", { timeout: 20_000 }, async () => {
+  const { health, errors, squatterHeldPort } = await runStartup({ occupyDevinPort: true });
+  assert.deepEqual(health.body.executionPlan.services, []);
+  assert.deepEqual(health.body.degraded, []);
+  assert.equal(health.body.devinCli.enabled, false);
+  assert.doesNotMatch(errors, /\[devin-cli\]|Devin CLI forwarder|LiteLLM gateway/);
+  assert.equal(squatterHeldPort, true, "the unselected route must not take the held Devin port");
+});
 
-test(
-  "an install with no curated Devin model spawns no forwarder and binds no port",
-  { timeout: 120_000 },
-  async () => {
-    // The Devin port is held by this test. A forwarder that was spawned would
-    // die on EADDRINUSE and abort startup by name, so reaching the gateway
-    // failure instead is proof that nothing was spawned and nothing was bound.
-    const { exit, errors, squatterHeldPort } = await runStartup({ occupyDevinPort: true });
+test("a curated Devin model spawns the forwarder and waits on its health", { timeout: 20_000 }, async () => {
+  const { health, errors } = await runStartup({ curatedDevinModel: true });
+  assert.deepEqual(health.body.executionPlan.services, ["devin", "gateway"]);
+  assert.deepEqual(health.body.degraded, ["gateway"]);
+  assert.equal(health.body.devinCli.reachable, true);
+  assert.match(errors, /\[devin-cli\] listening/);
+  assert.match(errors, /dependency unavailable: LiteLLM gateway exited before becoming healthy\./);
+});
 
-    assert.doesNotMatch(errors, /\[devin-cli\]/, errors);
-    assert.doesNotMatch(errors, /Devin CLI forwarder/, errors);
-    assert.match(errors, /startup failed: LiteLLM gateway exited before becoming healthy\./, errors);
-    assert.equal(exit.code, 1, errors);
-    assert.equal(squatterHeldPort, true, "something took the Devin port from this test");
-  },
-);
+test("a selected Devin bind failure names its degraded dependency while native routes stay available", { timeout: 20_000 }, async () => {
+  const { health, errors, squatterHeldPort } = await runStartup({ curatedDevinModel: true, occupyDevinPort: true });
+  assert.deepEqual(health.body.executionPlan.services, ["devin", "gateway"]);
+  assert.deepEqual(health.body.degraded, ["devinCli", "gateway"]);
+  assert.equal(health.body.devinCli.reachable, false);
+  assert.match(errors, /\[devin-cli\] cannot listen: .*already in use/);
+  assert.match(errors, /dependency unavailable: Devin CLI forwarder exited before becoming healthy\./);
+  assert.equal(squatterHeldPort, true);
+});
 
-test(
-  "a curated Devin model spawns the forwarder and waits on its health",
-  { timeout: 120_000 },
-  async () => {
-    const { exit, errors } = await runStartup({ curatedDevinModel: true });
-
-    // The forwarder announces itself on stderr when its listener is up, and
-    // startup only reaches the gateway once every forwarder health wait has
-    // resolved -- so both halves of "spawned and waited on" are asserted.
-    assert.match(errors, /\[devin-cli\] listening/, errors);
-    assert.match(errors, /startup failed: LiteLLM gateway exited before becoming healthy\./, errors);
-    assert.equal(exit.code, 1, errors);
-  },
-);
-
-test(
-  "a curated Devin model that cannot bind its port still fails startup by name",
-  { timeout: 120_000 },
-  async () => {
-    // Gating must not turn a real failure into a silent skip: when the provider
-    // is routed, an unbindable forwarder aborts startup naming itself, exactly
-    // as it did when the spawn was unconditional.
-    const { exit, errors } = await runStartup({ curatedDevinModel: true, occupyDevinPort: true });
-
-    assert.match(errors, /startup failed: Devin CLI forwarder exited before becoming healthy\./, errors);
-    assert.doesNotMatch(errors, /LiteLLM gateway exited before becoming healthy/, errors);
-    assert.equal(exit.code, 1, errors);
-  },
-);
-
-test("neither secret is echoed while the gate is being decided", { timeout: 120_000 }, async () => {
-  const { errors } = await runStartup({ curatedDevinModel: true });
-  assert.doesNotMatch(errors, /devin-gate-internal-key-with-sufficient-length/);
-  assert.doesNotMatch(errors, /devin-gate-caller-key-with-sufficient-length/);
+test("neither secret is echoed while the gate is being decided", { timeout: 20_000 }, async () => {
+  const { errors, health } = await runStartup({ curatedDevinModel: true });
+  assert.doesNotMatch(errors, new RegExp(`${INTERNAL_KEY}|${CALLER_KEY}`));
+  assert.doesNotMatch(JSON.stringify(health), new RegExp(`${INTERNAL_KEY}|${CALLER_KEY}`));
 });

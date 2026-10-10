@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 test("drift detection triggers republish with new arbitrary native in merged output", async () => {
   // Create a temporary state directory
@@ -17,6 +19,7 @@ test("drift detection triggers republish with new arbitrary native in merged out
   const originalStateDir = process.env.MODEL_ROUTER_STATE_DIR;
   const originalCodexHome = process.env.CODEX_HOME;
   const originalTarget = process.env.MODEL_ROUTER_TARGET;
+  const originalNoDiscovery = process.env.CODEX_ROUTER_NO_DISCOVERY;
 
   try {
     // Set up environment
@@ -28,6 +31,13 @@ test("drift detection triggers republish with new arbitrary native in merged out
     const { nativeCatalogDriftDetected, republishOnNativeDrift } = await import("../src/native-catalog-drift.mjs");
     const { codexBinaryFingerprint, codexVersion } = await import("../src/codex-binary.mjs");
     const { NATIVE_CATALOG_PATH, MERGED_CATALOG_PATH, CONFIG_PATH } = await import("../src/paths.mjs");
+
+    // Module imports cache path constants. Fail before any write if another
+    // test imported this module before the isolated environment was set.
+    assert.equal(CONFIG_PATH, path.join(codexHome, "config.toml"));
+    assert.equal(NATIVE_CATALOG_PATH, path.join(stateDir, "native-models.json"));
+    assert.equal(MERGED_CATALOG_PATH, path.join(stateDir, "merged-models.json"));
+    process.env.CODEX_ROUTER_NO_DISCOVERY = "0";
 
     // Create minimal managed config so codexIntegrationInstalled returns true
     writeFileSync(CONFIG_PATH, "# BEGIN codex-router-managed\nopenai_base_url = \"http://test\"\n# END codex-router-managed\n");
@@ -119,8 +129,8 @@ test("drift detection triggers republish with new arbitrary native in merged out
     }
 
     // NOW TEST ACTUAL REPUBLISH: Call republishOnNativeDrift()
-    // This should refresh the account cache, detect drift, and run the full
-    // publish path in that order.
+    // Exercise the catalog writer through the explicit fixture publisher.
+    // The default production publisher separately verifies service adoption.
     const republished = await republishOnNativeDrift({
       refreshAccountCatalog: async () => {
         writeFileSync(
@@ -129,15 +139,16 @@ test("drift detection triggers republish with new arbitrary native in merged out
         );
         return { status: "updated" };
       },
+      refreshTargetPicker: async () => (await import("../src/target-integration.mjs")).refreshTargetPickerIfInstalled(),
     });
-    
+
     // Republish should have succeeded
     assert.equal(republished, true, "republish succeeded");
 
     // VERIFY: merged-models.json or native-models.json should now contain NEW arbitrary native
     const updated = JSON.parse(readFileSync(NATIVE_CATALOG_PATH, "utf8"));
     const updatedSlugs = updated.models.map(m => m.slug);
-    
+
     assert.ok(
       updatedSlugs.includes("gpt-7-prime"),
       "NEW arbitrary native (gpt-7-prime) appears in native-models.json after republish"
@@ -154,7 +165,9 @@ test("drift detection triggers republish with new arbitrary native in merged out
     else delete process.env.CODEX_HOME;
     if (originalTarget !== undefined) process.env.MODEL_ROUTER_TARGET = originalTarget;
     else delete process.env.MODEL_ROUTER_TARGET;
-    
+    if (originalNoDiscovery !== undefined) process.env.CODEX_ROUTER_NO_DISCOVERY = originalNoDiscovery;
+    else delete process.env.CODEX_ROUTER_NO_DISCOVERY;
+
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
@@ -244,4 +257,48 @@ test("routed agent startup drift detection fails closed on inactive or uncertain
     false,
     "an uncertain config read must not trigger repair",
   );
+});
+
+test("account invalidation reaches the fixed catalog updater without stale validators", async () => {
+  const { republishOnNativeDrift } = await import("../src/native-catalog-drift.mjs");
+  let received;
+  const result = await republishOnNativeDrift({
+    accountChanged: true,
+    refreshAccountCatalog: async (options) => { received = options; return { status: "failed" }; },
+    nativeDriftDetected: () => false,
+    routedAgentDriftDetected: () => false,
+    refreshTargetPicker: () => { throw new Error("failed discovery must preserve the current publication"); },
+  });
+  assert.deepEqual(received, { force: true, conditional: false });
+  assert.equal(result, false);
+});
+
+test("the drift fixture rejects cached foreign paths before its first write", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "native-drift-isolation-"));
+  try {
+    const home = path.join(directory, "prior-home");
+    const state = path.join(directory, "prior-state");
+    mkdirSync(home);
+    mkdirSync(state);
+    const config = path.join(home, "config.toml");
+    const capture = path.join(state, "native-models.json");
+    writeFileSync(config, "preserve the previous config");
+    writeFileSync(capture, "preserve the previous capture");
+    const preload = path.join(directory, "preload.mjs");
+    writeFileSync(preload, `import ${JSON.stringify(new URL("../src/paths.mjs", import.meta.url).href)};\n`);
+    const childEnvironment = { ...process.env, CODEX_HOME: home, MODEL_ROUTER_STATE_DIR: state, MODEL_ROUTER_TARGET: "codex" };
+    delete childEnvironment.NODE_TEST_CONTEXT;
+    const result = spawnSync(process.execPath, [
+      "--import", pathToFileURL(preload).href, "--test", "--test-name-pattern=^drift detection triggers republish",
+      fileURLToPath(import.meta.url),
+    ], {
+      encoding: "utf8", windowsHide: true, timeout: 30_000,
+      env: childEnvironment,
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1, "a cached path from another home must fail the fixture isolation guard");
+    assert.match(result.stdout + result.stderr, /ERR_ASSERTION/);
+    assert.equal(readFileSync(config, "utf8"), "preserve the previous config");
+    assert.equal(readFileSync(capture, "utf8"), "preserve the previous capture");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

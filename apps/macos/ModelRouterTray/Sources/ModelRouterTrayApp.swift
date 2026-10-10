@@ -4165,14 +4165,16 @@ final class RouterScriptWatchdog: @unchecked Sendable {
   /// Electron's discovery budget (`{ timeoutMs: 45_000 }` in
   /// apps/control-center/electron/ipc.mjs). One provider HTTP round trip.
   static let discoveryTimeout: TimeInterval = 45
-  /// Electron's `CATALOG_MUTATION_TIMEOUT_MS` (1_320_000). A restart-bearing
-  /// curation reserves two complete 640s forward/rollback epochs and keeps the
-  /// remaining owner margin for process-tree cleanup and UI reporting.
-  static let catalogMutationTimeout: TimeInterval = 1_320
-  /// Curation's internal transaction expires before its 1,320s UI owner.
-  static let catalogPublicationOperationTimeout: TimeInterval = 1_280
-  /// Generic control owns one more nested tree around the 1,280s transaction.
-  static let catalogControlOperationTimeout: TimeInterval = 1_300
+  /// Electron's `CATALOG_MUTATION_TIMEOUT_MS` (45 minutes plus 20 seconds).
+  /// Dependency preparation, adoption, publication and independent rollback
+  /// share a finite transaction; the UI leaves the Node owner cleanup time.
+  static let catalogMutationTimeout: TimeInterval = 2_720
+  /// Direct curation uses the backend's complete 45-minute transaction cap.
+  static let catalogPublicationOperationTimeout: TimeInterval = 2_700
+  /// The bin/control owner keeps ten seconds beyond this 45-minute child
+  /// transaction. operationOwnerTimeout exports that owner deadline so a
+  /// bounded UI child does not add another process-tree cleanup contraction.
+  static let catalogControlOperationTimeout: TimeInterval = 2_700
   /// The Node owner receives this margin beyond its cooperative child budget
   /// to terminate a complete process tree before the UI watchdog fires.
   static let processTreeCleanupReserve: TimeInterval = 10
@@ -4213,12 +4215,14 @@ final class RouterScriptWatchdog: @unchecked Sendable {
     return [
       "set-apply",
       "credential",
+      "key-pool",
       "auth-mode",
       "subagents",
       "picker",
       "vision-bridge",
       "local-models",
       "signed-routing",
+      "generic-providers",
     ].contains(command)
   }
 

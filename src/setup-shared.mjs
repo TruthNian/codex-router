@@ -308,5 +308,5 @@ export function configureProvider(provider, { guided, providerKeyCommand }) {
   if (!confirm(`Enter a ${provider.displayName} key securely now?`)) {
     throw new Error(`${provider.displayName} setup was cancelled.`);
   }
-  run(process.execPath, [path.join(SOURCE_ROOT, "src", "provider-key.mjs"), provider.id, "set"]);
+  run(process.execPath, [path.join(SOURCE_ROOT, "src", "provider-key.mjs"), provider.id, "set", "--stage"]);
 }

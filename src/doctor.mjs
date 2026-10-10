@@ -20,13 +20,17 @@ import {
   RUNTIME_PROVIDERS,
   RUNTIME_PROVIDER_WARNINGS,
   USER_MODELS_SKIPPED,
+  providerForModel,
 } from "./model-registry.mjs";
+import { createExecutionPlan, routeExecution } from "./route-execution-plan.mjs";
 import { grokOAuthStatus } from "./grok-oauth-status.mjs";
 import {
   antigravityOAuthHealth,
+  antigravityOAuthStatus,
   repairAntigravityOAuthPermissions,
 } from "./antigravity-oauth-status.mjs";
-import { kimiOAuthHealth } from "./oauth-status.mjs";
+import { kimiOAuthHealth, kimiOAuthStatus } from "./oauth-status.mjs";
+import { devinCliStatus } from "./devin-cli-status.mjs";
 import {
   applyMultiAgentCapabilities,
   readMultiAgentSettings,
@@ -74,6 +78,7 @@ import {
   resolveStoredCredential,
 } from "./provider-api-key-routing.mjs";
 import { genericProviderConfigured } from "./generic-provider-readiness.mjs";
+import { readGenericProviders } from "./generic-provider-state.mjs";
 import { trustedSearchProviderDescriptor } from "./search-sidecar-policy.mjs";
 import { readSearchSidecarState } from "./search-sidecar-state.mjs";
 import { providerNeedsCuration } from "./provider-onboarding.mjs";
@@ -81,7 +86,7 @@ import { stateOwnershipStatus } from "./state-owner.mjs";
 import {
   canonicalProviderId,
   providerSelectionStatus,
-  selectedConfiguredListedModels,
+  selectedListedModels,
 } from "./provider-selection.mjs";
 import { resolveVisionEngine } from "./vision-bridge.mjs";
 import { installedNativeVisionEngines } from "./vision-engines.mjs";
@@ -114,6 +119,8 @@ import { serviceProxyOptInProblem } from "./proxy-environment.mjs";
 const checks = [];
 const add = (status, name, detail, fix) => checks.push({ status, name, detail, fix });
 const jsonOutput = process.argv.includes("--json");
+const includeAllProviders = process.argv.includes("--all");
+const credentialDiscoveryOff = discoveryDisabled();
 const homebrewManaged = isHomebrewManaged();
 const usesBundledVenv = !process.env.MODEL_ROUTER_LITELLM_BIN &&
   !(TARGET === "codex" &&
@@ -305,9 +312,10 @@ function repair() {
 }
 
 if (process.argv.includes("--help")) {
-  process.stdout.write(`Usage: doctor [--json] [--fix [--migrate-known]]
+  process.stdout.write(`Usage: doctor [--json] [--all] [--fix [--migrate-known]]
 
-Checks the complete Codex Router installation without printing credentials.
+Checks the Codex Router installation and enabled providers without printing credentials.
+--all also checks unselected providers and their credential inventory.
 --fix reinstalls generated files, configuration, and the background service.
 Known older routers are migrated only with the explicit --migrate-known flag.
 `);
@@ -444,6 +452,63 @@ add(
 );
 
 let selection = { providers: [], explicit: false };
+let apiKeyPools;
+let poolAuthoritySnapshot;
+const providerReadiness = new Map();
+
+function providerInDiagnosticScope(providerId) {
+  return includeAllProviders || selection.providers.includes(providerId);
+}
+
+function diagnosticPoolSnapshot() {
+  if (apiKeyPools) return apiKeyPools;
+  apiKeyPools = providerApiKeyPoolsSnapshot(credentialDiscoveryOff
+    ? {}
+    : {
+        resolveCredential: (providerId, credentialId) => {
+          // The pool document is metadata. A disabled pool must not cause its
+          // referenced credential to be opened merely to diagnose an active one.
+          if (!providerInDiagnosticScope(providerId)) return undefined;
+          const provider = PROVIDERS.get(providerId);
+          return provider ? resolveStoredCredential(provider, credentialId) : undefined;
+        },
+      });
+  poolAuthoritySnapshot = {
+    configured: apiKeyPools.configured,
+    valid: apiKeyPools.valid,
+    providers: Object.fromEntries(
+      Object.entries(apiKeyPools.providers).map(([providerId, pool]) => [
+        providerId,
+        { configured: true, valid: true, readiness: pool.readiness },
+      ]),
+    ),
+  };
+  return apiKeyPools;
+}
+
+function diagnosticProviderReadiness(provider) {
+  if (providerReadiness.has(provider.id)) return providerReadiness.get(provider.id);
+  diagnosticPoolSnapshot();
+  const readiness = effectiveProviderCredentialStatus(provider, {
+    persistent: true,
+    poolAuthoritySnapshot,
+  });
+  providerReadiness.set(provider.id, readiness);
+  return readiness;
+}
+
+function routedProviderConfigured(providerId) {
+  if (credentialDiscoveryOff) return false;
+  const provider = RUNTIME_PROVIDERS.get(providerId);
+  if (!provider) return false;
+  if (provider.generic === true) return genericProviderConfigured(provider.id);
+  if (provider.kind !== "oauth") return diagnosticProviderReadiness(provider).configured;
+  if (provider.id === "kimi-oauth") return kimiOAuthStatus().configured;
+  if (provider.id === "grok-oauth") return grokOAuthStatus().configured;
+  if (provider.id === "antigravity-oauth") return antigravityOAuthStatus().configured;
+  if (provider.id === "devin-cli") return devinCliStatus().configured;
+  return false;
+}
 let requiredRoutedModels = [];
 let catalogRoutedModels = [];
 let requiredModels = new Set();
@@ -471,7 +536,15 @@ try {
   selection = providerSelectionStatus();
   idleInstall =
     selection.explicit && selection.providers.length === 0 && discoveryDisabled();
-  requiredRoutedModels = selectedConfiguredListedModels();
+  // Filter selection before resolving readiness. The general configured scan
+  // also discovers disabled providers, which a default doctor must not read.
+  const configuredSelected = new Map();
+  requiredRoutedModels = selectedListedModels().filter((model) => {
+    if (!configuredSelected.has(model.provider)) {
+      configuredSelected.set(model.provider, routedProviderConfigured(model.provider));
+    }
+    return configuredSelected.get(model.provider);
+  });
   catalogRoutedModels = routedTransportActive ? requiredRoutedModels : [];
   requiredModels = new Set(catalogRoutedModels.map((model) => model.slug));
   // Registry selection and generic providers are two lists. A Poe-only
@@ -517,6 +590,13 @@ try {
   );
 }
 
+const diagnosticExecutionPlan = createExecutionPlan({
+  models: MODELS,
+  providerForModel,
+  routeEnabled: (model) => selection.providers.includes(model.provider) ||
+    RUNTIME_PROVIDERS.get(model.provider)?.generic === true,
+});
+const gatewayRequired = diagnosticExecutionPlan.needsGateway;
 let catalogModels = [];
 let catalogReadable = false;
 try {
@@ -590,6 +670,7 @@ let unroutable = [];
 try {
   const rendered = readFileSync(LITELLM_CONFIG_PATH, "utf8");
   unroutable = catalogRoutedModels
+    .filter((model) => routeExecution(model, { providerForModel }).transport === "litellm")
     .filter((model) => !rendered.includes(`model_name: "${model.gatewayModel}"`))
     .map((model) => model.slug);
 } catch {
@@ -801,9 +882,9 @@ add(
   "Change per-model visibility in the desktop Models settings.",
 );
 add(
-  existsSync(LITELLM_CONFIG_PATH) ? "ok" : "fail",
+  !gatewayRequired || existsSync(LITELLM_CONFIG_PATH) ? "ok" : "fail",
   "Generated gateway config",
-  LITELLM_CONFIG_PATH,
+  gatewayRequired ? LITELLM_CONFIG_PATH : "not required by the selected routes",
   "Run ./bin/doctor --fix.",
 );
 
@@ -818,7 +899,9 @@ add(
 // without the bundled `.venv`, and a fresh checkout has no venv until the
 // installer runs.
 let venvCheck;
-if (usesBundledVenv) {
+if (!gatewayRequired && !includeAllProviders) {
+  venvCheck = { status: "ok", detail: "not required by the selected routes" };
+} else if (usesBundledVenv) {
   const venvProblem = bundledVenvProblem();
   venvCheck = venvProblem
     ? {
@@ -951,7 +1034,6 @@ try {
 // provider's credential. Under --no-discovery the resolvers answer nothing by
 // design, so 26 rows of "not configured" would report the guard's output as
 // though it were the machine's state. One row says what is actually true.
-const credentialDiscoveryOff = discoveryDisabled();
 if (credentialDiscoveryOff) {
   add(
     "warn",
@@ -969,7 +1051,7 @@ if (credentialDiscoveryOff) {
     );
   }
 }
-if (!credentialDiscoveryOff) {
+if (!credentialDiscoveryOff && providerInDiagnosticScope("kimi-oauth")) {
   const kimiHealth = kimiOAuthHealth();
   const kimiSelected = selection.providers.includes("kimi-oauth");
   // An expired access token is a normal, recoverable state: the request path
@@ -988,6 +1070,8 @@ if (!credentialDiscoveryOff) {
     kimiHealth.detail,
     kimiHealth.fix,
   );
+}
+if (!credentialDiscoveryOff && providerInDiagnosticScope("grok-oauth")) {
   const grokOauth = grokOAuthStatus();
   const grokCli = grokCliPreflight();
   const grokOauthReady = grokOauth.configured && grokCli.runnable;
@@ -1001,6 +1085,8 @@ if (!credentialDiscoveryOff) {
         : `not configured; ${grokOauth.setup}`,
     !grokCli.runnable ? grokCli.fix : "Run grok login, then rerun the doctor.",
   );
+}
+if (!credentialDiscoveryOff && providerInDiagnosticScope("antigravity-oauth")) {
   const antigravityHealth = antigravityOAuthHealth();
   const antigravitySelected = selection.providers.includes("antigravity-oauth");
   const antigravityStatus = !antigravitySelected
@@ -1016,19 +1102,14 @@ if (!credentialDiscoveryOff) {
   );
 }
 
-const apiKeyPools = providerApiKeyPoolsSnapshot(credentialDiscoveryOff
-  ? {}
-  : {
-      resolveCredential: (providerId, credentialId) => {
-        const provider = PROVIDERS.get(providerId);
-        return provider ? resolveStoredCredential(provider, credentialId) : undefined;
-      },
-    });
-if (apiKeyPools.configured) {
-  const poolCount = Object.keys(apiKeyPools.providers).length;
-  const credentialCount = Object.values(apiKeyPools.providers)
+diagnosticPoolSnapshot();
+const scopedPools = Object.entries(apiKeyPools.providers)
+  .filter(([providerId]) => providerInDiagnosticScope(providerId));
+if (apiKeyPools.configured && (!apiKeyPools.valid || scopedPools.length)) {
+  const poolCount = scopedPools.length;
+  const credentialCount = scopedPools.map(([, pool]) => pool)
     .reduce((total, pool) => total + pool.credentials.length, 0);
-  const unusable = Object.entries(apiKeyPools.providers)
+  const unusable = scopedPools
     .filter(([, pool]) => pool.readiness?.usable !== true)
     .map(([providerId, pool]) => ({
       providerId,
@@ -1077,21 +1158,6 @@ if (apiKeyPools.configured) {
     "Restore an eligible resolvable credential, or delete the pool to return to the legacy single-key path.",
   );
 }
-const poolAuthoritySnapshot = {
-  configured: apiKeyPools.configured,
-  valid: apiKeyPools.valid,
-  providers: Object.fromEntries(
-    Object.entries(apiKeyPools.providers).map(([providerId, pool]) => [
-      providerId,
-      {
-        configured: true,
-        valid: true,
-        readiness: pool.readiness,
-      },
-    ]),
-  ),
-};
-
 for (const warning of RUNTIME_PROVIDER_WARNINGS) {
   add(
     "fail",
@@ -1139,6 +1205,20 @@ for (const provider of RUNTIME_PROVIDERS.values()) {
   }
 }
 
+if (includeAllProviders) {
+  let inactiveGenericProviders = [];
+  try {
+    inactiveGenericProviders = readGenericProviders({ reservedProviderIds: PROVIDERS })
+      .filter((provider) => provider.enabled !== true);
+  } catch {
+    // Registry loading already reports malformed descriptors above. An
+    // inventory read must not replace that diagnosis with an uncaught error.
+  }
+  for (const provider of inactiveGenericProviders) {
+    add("ok", `${provider.displayName} generic provider`, "disabled; no routes are published");
+  }
+}
+
 if (TARGET === "codex" && existsSync(SEARCH_SIDECARS_PATH)) {
   try {
     for (const binding of readSearchSidecarState().bindings) {
@@ -1174,10 +1254,8 @@ if (TARGET === "codex" && existsSync(SEARCH_SIDECARS_PATH)) {
 for (const provider of PROVIDERS.values()) {
   if (provider.kind !== "openai-compatible") continue;
   if (credentialDiscoveryOff) continue;
-  const status = effectiveProviderCredentialStatus(provider, {
-    persistent: true,
-    poolAuthoritySnapshot,
-  });
+  if (!providerInDiagnosticScope(provider.id)) continue;
+  const status = diagnosticProviderReadiness(provider);
   const credentialType = credentialLabel(provider);
   const credentialNoun = credentialType === "API key" ? "key" : credentialType.toLowerCase();
   // A keyless provider has no key to name, so calling its row a "key" and

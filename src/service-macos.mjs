@@ -263,17 +263,23 @@ if (!new Set(["install", "uninstall", "start", "stop", "restart", "status", "ren
 if (command === "render") {
   process.stdout.write(plist());
 } else if (command === "status") {
-  const description = loaded();
+  const inheritedDeadline = Number(process.env.CODEX_ROUTER_OPERATION_DEADLINE_MS);
+  const remaining = Number.isSafeInteger(inheritedDeadline) && inheritedDeadline > 0
+    ? Math.min(10_000, inheritedDeadline - Date.now()) : 10_000;
+  const probe = remaining > 0 ? probeLoaded(service, remaining) : { state: "unknown" };
   const installed = existsSync(LAUNCH_AGENT_PATH);
-  const isLoaded = Boolean(description) && installed;
+  // A loaded job remains owned even if its plist was removed. Query failures
+  // establish neither absence nor an offline publication boundary.
+  const isLoaded = probe.state === "loaded";
   const state = isLoaded
-    ? description?.match(/state = ([^\n]+)/)?.[1]?.trim() || "loaded"
-    : "stopped";
+    ? probe.description?.match(/state = ([^\n]+)/)?.[1]?.trim() || "loaded"
+    : probe.state === "unknown" ? "unknown" : "stopped";
   process.stdout.write(
     `${JSON.stringify({
       installed,
       loaded: isLoaded,
       state,
+      ...(probe.state === "unknown" ? { statusUnknown: true } : {}),
     })}\n`,
   );
 } else if (command === "install") {

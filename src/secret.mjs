@@ -4,13 +4,10 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   statSync,
-  unlinkSync,
-  writeFileSync,
 } from "node:fs";
 
-import { protectPrivateFile } from "./file-security.mjs";
+import { protectPrivateFile, writePrivateFile } from "./file-security.mjs";
 import {
   CALLER_SECRET_PATH,
   CURSOR_PUBLIC_SECRET_PATH,
@@ -36,42 +33,35 @@ function validSecret(target) {
 
 function ensureSecret(target) {
   if (!validSecret(target)) {
-    const temporary = `${target}.tmp.${process.pid}`;
-    writeFileSync(temporary, `${randomBytes(48).toString("base64url")}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    try {
-      protectPrivateFile(temporary);
-      renameSync(temporary, target);
-      protectPrivateFile(target);
-    } catch (error) {
-      if (existsSync(temporary)) unlinkSync(temporary);
-      throw error;
-    }
+    writePrivateFile(target, `${randomBytes(48).toString("base64url")}\n`);
+    return true;
   }
+  return false;
 }
 
-function status(target) {
+function status(target, alreadyProtected = false) {
   const present = validSecret(target);
-  if (present) protectPrivateFile(target);
+  if (present && !alreadyProtected) protectPrivateFile(target);
   return {
     present,
     mode: present ? statSync(target).mode & 0o777 : null,
   };
 }
 
+const newlyProtected = new Set();
 if (command === "ensure") {
   mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
   chmodSync(STATE_DIR, 0o700);
-  ensureSecret(INTERNAL_SECRET_PATH);
-  ensureSecret(CALLER_SECRET_PATH);
-  ensureSecret(CURSOR_PUBLIC_SECRET_PATH);
+  for (const target of [INTERNAL_SECRET_PATH, CALLER_SECRET_PATH, CURSOR_PUBLIC_SECRET_PATH]) {
+    if (ensureSecret(target)) newlyProtected.add(target);
+  }
 }
 
-const internal = status(INTERNAL_SECRET_PATH);
-const caller = status(CALLER_SECRET_PATH);
-const cursorPublic = status(CURSOR_PUBLIC_SECRET_PATH);
+// Existing keys still get ACL repair on ensure and status. Keys published by
+// this invocation already carried the private temporary's ACL through rename.
+const internal = status(INTERNAL_SECRET_PATH, newlyProtected.has(INTERNAL_SECRET_PATH));
+const caller = status(CALLER_SECRET_PATH, newlyProtected.has(CALLER_SECRET_PATH));
+const cursorPublic = status(CURSOR_PUBLIC_SECRET_PATH, newlyProtected.has(CURSOR_PUBLIC_SECRET_PATH));
 process.stdout.write(
   `${JSON.stringify({
     present: internal.present && caller.present && cursorPublic.present,

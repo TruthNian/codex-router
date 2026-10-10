@@ -5,15 +5,13 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
 import { withAtomicStateLock } from "./atomic-state-lock.mjs";
 import { credentialPaths } from "./provider-credentials.mjs";
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import { normalizeGenericProviderId } from "./generic-provider-identity.mjs";
 import { PROVIDERS } from "./model-registry.mjs";
 import {
@@ -155,22 +153,7 @@ function atomicPrivateBytes(filePath, bytes, { directoryMode = 0o700 } = {}) {
   const directory = path.dirname(target);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, directoryMode);
-  const temporary = path.join(
-    directory,
-    `.${path.basename(target)}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`,
-  );
-  try {
-    writeFileSync(temporary, bytes, { mode: 0o600 });
-    protectPrivateFile(temporary);
-    renameSync(temporary, target);
-    protectPrivateFile(target);
-  } catch (error) {
-    try { unlinkSync(temporary); } catch (cleanupError) {
-      if (cleanupError?.code !== "ENOENT") error.cleanupError = cleanupError;
-    }
-    throw error;
-  }
-  return target;
+  return writePrivateFile(target, bytes);
 }
 
 function restoreMigrationTarget(target, before, after) {

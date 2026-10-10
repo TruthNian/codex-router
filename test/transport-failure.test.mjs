@@ -6,6 +6,8 @@ import {
   hasProviderTransportError,
   localTransportHost,
   providerTransportError,
+  providerTransportDeliveryState,
+  PROVIDER_DELIVERY_STATE_HEADER,
   transportFailureHost,
 } from "../src/transport-failure.mjs";
 
@@ -135,11 +137,12 @@ test("a non-transport error is not diagnosed", () => {
   assert.equal(describeTransportFailure(unknown), undefined);
 });
 
-test("provider transport markers carry only a safe type and code", () => {
+test("provider transport markers carry sanitized delivery evidence without host or message contents", () => {
   const error = connectTimeout();
   assert.deepEqual(providerTransportError(error), {
     type: "provider_transport_error",
     code: "UND_ERR_CONNECT_TIMEOUT",
+    deliveryState: "not_sent",
     message: "The provider connection failed before a response was available.",
   });
   assert.equal(
@@ -148,6 +151,26 @@ test("provider transport markers carry only a safe type and code", () => {
   );
   assert.equal(providerTransportError(new Error("application failure")), undefined);
   assert.equal(hasProviderTransportError("provider unavailable"), false);
+});
+
+test("a reset and a headers timeout remain ambiguous even before any response", () => {
+  for (const code of ["ECONNRESET", "UND_ERR_SOCKET", "UND_ERR_HEADERS_TIMEOUT"]) {
+    const cause = Object.assign(new Error("synthetic-private-upstream-detail"), { code, hostname: "private.example.test" });
+    const marker = providerTransportError(new TypeError("fetch failed", { cause }));
+    assert.equal(marker.deliveryState, "possibly_sent");
+    assert.doesNotMatch(JSON.stringify(marker), /synthetic-private|private\.example/);
+  }
+});
+
+test("only the known local forwarder's delivery header grants pre-send evidence", () => {
+  const bodyText = JSON.stringify({ error: { type: "provider_transport_error", code: "ECONNREFUSED", deliveryState: "not_sent" } });
+  assert.equal(PROVIDER_DELIVERY_STATE_HEADER, "x-codex-router-delivery-state");
+  assert.equal(providerTransportDeliveryState(bodyText), "possibly_sent", "origin body fields have no authority");
+  assert.equal(providerTransportDeliveryState(bodyText, { trustedDeliveryState: "not_sent" }), "not_sent");
+  for (const value of ["possibly_sent", "not_sent, possibly_sent", "unknown", "", undefined]) {
+    assert.equal(providerTransportDeliveryState(bodyText, { trustedDeliveryState: value }), "possibly_sent");
+  }
+  assert.equal(providerTransportDeliveryState("ordinary provider error", { trustedDeliveryState: "not_sent" }), undefined);
 });
 
 test("a host is found with no hostname field and no known pattern falls back", () => {

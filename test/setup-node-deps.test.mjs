@@ -5,15 +5,15 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+
+import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const PYTHON_AVAILABLE =
@@ -196,7 +196,7 @@ function withFreshGuidedSetup(
   verify,
   { npmStub = NPM_STUB_SUCCEEDS, models = "select-flash" } = {},
 ) {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-guided-deps-"));
+  const testRoot = setupFixtureRoot("codex-router-guided-deps-");
   const checkout = path.join(testRoot, "checkout");
   const fakeBin = path.join(testRoot, "bin");
   const stateDir = path.join(testRoot, "state");
@@ -230,7 +230,7 @@ function withFreshGuidedSetup(
       {
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...setupFixtureEnvironment(testRoot, stateDir),
           PATH: `${fakeBin}:${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`,
           CODEX_ROUTER_NPM_LOG: npmLog,
           CODEX_ROUTER_TEST_NODE_MODULES: path.join(root, "node_modules"),
@@ -274,7 +274,7 @@ test(
   "guided Antigravity prepares dependencies before browser auth and withdraws an unverified selection",
   { skip: process.platform === "win32" || !PYTHON_AVAILABLE },
   () => {
-    const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-antigravity-deps-"));
+    const testRoot = setupFixtureRoot("codex-router-antigravity-deps-");
     const checkout = path.join(testRoot, "checkout");
     const fakeBin = path.join(testRoot, "bin");
     const stateDir = path.join(testRoot, "state");
@@ -321,7 +321,7 @@ test(
         {
           encoding: "utf8",
           env: {
-            ...process.env,
+            ...setupFixtureEnvironment(testRoot, stateDir),
             PATH: `${fakeBin}:${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`,
             CODEX_ROUTER_NPM_LOG: npmLog,
             CODEX_ROUTER_TEST_NODE_MODULES: path.join(root, "node_modules"),
@@ -453,7 +453,7 @@ test(
     // hands out /var/... temp directories that resolve to /private/var/...,
     // where the two never match and the step silently does nothing.
     const testRoot = realpathSync(
-      mkdtempSync(path.join(os.tmpdir(), "codex-router-install-deps-")),
+      setupFixtureRoot("codex-router-install-deps-"),
     );
     try {
       const upstream = path.join(testRoot, "upstream");
@@ -500,7 +500,7 @@ test(
         encoding: "utf8",
         cwd: testRoot,
         env: {
-          ...process.env,
+          ...setupFixtureEnvironment(testRoot, path.join(testRoot, "state"), testRoot),
           PATH: `${fakeBin}:${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`,
           HOME: testRoot,
           CODEX_HOME: testRoot,

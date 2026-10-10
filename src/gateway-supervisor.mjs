@@ -20,13 +20,12 @@
 //
 // Three rules keep the restart from being worse than the crash:
 //
-//   1. **Only after the gateway has been healthy once.** A gateway that never
-//      came up is a configuration or dependency failure, and retrying it hides
-//      the message the operator needs. Startup failure is unchanged: it still
-//      throws out of `main()` and takes the service down.
+//   1. **A bounded startup allowance.** Failed initial readiness is visible;
+//      recovery runs while independent native/direct routes keep serving.
 //   2. **Bounded, in a window.** At most `maxRestarts` failures inside
-//      `windowMs`; past that the supervisor returns and the service exits so
-//      the OS supervisor performs a genuinely clean restart. Without the
+//      `windowMs`; past that the supervisor returns an exhausted result. The
+//      service owner decides whether independent routes remain available.
+//      Without the
 //      window, an install that crashes once a week would eventually exhaust a
 //      lifetime budget and stop being restarted at all; without the bound, a
 //      gateway that dies on every request becomes a spawn loop.
@@ -129,6 +128,21 @@ function reason(error) {
   return (error instanceof Error && error.message) || String(error);
 }
 
+// Cancel both watchdog and restart waits when their owning epoch ends. A
+// stopped child must not leave a referenced 15-second watchdog timer behind.
+function supervisorSleep(ms, signal) {
+  if (signal?.aborted || !(ms > 0)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener("abort", finish, { once: true });
+  });
+}
+
 // Resolve as soon as the child exits OR its liveness probe fails conclusively
 // `healthFailures` times in a row (or times out `healthStallFailures` times in
 // a row). The watchdog is marked stopped once the race is decided so it cannot
@@ -144,15 +158,19 @@ async function waitForExitOrUnhealthy(
     healthStallFailures,
     isShuttingDown,
     sleep,
+    signal,
   },
 ) {
   const exit = waitForExit(current, label).then((result) => ({ kind: "exit", result }));
   let stopped = false;
+  const watchdogController = new AbortController();
+  const watchdogSignal = signal
+    ? AbortSignal.any([signal, watchdogController.signal]) : watchdogController.signal;
   const watchdog = (async () => {
     let consecutive = 0;
     let conclusive = 0;
     while (!stopped) {
-      await sleep(healthIntervalMs);
+      await sleep(healthIntervalMs, watchdogSignal);
       if (stopped || isShuttingDown() || !isRunning(current)) return null;
       try {
         await healthCheck();
@@ -181,6 +199,7 @@ async function waitForExitOrUnhealthy(
   })();
   const winner = await Promise.race([exit, watchdog]);
   stopped = true;
+  watchdogController.abort();
   return winner ?? exit;
 }
 
@@ -201,7 +220,9 @@ export async function superviseGateway({
   stop = (target) => target.kill("SIGTERM"),
   isShuttingDown = () => false,
   log = (message) => console.error(message),
-  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  sleep = supervisorSleep,
+  signal,
+  onHealthy,
   now = Date.now,
   maxRestarts = DEFAULT_MAX_RESTARTS,
   windowMs = DEFAULT_RESTART_WINDOW_MS,
@@ -228,6 +249,7 @@ export async function superviseGateway({
           healthStallFailures,
           isShuttingDown,
           sleep,
+          signal,
         })
       : { kind: "exit", result: await waitForExit(current, label) };
     const exit = outcome.result;
@@ -257,7 +279,7 @@ export async function superviseGateway({
         `(restart ${failures.length} of ${maxRestarts}). The router stays up; ` +
         `requests fail with an upstream error until it answers again.`,
     );
-    await sleep(wait);
+    await sleep(wait, signal);
     if (isShuttingDown()) return { ...exit, restarts };
 
     if (outcome.kind === "unhealthy") {
@@ -272,6 +294,7 @@ export async function superviseGateway({
     }
 
     restarts += 1;
+    let healthy = false;
     try {
       current = start();
       // A replacement that is still running when its health budget runs out is
@@ -291,6 +314,7 @@ export async function superviseGateway({
         }
       }
       log(`${label} is healthy again after ${restarts} restart(s).`);
+      healthy = true;
     } catch (error) {
       log(`${label} did not come back: ${reason(error)}.`);
       // A child that is alive but never became healthy would leave the loop
@@ -298,5 +322,9 @@ export async function superviseGateway({
       // it, so end it here and let the next iteration count it.
       if (isRunning(current)) stop(current);
     }
+    // Application finalization can fail after an otherwise healthy restart
+    // (for example, an exact proof rollback was not confirmed). That is fatal
+    // to the service owner, not a reason to kill/retry this healthy dependency.
+    if (healthy && !isShuttingDown()) await onHealthy?.();
   }
 }

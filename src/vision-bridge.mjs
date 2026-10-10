@@ -1,8 +1,13 @@
+import { rejectGenerationRedirect } from "./generation-redirect.mjs";
 import { createHash } from "node:crypto";
 
 import { upstreamFailureKind } from "./error-translation.mjs";
 import { PROVIDERS } from "./model-registry.mjs";
 import { cooldownUntil, parseRateLimitHeaders } from "./rate-limit-headers.mjs";
+import {
+  isRetryableTransportError, NATIVE_RETRY_POLICY, sleep, transportDeliveryState,
+} from "./upstream-retry.mjs";
+import { PROVIDER_DELIVERY_STATE_HEADER, providerTransportDeliveryState } from "./transport-failure.mjs";
 
 // A text-only model cannot read a pasted screenshot, so the router reads it on
 // the model's behalf: every image part is sent to a vision-capable model the
@@ -893,7 +898,7 @@ function responsesBody(engine, imageUrl, { stream = false, effort, question = ""
 // Responses API as the gateway path, but has to go straight to the Codex
 // backend carrying the caller's own session headers, because the gateway has no
 // route or credential for a native slug.
-function describeRequest(engine, imageUrl, gatewayBase, gatewayHeaders, nativeCall, effort, question = "") {
+function describeRequest(engine, imageUrl, gatewayBase, gatewayHeaders, nativeCall, effort, question = "", responsesTarget) {
   // Pinned engines and pinned efforts are chosen separately, so the stored
   // level may be one this engine never offered. Sending it anyway is a 400
   // from the backend; dropping it just falls back to the model's own default.
@@ -940,40 +945,32 @@ function describeRequest(engine, imageUrl, gatewayBase, gatewayHeaders, nativeCa
     };
   }
   return {
-    url: `${gatewayBase}/responses`,
+    url: responsesTarget ?? `${gatewayBase}/responses`,
     headers: gatewayHeaders,
     body: responsesBody(engine, imageUrl, { effort: level, question }),
   };
 }
 
-// A read that fails once is not a read that cannot be done. The engine is a
-// rate-limited account on the other side of a network, so 429s, 502s and reset
-// connections happen -- and losing that image for the whole turn means the
-// operator pastes a screenshot and gets told it could not be read, for a reason
-// that would have gone away in a second. Everything here is a *transient*
-// answer: a refusal (401, 403, 404) or a bad request is not retried, because a
-// second identical call buys the identical refusal.
+// A vision read is a generation POST too. No description reaching the caller
+// does not establish that the engine never executed it. Retry positive
+// pre-send failures; ambiguous transport/status failures need the same explicit
+// availability policy as ordinary native turns. Observed empty completions and
+// short rate-limit refusals retain their separate bounded repair contracts.
 const VISION_RETRY_DELAYS_MS = [250, 1_000];
 
 function isTransientStatus(status) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-// A timeout is deliberately *not* transient. The per-attempt budget is already
-// two minutes; spending another two on the same slow engine turns one late
-// answer into a turn that never comes back.
-function isTransientError(error) {
-  return !["TimeoutError", "AbortError"].includes(error?.name);
-}
-
 export class VisionUpstreamError extends Error {
-  constructor(message, { status, failureKind, cooldownUntil: until, retryable = false } = {}) {
+  constructor(message, { status, failureKind, cooldownUntil: until, retryable = false, deliveryState } = {}) {
     super(message);
     this.name = "VisionUpstreamError";
     this.status = Number.isFinite(Number(status)) ? Number(status) : undefined;
     this.failureKind = failureKind;
     this.cooldownUntil = until;
     this.retryable = retryable;
+    this.deliveryState = deliveryState;
   }
 }
 
@@ -988,6 +985,7 @@ export async function describeImage({
   engine,
   imageUrl,
   gatewayBase,
+  responsesTarget,
   headers,
   nativeCall,
   effort,
@@ -996,19 +994,22 @@ export async function describeImage({
   fetchImpl = fetch,
   timeoutMs = DEFAULT_VISION_TIMEOUT_MS,
   retryDelaysMs = VISION_RETRY_DELAYS_MS,
+  deliveryPolicy = NATIVE_RETRY_POLICY,
+  trustedTransportResponse = false,
 }) {
   let lastTransient;
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     if (attempt) {
-      await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt - 1]));
-      // The caller went away between attempts; there is nobody to read for.
-      if (signal?.aborted) break;
+      await sleep(retryDelaysMs[attempt - 1], signal);
     }
+    // A departing caller does not wait out backoff or start another paid read.
+    signal?.throwIfAborted();
     try {
       return await attemptDescribe({
         engine,
         imageUrl,
         gatewayBase,
+        responsesTarget,
         headers,
         nativeCall,
         effort,
@@ -1016,6 +1017,8 @@ export async function describeImage({
         question,
         fetchImpl,
         timeoutMs,
+        deliveryPolicy,
+        trustedTransportResponse,
       });
     } catch (error) {
       if (error?.retryable !== true) throw error;
@@ -1030,6 +1033,7 @@ async function attemptDescribe({
   engine,
   imageUrl,
   gatewayBase,
+  responsesTarget,
   headers,
   nativeCall,
   effort,
@@ -1037,32 +1041,53 @@ async function attemptDescribe({
   question,
   fetchImpl,
   timeoutMs,
+  deliveryPolicy,
+  trustedTransportResponse,
 }) {
-  const request = describeRequest(engine, imageUrl, gatewayBase, headers, nativeCall, effort, question);
+  const request = describeRequest(engine, imageUrl, gatewayBase, headers, nativeCall, effort, question, responsesTarget);
   const timeout = AbortSignal.timeout(timeoutMs);
   let upstream;
   try {
     upstream = await fetchImpl(request.url, {
       method: "POST",
+      redirect: "manual",
       headers: request.headers,
       body: JSON.stringify(request.body),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
+    await rejectGenerationRedirect(upstream);
   } catch (error) {
     // The transport's own wording is kept: "fetch failed" against a loopback
     // engine is how an operator learns their own server is down, and replacing
-    // it with something tidier would throw that away. It is still retried --
-    // a server that is restarting answers the second ask.
+    // it with something tidier would throw that away. A reset may come after
+    // the complete POST was executed, so wording alone cannot permit replay.
+    if (error?.name === "AbortError") throw error;
     if (error?.name === "TimeoutError") {
-      throw new Error(`${engine.displayName || engine.slug} took too long to read it`);
+      throw new VisionUpstreamError(`${engine.displayName || engine.slug} took too long to read it`, {
+        deliveryState: "possibly_sent",
+      });
     }
     const message = error?.message || `${engine.displayName || engine.slug} could not be reached`;
-    if (isTransientError(error)) throw new TransientVisionError(message);
-    throw new Error(message);
+    const deliveryState = transportDeliveryState(error);
+    if (isRetryableTransportError(error) &&
+        (deliveryState === "not_sent" || deliveryPolicy === "availability")) {
+      throw new TransientVisionError(message, { deliveryState });
+    }
+    throw new VisionUpstreamError(message, { deliveryState });
   }
-  const bytes = Buffer.from(await upstream.arrayBuffer());
+  let bytes;
+  try {
+    bytes = Buffer.from(await upstream.arrayBuffer());
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    throw new VisionUpstreamError(`${engine.displayName || engine.slug} stopped partway through reading it`, {
+      deliveryState: "response_started",
+    });
+  }
   if (bytes.length > MAX_VISION_RESPONSE_BYTES) {
-    throw new Error(`${engine.displayName || engine.slug} returned an oversized response`);
+    throw new VisionUpstreamError(`${engine.displayName || engine.slug} returned an oversized response`, {
+      deliveryState: "response_started",
+    });
   }
   if (!upstream.ok) {
     // Never echo the gateway body: it can carry provider error text that names
@@ -1071,15 +1096,21 @@ async function attemptDescribe({
     const message = `${engine.displayName || engine.slug} answered HTTP ${upstream.status}`;
     const bodyText = bytes.toString("utf8");
     const failureKind = upstreamFailureKind({ status: upstream.status, bodyText });
+    const transportState = !engine.native && !engine.local && trustedTransportResponse
+      ? providerTransportDeliveryState(bodyText, {
+          trustedDeliveryState: upstream.headers.get(PROVIDER_DELIVERY_STATE_HEADER),
+        }) : undefined;
     const rateLimit = upstream.status === 429 ? parseRateLimitHeaders(upstream.headers) : undefined;
     const until = cooldownUntil(rateLimit);
     const metadata = {
       status: upstream.status,
       failureKind,
+      deliveryState: transportState ?? ([400, 401, 403, 404, 429].includes(upstream.status) ? "rejected" : "response_started"),
       ...(until ? { cooldownUntil: until } : {}),
     };
     const retryable =
       isTransientStatus(upstream.status) &&
+      (upstream.status === 429 || deliveryPolicy === "availability" || transportState === "not_sent") &&
       failureKind !== "out_of_usage" &&
       failureKind !== "entitlement" &&
       !until;
@@ -1088,16 +1119,29 @@ async function attemptDescribe({
   }
   let text;
   try {
-    text = request.stream
-      ? streamedResponseText(bytes.toString("utf8"))
-      : responseText(JSON.parse(bytes.toString("utf8")));
+    if (request.stream) {
+      text = streamedResponseText(bytes.toString("utf8"));
+    } else {
+      const payload = JSON.parse(bytes.toString("utf8"));
+      const responsesShape = payload?.object === "response" || Array.isArray(payload?.output) ||
+        typeof payload?.output_text === "string";
+      const status = typeof payload?.status === "string" ? payload.status : undefined;
+      // The buffered Responses contract has the same terminal verdict as SSE.
+      // A declared failure is not a completed empty reply to repair, and its
+      // partial text must never become apparently complete image evidence.
+      if (payload?.error || (responsesShape && status !== undefined && status !== "completed")) {
+        throw new VisionStreamError("the reader's buffered response failed before it finished");
+      }
+      text = responseText(payload);
+    }
   } catch (error) {
     // A stream that failed mid-flight says so. Anything else is a shape this
     // parser could not read at all. Neither message carries upstream text.
-    throw new Error(
+    throw new VisionUpstreamError(
       error instanceof VisionStreamError
         ? `${engine.displayName || engine.slug} stopped partway through reading it`
         : `${engine.displayName || engine.slug} returned an unreadable response`,
+      { deliveryState: "response_started" },
     );
   }
   // An empty reply is an engine that hiccupped, not one that refuses: worth
@@ -1105,6 +1149,7 @@ async function attemptDescribe({
   if (!text) {
     throw new TransientVisionError(
       `${engine.displayName || engine.slug} returned no description`,
+      { deliveryState: "completed" },
     );
   }
   return text.length > VISION_EVIDENCE_MAX_CHARS

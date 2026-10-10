@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { PROVIDER_SELECTION_PATH } from "./paths.mjs";
 import { PROVIDERS, providerNeedsNoKey } from "./model-registry.mjs";
 import { devinCliStatus } from "./devin-cli-status.mjs";
 import { grokOAuthStatus } from "./grok-oauth-status.mjs";
@@ -23,7 +24,6 @@ import {
   readProviderSelection,
 } from "./provider-selection.mjs";
 import {
-  refreshTargetPickerIfInstalled,
   targetCli,
   targetPickerName,
   targetRestartHint,
@@ -43,9 +43,10 @@ const MAX_PROVIDER_OPERATION_MS = 11 * 60_000;
 
 function providerOperationContext(command) {
   if (!["login", "probe", "disconnect"].includes(command)) return {};
+  const maximumMs = command === "disconnect" ? 45 * 60_000 : MAX_PROVIDER_OPERATION_MS;
   const deadline = operationDeadlineFromEnvironment(process.env, {
-    timeoutMs: MAX_PROVIDER_OPERATION_MS,
-    maximumMs: MAX_PROVIDER_OPERATION_MS,
+    timeoutMs: maximumMs,
+    maximumMs,
   });
   const controller = new AbortController();
   const timer = setTimeout(() => {
@@ -81,6 +82,7 @@ import { PROVIDER_CREDENTIAL_STORE_PATH } from "./paths.mjs";
 import { promptForSecret } from "./secret-prompt.mjs";
 import {
   applyModelOverlayPublication,
+  publishAdoptedModelOverlayFresh,
   transactModelOverlayMutation,
 } from "./model-overlay-publication.mjs";
 import {
@@ -254,6 +256,7 @@ async function runGenericCredentialCommand(args, {
         credentialId = undefined;
       }
     },
+    restart: true,
     applyPublication,
   });
   const result = {
@@ -419,7 +422,7 @@ async function main() {
     // router. Kimi and Grok retain their official CLI sessions, which need a
     // real terminal instead of a child with piped stdio.
     await loginOauthProvider(provider.id, operation);
-    await withModelOverlayLock(() => refreshTargetPickerIfInstalled(operation));
+    await publishAdoptedModelOverlayFresh(operation);
     process.stdout.write(
       `${provider.displayName} sign-in completed with the operator-owned OAuth client. ` +
         `The route remains disabled until an explicit live compatibility test succeeds.\n` +
@@ -437,7 +440,7 @@ async function main() {
       deadline = operation.deadline,
     } = {}) => withModelOverlayLock(async () => {
       await forgetProviderCatalogFamilyCache(provider.id);
-      return refreshTargetPickerIfInstalled({ signal, deadline });
+      return publishAdoptedModelOverlayFresh({ lock: false, signal, deadline });
     });
     const { result, refreshed } = await activateAntigravityProbe({
       probe: probeAntigravity,
@@ -448,7 +451,7 @@ async function main() {
       withdraw: refreshInstalledClients,
       // A successful managed restart waits for start.mjs, which conditionally
       // spawns and health-gates this forwarder before router health succeeds.
-      restart: () => restartRouterServiceIfInstalled(operation),
+      restart: (nextOperation) => restartRouterServiceIfInstalled(nextOperation),
       publish: refreshInstalledClients,
       signal: operation.signal,
       deadline: operation.deadline,
@@ -471,16 +474,21 @@ async function main() {
     if (provider?.id !== "antigravity-oauth") {
       throw new Error("Usage: providers disconnect antigravity-oauth");
     }
+    let warnings;
     await withModelOverlayLock(async () => {
       await removeApiCredential(provider.id);
-      // removeApiCredential also withdraws the selection. Republish even when
-      // the credential vanished first, or installed clients can retain a
-      // stale Antigravity route after an otherwise successful disconnect.
-      await refreshTargetPickerIfInstalled(operation);
+      // Disconnect is irreversible: adopt the withdrawn route before clients,
+      // and report publication failure without reviving deleted OAuth state.
+      warnings = await applyModelOverlayPublication({
+        ...operation, restart: true, warningOnly: true,
+      });
     });
     process.stdout.write(
       `${provider.displayName} disconnected; its operator OAuth client, session, live proof, and picker selection were removed.\n`,
     );
+    for (const warning of Object.values(warnings || {})) {
+      process.stderr.write(`Disconnected; client refresh needs attention: ${warning}\n`);
+    }
     return;
   }
   if (!provider || !["enable", "disable"].includes(command)) {
@@ -502,12 +510,14 @@ async function main() {
   }
   let providers;
   let refreshed;
-  await withModelOverlayLock(async () => {
-    providers = command === "enable"
-      ? enableProvider(providerId)
-      : disableProvider(providerId);
-    refreshed = await refreshTargetPickerIfInstalled();
+  await transactModelOverlayMutation({
+    files: [PROVIDER_SELECTION_PATH],
+    mutate: () => {
+      providers = command === "enable" ? enableProvider(providerId) : disableProvider(providerId);
+    },
+    restart: true,
   });
+  refreshed = true;
   // "shown in the model picker" is false for a catalog-only provider with no
   // curated models: enabling it changes nothing the user can see. Say what
   // actually happened, and name the step that makes it true.

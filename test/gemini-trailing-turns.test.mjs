@@ -47,6 +47,16 @@ function run(script, env) {
       CODEX_ROUTER_INTERNAL_KEY: INTERNAL_KEY,
       KIMI_INTERNAL_KEY: INTERNAL_KEY,
       CODEX_ROUTER_SHOW_ALL_MODELS: "1",
+      CODEX_ROUTER_GATEWAY_BASE_URL: "http://127.0.0.1:9/unused-gateway/v1",
+      CODEX_ROUTER_API_BASE_URL: env.CODEX_ROUTER_GATEWAY_BASE_URL || "http://127.0.0.1:9/unused-api/v1",
+      CODEX_NATIVE_BASE_URL: "http://127.0.0.1:9/unused-native",
+      CODEX_ROUTER_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_API_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_GROK_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_GATEWAY_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: "9",
+      MODEL_ROUTER_DEVIN_CLI_PORT: "9",
+      MODEL_ROUTER_LOCAL_BASE_URL: "http://127.0.0.1:9/v1",
       ...env,
     },
     stdio: ["ignore", "ignore", "pipe"],
@@ -274,7 +284,7 @@ test("router trims only official and explicitly opted-in trailing Responses mode
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "gemini-router-state-"));
   writeFileSync(
     path.join(stateDir, "enabled-providers.json"),
-    `${JSON.stringify({ version: 1, providers: [] })}\n`,
+    `${JSON.stringify({ version: 1, providers: ["gemini-api", "openrouter"] })}\n`,
   );
   const routerPort = await openPort();
   const router = run("router.mjs", {
@@ -319,10 +329,9 @@ test("router trims only official and explicitly opted-in trailing Responses mode
     assert.equal(health.status, 200, JSON.stringify(healthPayload));
     assert.equal(healthPayload.api.reachable, true);
     assert.ok(healthRequests.includes("/api-health"));
-    writeFileSync(
-      path.join(stateDir, "enabled-providers.json"),
-      `${JSON.stringify({ version: 1, providers: ["gemini-api", "openrouter"] })}\n`,
-    );
+    // The runtime adopts one registry/selection generation at startup. The
+    // providers above are already enabled in that generation; an external
+    // file edit alone must not advertise unloaded routes or dependencies.
 
     await route(models.official.slug);
     assert.deepEqual(gatewayRequests.at(-1).input, [

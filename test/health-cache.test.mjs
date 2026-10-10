@@ -110,7 +110,7 @@ test("the router probes through the cache, not around it", () => {
   // ever goes straight to the network again the probe flood comes back
   // silently.
   assert.match(router, /const healthCache = createHealthCache\(\{\s*staleWhileRevalidate:\s*true\s*\}\)/);
-  assert.match(router, /function serviceHealth\(url\)\s*\{\s*return healthCache\(url,/);
+  assert.match(router, /function serviceHealth\(url, options\)\s*\{\s*return healthCache\(url, \(\) => probeService\(url, options\)\)/);
   assert.match(router, /loopbackProbeFetch\(/);
 });
 

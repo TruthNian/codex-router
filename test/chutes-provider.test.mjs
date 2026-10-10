@@ -2,21 +2,23 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
+import { startProviderControlRuntime, runProviderFixtureNode } from "./fixtures/provider-control-runtime.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function isolatedEnvironment(testRoot, extra = {}) {
   return {
-    ...process.env,
+    ...setupFixtureEnvironment(testRoot, path.join(testRoot, "state")),
+    MODEL_ROUTER_TARGET: "codex",
     HOME: testRoot,
     CODEX_HOME: path.join(testRoot, "codex"),
     CODEX_ROUTER_STATE_DIR: path.join(testRoot, "state"),
@@ -62,7 +64,7 @@ test("the macOS tray labels Chutes as a metered API route", () => {
 });
 
 test("both installer frontends pass provider selection to setup, which accepts Chutes", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "chutes-installer-test-"));
+  const testRoot = setupFixtureRoot("chutes-installer-test-");
   try {
     const posix = readFileSync(path.join(root, "install.sh"), "utf8");
     const windows = readFileSync(path.join(root, "install.ps1"), "utf8");
@@ -86,8 +88,9 @@ test("both installer frontends pass provider selection to setup, which accepts C
   }
 });
 
-test("providers enable accepts a configured Chutes key and points catalog-only users at curation", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "chutes-enable-test-"));
+test("providers enable accepts a configured Chutes key and points catalog-only users at curation", async () => {
+  const testRoot = setupFixtureRoot("chutes-enable-test-");
+  const runtime = await startProviderControlRuntime(testRoot);
   try {
     writeChutesCredential(testRoot);
     writeFileSync(
@@ -95,9 +98,9 @@ test("providers enable accepts a configured Chutes key and points catalog-only u
       `${JSON.stringify({ version: 1, providers: [] })}\n`,
       { mode: 0o600 },
     );
-    const result = runNode(
+    const result = await runProviderFixtureNode(
       ["src/providers.mjs", "enable", "chutes"],
-      isolatedEnvironment(testRoot),
+      isolatedEnvironment(testRoot, runtime.environment),
     );
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Chutes is enabled, but ships no preselected models/);
@@ -106,13 +109,20 @@ test("providers enable accepts a configured Chutes key and points catalog-only u
       readFileSync(path.join(testRoot, "state", "enabled-providers.json"), "utf8"),
     );
     assert.deepEqual(selection.providers, ["chutes"]);
+    const phases = runtime.events().map((event) => event.phase);
+    for (const phase of ["dependencies", "prepare", "service-restart", "health-adoption", "publish"]) assert.equal(phases.includes(phase), true, phase);
+    assert.equal(phases.indexOf("prepare") < phases.indexOf("service-restart"), true);
+    assert.equal(phases.indexOf("service-restart") < phases.indexOf("health-adoption"), true);
+    assert.equal(phases.indexOf("health-adoption") < phases.indexOf("publish"), true);
+    assert.equal(runtime.events().filter((event) => event.phase === "health-adoption").every((event) => /^[a-f0-9]{64}$/.test(event.fingerprint)), true);
   } finally {
+    await runtime.close();
     rmSync(testRoot, { recursive: true, force: true });
   }
 });
 
 test("doctor recognizes a persistent Chutes key and warns when no models are curated", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "chutes-doctor-test-"));
+  const testRoot = setupFixtureRoot("chutes-doctor-test-");
   try {
     writeChutesCredential(testRoot);
     writeFileSync(
@@ -132,8 +142,32 @@ test("doctor recognizes a persistent Chutes key and warns when no models are cur
   }
 });
 
+test("Chutes enable refuses a service with another fingerprint and restores its exact selection", async () => {
+  const testRoot = setupFixtureRoot("chutes-adoption-failure-");
+  const runtime = await startProviderControlRuntime(testRoot);
+  try {
+    writeChutesCredential(testRoot);
+    const selection = path.join(testRoot, "state", "enabled-providers.json");
+    const original = '{ "version": 1, "providers": [] }\n';
+    writeFileSync(selection, original);
+    const result = await runProviderFixtureNode(["src/providers.mjs", "enable", "chutes"], isolatedEnvironment(testRoot, {
+      ...runtime.environment, FIXTURE_PROVIDER_REJECT_ADOPTION: "1",
+    }));
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /running router has not adopted/);
+    assert.equal(readFileSync(selection, "utf8"), original);
+    const events = runtime.events();
+    assert.equal(events.filter((event) => event.phase === "publish").length, 1, "only restored selection may reach real target publication");
+    assert.equal(events.some((event) => event.phase === "health-adoption" && event.fingerprint === "0".repeat(64)), true);
+    assert.equal(events.at(-1).phase, "publish");
+  } finally {
+    await runtime.close();
+    rmSync(testRoot, { recursive: true, force: true });
+  }
+});
+
 test("Chutes public-catalog fixtures drive discovery, deterministic curation, and a LiteLLM route", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "chutes-curation-test-"));
+  const testRoot = setupFixtureRoot("chutes-curation-test-");
   try {
     const fixture = path.join(testRoot, "models.json");
     writeFileSync(fixture, JSON.stringify({

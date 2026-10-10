@@ -14,7 +14,7 @@ test("native catalog watcher refreshes periodically without overlapping passes",
     clear(timer) { assert.equal(timer, 1); },
     interval(callback, delay) {
       tick = callback;
-      assert.equal(delay, NATIVE_ACCOUNT_CATALOG_TTL_MS);
+      assert.equal(delay, 86_400_000);
       return 1;
     },
     republish() {
@@ -152,4 +152,104 @@ test("the background watcher does not keep a finished process alive", () => {
   ], { encoding: "utf8", windowsHide: true, timeout: 5_000 });
   assert.equal(result.error, undefined, "watcher held the process open");
   assert.equal(result.status, 0, result.stderr);
+});
+
+test("startup invalidates previous-account validators, events merge during flight, and stop disposes them", async () => {
+  let event;
+  let scheduled;
+  let release;
+  let disposed = false;
+  let cleared = false;
+  const options = [];
+  const stop = watchNativeCatalog({
+    immediate: true,
+    interval() { return 1; },
+    clear() {},
+    subscribeEvents(listener) { event = listener; return () => { disposed = true; }; },
+    schedule(callback, delay) { assert.equal(delay, 500); scheduled = callback; return 2; },
+    cancel(timer) { assert.equal(timer, 2); cleared = true; },
+    republish(value) {
+      options.push(value);
+      return new Promise((resolve) => { release = resolve; });
+    },
+  });
+  try {
+    assert.deepEqual(options, [{ forceAccountRefresh: true, accountChanged: true }]);
+    event({ source: "binary", forceAccountRefresh: true });
+    event({ source: "account", forceAccountRefresh: true, accountChanged: true });
+    assert.equal(scheduled, undefined, "in-flight notifications cannot overlap the startup pass");
+    release(false);
+    await Promise.resolve();
+    scheduled();
+    assert.deepEqual(options, [
+      { forceAccountRefresh: true, accountChanged: true },
+      { forceAccountRefresh: true, accountChanged: true },
+    ], "both events produce one subsequent unconditional refresh");
+    event({ source: "binary", forceAccountRefresh: true });
+    release(false);
+    await Promise.resolve();
+    stop();
+    scheduled();
+    assert.equal(options.length, 2);
+    assert.equal(disposed, true);
+    assert.equal(cleared, true);
+  } finally { stop(); release?.(false); }
+});
+
+test("an interval racing a debounced event does not lose its account invalidation", async () => {
+  let event;
+  let tick;
+  let queued;
+  let release;
+  const calls = [];
+  const stop = watchNativeCatalog({
+    interval(callback) { tick = callback; return 1; },
+    clear() {},
+    subscribeEvents(listener) { event = listener; return () => {}; },
+    schedule(callback) { queued = callback; return 2; },
+    cancel() {},
+    republish(options) { calls.push(options); return new Promise((resolve) => { release = resolve; }); },
+  });
+  try {
+    event({ source: "account", accountChanged: true });
+    const pending = tick();
+    queued();
+    assert.deepEqual(calls, [{}]);
+    release(false);
+    await pending;
+    queued();
+    assert.deepEqual(calls, [{}, { forceAccountRefresh: false, accountChanged: true }]);
+    release(false);
+  } finally { stop(); release?.(false); }
+});
+
+test("event-triggered refresh failure does not strand a queued account change", async () => {
+  let event;
+  let queued;
+  let release;
+  const calls = [];
+  const messages = [];
+  const stop = watchNativeCatalog({
+    interval() { return 1; }, clear() {},
+    subscribeEvents(listener) { event = listener; return () => {}; },
+    schedule(callback) { queued = callback; return 2; }, cancel() {},
+    log(message) { messages.push(message); },
+    republish(options) {
+      calls.push(options);
+      if (calls.length === 1) return new Promise((_resolve, reject) => { release = reject; });
+      return Promise.resolve(false);
+    },
+  });
+  try {
+    event({ source: "binary", forceAccountRefresh: true });
+    queued();
+    event({ source: "account", accountChanged: true });
+    release(new Error("offline"));
+    await Promise.resolve();
+    await Promise.resolve();
+    queued();
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].accountChanged, true);
+    assert.deepEqual(messages, ["[codex-router] Native catalog refresh failed: offline"]);
+  } finally { stop(); }
 });

@@ -200,7 +200,7 @@ test("rollback restores durable overlay state even after the deadline expires", 
   assert.deepEqual(events, ["restore"]);
 });
 
-test("synchronous mutations propagate publication errors before restart", async () => {
+test("synchronous mutations propagate client publication errors after adoption", async () => {
   const events = [];
   await assert.rejects(
     applyModelOverlayPublication({
@@ -213,7 +213,7 @@ test("synchronous mutations propagate publication errors before restart", async 
     }),
     /target publication failed/,
   );
-  assert.deepEqual(events, ["publish"]);
+  assert.deepEqual(events, ["restart", "publish"]);
 });
 
 test("transactional mutations preserve warning-only publication semantics", async () => {
@@ -261,7 +261,7 @@ test("transactional rollback is strict even when forward publication is warning-
 test("deadline failure rolls partial publication back in a non-caller-cancellable epoch", async () => {
   const caller = new AbortController();
   const startedAt = Date.now();
-  const operationDeadline = startedAt + 30 * 60_000;
+  const operationDeadline = startedAt + 45 * 60_000;
   const state = {
     durable: "old",
     gateway: "old",
@@ -291,12 +291,13 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
         publication += 1;
         if (publication === 1) {
           assert.equal(options.signal.aborted, false);
-          assert.ok(options.deadline >= startedAt + 630_000);
-          assert.ok(options.deadline <= startedAt + 640_100);
+          assert.ok(options.deadline >= startedAt + 1_260_000);
+          assert.ok(options.deadline <= startedAt + 1_270_100);
           forwardDeadline = options.deadline;
           state.gateway = "new";
+          state.running = "new";
           state.codex = "new";
-          events.push("publish:new:gateway", "publish:new:codex");
+          events.push("prepare:new:gateway", "restart:new", "publish:new:codex");
           caller.abort(new Error("caller deadline elapsed"));
           assert.equal(options.signal.aborted, true);
           throw Object.assign(new Error("forward publication deadline elapsed"), {
@@ -305,13 +306,15 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
         }
         assert.equal(options.signal, undefined);
         assert.ok(options.deadline >= forwardDeadline);
-        assert.ok(options.deadline <= Date.now() + 640_000);
-        for (const target of ["gateway", "codex", "dsh", "gemini"]) {
+        assert.ok(options.deadline <= Date.now() + 1_270_000);
+        state.gateway = state.durable;
+        events.push(`prepare:${state.durable}:gateway`);
+        state.running = state.durable;
+        events.push(`restart:${state.durable}`);
+        for (const target of ["codex", "dsh", "gemini"]) {
           state[target] = state.durable;
           events.push(`publish:${state.durable}:${target}`);
         }
-        state.running = state.durable;
-        events.push(`restart:${state.durable}`);
       },
     }),
     /forward publication deadline elapsed/,
@@ -327,14 +330,15 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
   });
   assert.deepEqual(events, [
     "mutate:new",
-    "publish:new:gateway",
+    "prepare:new:gateway",
+    "restart:new",
     "publish:new:codex",
     "restore:old",
-    "publish:old:gateway",
+    "prepare:old:gateway",
+    "restart:old",
     "publish:old:codex",
     "publish:old:dsh",
     "publish:old:gemini",
-    "restart:old",
   ]);
 });
 
@@ -347,11 +351,13 @@ test("restart-bearing forward publication preserves distinct publish and readine
     restart: true,
     applyPublication: (options) => applyModelOverlayPublication({
       ...options,
+      prepare: async ({ deadline }) => { deadlines.prepare = deadline; return {}; },
       publish: async ({ deadline }) => { deadlines.publish = deadline; },
       restartService: async ({ deadline }) => { deadlines.restart = deadline; },
     }),
   });
-  assert.equal(deadlines.restart - deadlines.publish, 340_000);
+  assert.equal(deadlines.restart - deadlines.prepare, 340_000);
+  assert.equal(deadlines.publish - deadlines.restart, 300_000);
   assert.ok(deadlines.restart - Date.now() >= 330_000);
 });
 
@@ -370,6 +376,7 @@ test("rollback receives the same complete publish and readiness epochs as forwar
         phases.push(phase);
         return applyModelOverlayPublication({
           ...options,
+          prepare: async ({ deadline }) => { phase.prepareDeadline = deadline; return {}; },
           publish: async ({ deadline }) => { phase.publishDeadline = deadline; },
           restartService: async ({ deadline }) => {
             phase.restartDeadline = deadline;
@@ -384,7 +391,7 @@ test("rollback receives the same complete publish and readiness epochs as forwar
   assert.equal(durable, "old");
   assert.deepEqual(phases.map((phase) => phase.durable), ["new", "old"]);
   for (const phase of phases) {
-    assert.equal(phase.restartDeadline - phase.publishDeadline, 340_000);
+    assert.equal(phase.restartDeadline - phase.prepareDeadline, 340_000);
     assert.ok(phase.restartDeadline - Date.now() >= 330_000);
   }
 });
@@ -394,7 +401,7 @@ test("an impossible inherited restart deadline is refused before overlay mutatio
   await assert.rejects(
     transactModelOverlayMutation({
       lock: false,
-      deadline: Date.now() + 20 * 60_000,
+      deadline: Date.now() + 40 * 60_000,
       restart: true,
       mutate: async () => events.push("mutate"),
       restore: async () => events.push("restore"),
@@ -436,7 +443,7 @@ test(
       "try {",
       "  await transactModelOverlayMutation({",
       "    lock: false,",
-      "    deadline: Date.now() + 9 * 60_000,",
+      "    deadline: Date.now() + 35 * 60_000,",
       "    capture: async () => readFileSync(statePath, 'utf8'),",
       "    mutate: async () => { writeFileSync(statePath, 'new'); event('mutate'); },",
       "    restore: async (snapshot) => { writeFileSync(statePath, snapshot); event('restore'); },",
@@ -503,7 +510,7 @@ test(
       "try {",
       "  await transactModelOverlayMutation({",
       "    lock: false,",
-      "    deadline: Date.now() + 9 * 60_000,",
+      "    deadline: Date.now() + 35 * 60_000,",
       "    capture: async () => 'old',",
       "    mutate: async () => { writeFileSync(statePath, 'new'); },",
       "    restore: async (snapshot) => {",
@@ -558,7 +565,7 @@ test(
 );
 
 test("restart timeout republishes and restarts the prior overlay", async () => {
-  const operationDeadline = Date.now() + 30 * 60_000;
+  const operationDeadline = Date.now() + 45 * 60_000;
   let durable = "old";
   let publication = 0;
   const events = [];
@@ -570,13 +577,14 @@ test("restart timeout republishes and restarts the prior overlay", async () => {
       restore: async () => { durable = "old"; },
       applyPublication: (options) => applyModelOverlayPublication({
         ...options,
+        prepare: async () => { events.push(`prepare:${durable}`); return {}; },
         publish: async () => {
           publication += 1;
           events.push(`publish:${durable}`);
         },
         restartService: async () => {
           events.push(`restart:${durable}`);
-          if (publication === 1) {
+          if (durable === "new") {
             throw Object.assign(new Error("forward restart deadline elapsed"), {
               code: "router_operation_timeout",
             });
@@ -588,28 +596,30 @@ test("restart timeout republishes and restarts the prior overlay", async () => {
   );
   assert.equal(durable, "old");
   assert.deepEqual(events, [
-    "publish:new",
+    "prepare:new",
     "restart:new",
-    "publish:old",
+    "prepare:old",
     "restart:old",
+    "publish:old",
   ]);
 });
 
-test("completed operations warn and skip restart when publication fails", async () => {
+test("completed operations warn and skip restart when preparation fails", async () => {
   const events = [];
   const warnings = await applyModelOverlayPublication({
     warningOnly: true,
-    publish: async () => {
-      events.push("publish");
-      throw new Error("target publication failed");
+    prepare: async () => {
+      events.push("prepare");
+      throw new Error("gateway preparation failed");
     },
+    publish: async () => assert.fail("failed preparation cannot publish clients"),
     restart: true,
     restartService: async () => events.push("restart"),
   });
 
-  assert.deepEqual(events, ["publish"]);
+  assert.deepEqual(events, ["prepare"]);
   assert.deepEqual(warnings, {
-    catalogError: "target publication failed",
+    catalogError: "gateway preparation failed",
   });
 });
 
@@ -628,7 +638,7 @@ test("warning-only completion treats an impossible inherited restart epoch as a 
   assert.equal(warnings.restartError, undefined);
 });
 
-test("completed operations retain a post-publication restart failure as a warning", async () => {
+test("completed operations retain an adoption failure as a warning without publishing", async () => {
   const events = [];
   const warnings = await applyModelOverlayPublication({
     warningOnly: true,
@@ -640,7 +650,7 @@ test("completed operations retain a post-publication restart failure as a warnin
     },
   });
 
-  assert.deepEqual(events, ["publish", "restart"]);
+  assert.deepEqual(events, ["restart"]);
   assert.deepEqual(warnings, { restartError: "service restart failed" });
 });
 
@@ -661,7 +671,7 @@ test("a completed local pull reports publication failure without becoming failed
     }),
   });
 
-  assert.deepEqual(events, ["download", "overlay", "publish"]);
+  assert.deepEqual(events, ["download", "overlay", "restart", "publish"]);
   assert.equal(result.status, "done");
   assert.equal(result.catalogError, "installed target could not be refreshed");
   assert.equal(readLocalDownload().status, "done");

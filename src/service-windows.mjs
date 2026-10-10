@@ -2,9 +2,7 @@ import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  renameSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -22,7 +20,7 @@ import {
   serviceProcessOwnership,
   serviceRecordSettled,
 } from "./service-process.mjs";
-import { ensureCheckoutReadable, protectPrivateFile } from "./file-security.mjs";
+import { ensureCheckoutReadable, writePrivateFile } from "./file-security.mjs";
 import { providerApiKeyServiceEnvironment } from "./provider-api-key-service-environment.mjs";
 import { responsesWsServiceEnvironment } from "./responses-ws-client.mjs";
 import { serviceZaiCodingStreamEnvironment } from "./zai-stream-timeouts.mjs";
@@ -164,25 +162,10 @@ function schtasks(args, options = {}) {
 
 function writeAtomic(target, contents) {
   guardLauncherWrite();
-  const temporary = `${target}.tmp.${process.pid}`;
-  try {
-    writeFileSync(temporary, contents, { mode: 0o600 });
-    // Proxy URLs may contain credentials. Protect both the temporary file and
-    // the replaced launcher so Windows does not leave the secret readable via
-    // inherited ACLs (POSIX mode bits are kept in step for deterministic tests).
-    protectPrivateFile(temporary);
-    // renameSync replaces an existing destination on Windows, so reinstalling
-    // over an older launcher pair is a plain overwrite rather than a conflict.
-    renameSync(temporary, target);
-    protectPrivateFile(target);
-  } catch (error) {
-    try {
-      unlinkSync(temporary);
-    } catch {
-      // Best effort cleanup; preserve the original write/ACL error.
-    }
-    throw error;
-  }
+  // The shared writer hardens the temporary before replacement. Windows moves
+  // that DACL with the file, avoiding a second PowerShell launch while keeping
+  // proxy credentials private and preserving the launcher's binary encoding.
+  writePrivateFile(target, contents);
 }
 
 function writeLaunchers() {
@@ -438,10 +421,11 @@ function endTask({ taskDisabled = false } = {}) {
 // unregisters before it registers, so a failed registration leaves either the
 // previous definition or nothing at all, and `/Run` against a name that is gone
 // recovers nothing while reporting an error of its own.
-function taskExists({ strict = false } = {}) {
-  const deadline = Date.now() + TASK_STOP_TIMEOUT_MS;
+function taskExists({ strict = false, deadline = Date.now() + TASK_STOP_TIMEOUT_MS } = {}) {
   try {
-    schtasks(["/Query", "/TN", taskName], { quiet: true, timeout: TASK_STOP_TIMEOUT_MS });
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("The task registration query deadline expired.");
+    schtasks(["/Query", "/TN", taskName], { quiet: true, timeout: Math.min(TASK_STOP_TIMEOUT_MS, remaining) });
     return true;
   } catch {
     // A failed query may be denied or unavailable, not an absent registration.
@@ -503,8 +487,10 @@ function taskState({ deadline } = {}) {
   return undefined;
 }
 
-async function taskRunning(state) {
+async function taskRunning(state, { deadline } = {}) {
   if (state === "running") return true;
+  const remaining = deadline === undefined ? TASK_STATE_TIMEOUT_MS : deadline - Date.now();
+  if (remaining <= 0) return false;
   // Task Scheduler can answer Ready while its detached launcher is still
   // serving. Reuse the process-level probe that guards startup readiness, but
   // keep an unavailable query inconclusive so a restricted shell cannot turn
@@ -512,7 +498,7 @@ async function taskRunning(state) {
   const corroborated = await windowsScheduledTaskState({
     taskName,
     platform: effectivePlatform,
-    timeoutMs: TASK_STATE_TIMEOUT_MS,
+    timeoutMs: Math.min(TASK_STATE_TIMEOUT_MS, remaining),
   });
   // Neither signal is sufficient alone: COM instances can outlive their
   // process, while the machine-wide launcher scan can also see a manually
@@ -648,17 +634,30 @@ if (command === "render") {
   let installed = false;
   let state = "stopped";
   let loaded = false;
+  let statusUnknown = false;
+  const inheritedDeadline = Number(process.env.CODEX_ROUTER_OPERATION_DEADLINE_MS);
+  const deadline = Math.min(Date.now() + TASK_STOP_TIMEOUT_MS,
+    Number.isSafeInteger(inheritedDeadline) && inheritedDeadline > 0 ? inheritedDeadline : Number.POSITIVE_INFINITY);
   try {
-    schtasks(["/Query", "/TN", taskName, "/FO", "LIST", "/V"]);
-    installed = true;
-    state = taskState() || "ready";
-    loaded = await taskRunning(state);
-    if (loaded) state = "running";
+    // A failed named query proves nothing. The strict helper requires a
+    // successful full enumeration before it can report an absent task.
+    installed = taskExists({ strict: true, deadline });
+    if (installed) {
+      state = taskState({ deadline });
+      if (!["running", "ready", "disabled", "queued"].includes(state)) {
+        state = "unknown";
+        statusUnknown = true;
+      } else {
+        loaded = await taskRunning(state, { deadline });
+        if (loaded) state = "running";
+      }
+    }
   } catch {
-    // Missing task.
+    state = "unknown";
+    statusUnknown = true;
   }
   process.stdout.write(
-    `${JSON.stringify({ installed, loaded, state })}\n`,
+    `${JSON.stringify({ installed, loaded, state, ...(statusUnknown ? { statusUnknown: true } : {}) })}\n`,
   );
 } else if (command === "stop") {
   // A heartbeat trigger must not undo an explicit stop. Disable the task before

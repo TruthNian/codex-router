@@ -240,6 +240,7 @@ printf '%s\n' "$*" >>"$CODEX_ROUTER_TEST_CALL_LOG"
 case "\${1:-}" in
   -e) exec "$CODEX_ROUTER_TEST_REAL_NODE" "$@" ;;
   src/install-plan.mjs) [ "\${2:-}" = status ] && printf 'skip\n'; exit 0 ;;
+  src/runtime-dependency-requirements.mjs) printf 'required\n'; exit 0 ;;
   src/login-free-refresh-journal.mjs) exec "$CODEX_ROUTER_TEST_REAL_NODE" "$@" ;;
   *) exit 0 ;;
 esac
@@ -312,6 +313,9 @@ printf 'codex-router-wrapper-call\\0%s\\0%s\\0%s\\0' "$CODEX_ROUTER_NODE_BIN" "$
 if [ "\${1:-}" = src/install-plan.mjs ] && [ "\${2:-}" = status ]; then
   printf 'skip\\n'
 fi
+if [ "\${1:-}" = src/runtime-dependency-requirements.mjs ]; then
+  printf 'required\\n'
+fi
 `,
         { mode: 0o755 },
       );
@@ -326,7 +330,7 @@ fi
       };
 
       for (const [script, args, expectedCall] of [
-        [path.join(root, "bin", "install"), ["--prepare-only"], "<src/catalog.mjs>"],
+        [path.join(root, "bin", "install"), ["--prepare-only"], "<src/secret.mjs><ensure>"],
         [path.join(root, "bin", "enable"), [], "<src/service.mjs><install>"],
       ]) {
         rmSync(callDir, { recursive: true, force: true });
@@ -382,6 +386,9 @@ test(
 printf '%s\\n' "${name}" >>"$CODEX_ROUTER_WRAPPER_LOG"
 if [ "\${1:-}" = src/install-plan.mjs ] && [ "\${2:-}" = status ]; then
   printf 'skip\\n'
+fi
+if [ "\${1:-}" = src/runtime-dependency-requirements.mjs ]; then
+  printf 'required\\n'
 fi
 `,
           { mode: 0o755 },
@@ -1010,7 +1017,7 @@ test("the foreign-state override is scoped to a full ownership-transferring inst
   );
 
   // POSIX: exported only after the arguments are known, and only for a full
-  // install -- a prepare-only run must meet the guard like any other writer.
+  // install -- neither preparation phase transfers state ownership.
   const parseIndex = posix.indexOf("--prepare-only) prepare_only=true ;;");
   const exportIndex = posix.indexOf("MODEL_ROUTER_ALLOW_FOREIGN_STATE=1");
   assert.notEqual(parseIndex, -1, "bin/install must parse --prepare-only");
@@ -1021,7 +1028,7 @@ test("the foreign-state override is scoped to a full ownership-transferring inst
   );
   assert.match(
     posix,
-    /if \[ "\$prepare_only" != true \]; then\n  MODEL_ROUTER_ALLOW_FOREIGN_STATE=1\n  export MODEL_ROUTER_ALLOW_FOREIGN_STATE\nfi/,
+    /if \[ "\$prepare_only" != true \] && \[ "\$dependencies_only" != true \]; then\n  MODEL_ROUTER_ALLOW_FOREIGN_STATE=1\n  export MODEL_ROUTER_ALLOW_FOREIGN_STATE\nfi/,
     "the override must be guarded on a full install",
   );
   if (POSIX_SHELL_AVAILABLE) {
@@ -1040,6 +1047,9 @@ test("the foreign-state override is scoped to a full ownership-transferring inst
     "the override must be set only for a full install",
   );
   const setIndex = windows.indexOf('$env:MODEL_ROUTER_ALLOW_FOREIGN_STATE = "1"');
+  const dependencyReturnIndex = windows.search(/if \(\$DependenciesOnly\) \{\r?\n\s*Write-Host "Runtime dependencies/);
+  assert.ok(dependencyReturnIndex !== -1 && dependencyReturnIndex < setIndex,
+    "dependency-only returns before the ownership override");
   assert.ok(
     setIndex !== -1 && setIndex < windows.indexOf("src/catalog.mjs"),
     "the override must be in place before the generated state is rebuilt",
@@ -1079,6 +1089,7 @@ test("Windows prepare-only restores the caller foreign-state override live", {
         ")",
         'if defined CODEX_ROUTER_TEST_FAIL_LEGACY if /I "%~1"=="src\\legacy-migration.mjs" exit /b 17',
         'if defined CODEX_ROUTER_TEST_FAIL_LEGACY if /I "%~1"=="src/legacy-migration.mjs" exit /b 17',
+        'if /I "%~1"=="src/runtime-dependency-requirements.mjs" (echo required& exit /b 0)',
         'if /I "%~1"=="src/install-plan.mjs" if /I "%~2"=="status" (',
         "  echo skip",
         "  exit /b 0",

@@ -1,0 +1,1 @@
+- Install Python and LiteLLM only when a selected route needs the gateway; native and direct Responses deployments now prepare without a Python runtime. Explicit dependency repair still rebuilds both dependency trees.

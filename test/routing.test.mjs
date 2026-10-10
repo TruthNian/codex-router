@@ -89,6 +89,20 @@ function run(script, env, { nodeArgs = [] } = {}) {
       CODEX_ROUTER_INTERNAL_KEY: INTERNAL_KEY,
       KIMI_INTERNAL_KEY: INTERNAL_KEY,
       CODEX_ROUTER_SHOW_ALL_MODELS: "1",
+      // Router preparation tests share one local Responses stub for the two
+      // execution hops. Its model is the Router's registry ID, before the
+      // API forwarder's provider-model/credential normalization. Tests of
+      // that second boundary explicitly supply their real local API child.
+      CODEX_ROUTER_GATEWAY_BASE_URL: "http://127.0.0.1:9/unused-gateway/v1",
+      CODEX_ROUTER_API_BASE_URL: env.CODEX_ROUTER_GATEWAY_BASE_URL || "http://127.0.0.1:9/unused-api/v1",
+      CODEX_NATIVE_BASE_URL: "http://127.0.0.1:9/unused-native",
+      CODEX_ROUTER_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_API_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_GROK_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_GATEWAY_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: env.CODEX_ROUTER_GATEWAY_HEALTH_URL ? new URL(env.CODEX_ROUTER_GATEWAY_HEALTH_URL).port : "9",
+      MODEL_ROUTER_DEVIN_CLI_PORT: env.CODEX_ROUTER_GATEWAY_HEALTH_URL ? new URL(env.CODEX_ROUTER_GATEWAY_HEALTH_URL).port : "9",
+      MODEL_ROUTER_LOCAL_BASE_URL: "http://127.0.0.1:9/v1",
       ...env,
     },
     stdio: ["ignore", "ignore", "pipe"],
@@ -458,17 +472,21 @@ test("router requires the configured path capability before any model route", as
     const publicPayload = await publicHealth.json();
     assert.deepEqual(
       Object.keys(publicPayload).sort(),
-      ["activity", "degraded", "ok", "service", "version"],
+      ["activity", "degraded", "executionPlan", "ok", "service", "version"],
     );
     // `degraded` names which local service is unreachable so doctor can say the
     // gateway died rather than "the router is not ready". It is a closed set of
-    // three fixed local service names -- never a URL, a credential, or the
+    // fixed local service names -- never a URL, a credential, or the
     // per-service payloads the protected leaf carries.
     assert.ok(
       publicPayload.degraded.every((name) =>
-        ["oauth", "api", "grokOauth", "gateway"].includes(name)),
+        ["oauth", "api", "grokOauth", "antigravityOauth", "devinCli", "gateway", "ollama"].includes(name)),
       JSON.stringify(publicPayload.degraded),
     );
+    assert.deepEqual(Object.keys(publicPayload.executionPlan).sort(), ["fingerprint", "needsGateway", "services"]);
+    assert.match(publicPayload.executionPlan.fingerprint, /^[a-f0-9]{64}$/);
+    assert.ok(publicPayload.executionPlan.services.includes("api"));
+    assert.doesNotMatch(JSON.stringify(publicPayload), new RegExp(`${CALLER_KEY}|${INTERNAL_KEY}|127\\.0\\.0\\.1`));
     assert.equal(publicPayload.activity.state, "error");
 
     const protectedHealth = await fetch(`${routerBase(routerPort)}/health`);
@@ -5314,33 +5332,22 @@ test("API forwarder never replays embeddings through a provider API-key pool", a
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "routing-embedding-pool-state-"));
   const credentialStorePath = path.join(stateDir, "provider-credentials.json");
   const poolStatePath = path.join(stateDir, "provider-api-key-pools.json");
-  const inactiveRouterPort = await openPort();
   const credentials = [
     ["OPENCODE_API_KEY", "POOL_EMBEDDING_KEY_ONE"],
     ["OPENCODE_GO_API_KEY", "POOL_EMBEDDING_KEY_TWO"],
   ];
-  for (const [name] of credentials) {
-    execFileSync(process.execPath, [
-      path.join(root, "src", "control.mjs"),
-      "key-pool",
-      "opencode-go",
-      "add-env",
-      name,
-    ], {
-      cwd: root,
-      env: {
-        ...process.env,
-        MODEL_ROUTER_TARGET: "codex",
-        MODEL_ROUTER_STATE_DIR: stateDir,
-        MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
-        MODEL_ROUTER_API_KEY_POOL_PATH: poolStatePath,
-        CODEX_ROUTER_PORT: String(inactiveRouterPort),
-        CODEX_ROUTER_SERVICE_PLATFORM: "darwin",
-        MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(stateDir, "launch-agents"),
-      },
-      stdio: "ignore",
-    });
-  }
+  // Exercise the real metadata writer in an isolated child. This test covers
+  // API credential selection/replay, not the CLI's managed-service staging
+  // transaction (which has its own service-platform fixtures).
+  execFileSync(process.execPath, ["--input-type=module", "--eval", `
+    const { addEnvironmentCredentialToPool } = await import("./src/provider-api-key-control.mjs");
+    const { names, credentialStorePath, poolStatePath } = JSON.parse(process.argv[1]);
+    for (const name of names) await addEnvironmentCredentialToPool("opencode-go", name, { credentialStorePath, poolStatePath });
+  `, JSON.stringify({ names: credentials.map(([name]) => name), credentialStorePath, poolStatePath })], {
+    cwd: root,
+    env: { ...process.env, MODEL_ROUTER_STATE_DIR: stateDir, CODEX_ROUTER_STATE_DIR: stateDir },
+    stdio: "pipe",
+  });
   const upstreamRequests = [];
   const upstream = await mockServer(async (request, response) => {
     upstreamRequests.push({
@@ -10275,8 +10282,10 @@ test("a live child turn refines a legacy experimental subagent diagnostic", asyn
     }
     json(response, 200, {
       id: "resp_child",
+      object: "response",
+      status: "completed",
       output: [
-        { type: "message", content: [{ type: "output_text", text: "child done" }] },
+        { type: "message", role: "assistant", content: [{ type: "output_text", text: "child done" }] },
       ],
       usage: { input_tokens: 12, output_tokens: 3 },
     });

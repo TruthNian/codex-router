@@ -16,6 +16,56 @@ const headersProvider = async () => ({
 });
 const noLock = (operation) => operation();
 
+test("account invalidation bypasses fresh caches and removes previous-account ETag validators", () =>
+  withCache(async (cachePath) => {
+    const models = [{ slug: "gpt-shared-across-accounts" }];
+    writeFileSync(cachePath, JSON.stringify(fixtureCache(models, { fetched_at: "2026-09-06T00:00:00.000Z" })));
+    let sent;
+    const result = await refreshNativeAccountCatalog({
+      cachePath, conditional: false, version: "0.153.2", now: Date.parse("2026-09-06T00:00:01.000Z"),
+      headersProvider, discoveryOff: () => false, lock: noLock,
+      fetchImpl: async (_url, init) => {
+        sent = init.headers;
+        return new Response(JSON.stringify({ models }), { status: 200 });
+      },
+    });
+    assert.equal(sent["if-none-match"], undefined);
+    assert.equal(result.status, "revalidated");
+    const written = JSON.parse(readFileSync(cachePath, "utf8"));
+    assert.deepEqual(written.models, models);
+    assert.equal(written.etag, undefined, "previous account validator must not survive a successful unconditional refresh");
+    assert.equal(written.fetched_at, "2026-09-06T00:00:01.000Z");
+  }));
+
+test("an invalidated account cannot bless an unsolicited 304 or overwrite cache on failure", () =>
+  withCache(async (cachePath) => {
+    const contents = JSON.stringify(fixtureCache([{ slug: "gpt-safe" }]));
+    writeFileSync(cachePath, contents);
+    for (const fetchImpl of [
+      async () => new Response(null, { status: 304 }),
+      async () => { throw new Error("offline"); },
+    ]) {
+      const result = await refreshNativeAccountCatalog({
+        cachePath, conditional: false, version: "0.153.2", headersProvider,
+        discoveryOff: () => false, lock: noLock, fetchImpl,
+      });
+      assert.equal(result.status, "failed");
+      assert.equal(readFileSync(cachePath, "utf8"), contents);
+    }
+  }));
+
+test("an installed-client version change persists its metadata even when models are identical", () =>
+  withCache(async (cachePath) => {
+    const models = [{ slug: "gpt-stable" }];
+    writeFileSync(cachePath, JSON.stringify(fixtureCache(models, { client_version: "0.152.0" })));
+    const result = await refreshNativeAccountCatalog({
+      cachePath, version: "0.153.2", headersProvider, discoveryOff: () => false, lock: noLock,
+      fetchImpl: async () => new Response(JSON.stringify({ models }), { status: 200 }),
+    });
+    assert.equal(result.status, "revalidated");
+    assert.equal(JSON.parse(readFileSync(cachePath, "utf8")).client_version, "0.153.2");
+  }));
+
 function fixtureCache(models, overrides = {}) {
   return {
     fetched_at: "2026-08-01T00:00:00.000Z",

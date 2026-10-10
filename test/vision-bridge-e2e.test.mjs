@@ -434,10 +434,10 @@ test("a failed vision read degrades to a stated failure and the turn still compl
       imageTurn({ question: "What does this error say?" }),
     );
     assert.equal(result.status, 200);
-    // A 500 is transient, so the read was asked for again before the image was
-    // written off: one attempt plus two retries.
+    // A 500 can follow an executed generation POST. The default policy does
+    // not silently replay that image against the same engine.
     report(`attempts against a failing engine: ${upstreams.state.visionRequests.length}`);
-    assert.equal(upstreams.state.visionRequests.length, 3);
+    assert.equal(upstreams.state.visionRequests.length, 1);
     const sent = upstreams.state.gatewayRequests.at(-1);
     assert.equal(imageParts(sent.input).length, 0);
     const stated = textParts(sent.input).find((text) => text.includes("could not be read"));
@@ -457,10 +457,10 @@ test("a failed vision read degrades to a stated failure and the turn still compl
     );
     assert.equal(retry.status, 200);
     report(`reads after a failure then a recovery: ${upstreams.state.visionRequests.length}`);
-    // Three attempts against the failing engine, then one against the
+    // One attempt against the failing engine, then one against the
     // recovered one. Nothing was cached, so recovery is tried rather than the
     // failure being replayed for an hour.
-    assert.equal(upstreams.state.visionRequests.length, 4);
+    assert.equal(upstreams.state.visionRequests.length, 2);
     assert.ok(
       textParts(upstreams.state.gatewayRequests.at(-1).input).some((text) =>
         text.includes("<<<IMAGE EVIDENCE"),

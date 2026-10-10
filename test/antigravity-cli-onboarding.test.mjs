@@ -238,7 +238,8 @@ test("desktop onboarding keeps the Antigravity probe explicit on every platform"
   assert.match(tray, /setup\?\.disconnectable == true/);
   assert.match(startup, /const antigravityStartup = antigravityOAuthStartupState\(\)/);
   assert.match(startup, /attemptAntigravityProbePromotionAfterReadiness/);
-  assert.match(startup, /\.\.\.\(antigravityForwarder/);
+  assert.match(startup, /\["antigravity", "Antigravity OAuth forwarder"/);
+  assert.match(startup, /\.filter\(\(\[service\]\) => requiredServices\.has\(service\)\)/);
   const providers = readFileSync(path.join(root, "src", "providers.mjs"), "utf8");
   const control = readFileSync(path.join(root, "src", "control.mjs"), "utf8");
   const activation = readFileSync(
@@ -253,7 +254,7 @@ test("desktop onboarding keeps the Antigravity probe explicit on every platform"
     path.join(root, "src", "provider-onboarding.mjs"),
     "utf8",
   );
-  assert.match(providers, /restartRouterServiceIfInstalled\(operation\)/);
+  assert.match(providers, /restartRouterServiceIfInstalled\(nextOperation\)/);
   assert.match(providers, /activateAntigravityProbe/);
   assert.match(control, /activateAntigravityProbe/);
   assert.match(activation, /Installed clients remain withdrawn/);

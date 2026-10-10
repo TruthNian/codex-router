@@ -1,16 +1,13 @@
 import {
   existsSync,
-  mkdirSync,
   readFileSync,
-  renameSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { scanTomlDocument } from "./toml-structure.mjs";
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import { MODEL_BY_SLUG } from "./model-registry.mjs";
 import {
   CONFIG_PATH,
@@ -169,23 +166,7 @@ export function readNativeCatalogSource() {
 }
 
 function writeNativeCatalogSource(value) {
-  mkdirSync(path.dirname(NATIVE_CATALOG_SOURCE_PATH), {
-    recursive: true,
-    mode: 0o700,
-  });
-  const temporary = `${NATIVE_CATALOG_SOURCE_PATH}.tmp.${process.pid}`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  try {
-    protectPrivateFile(temporary);
-    renameSync(temporary, NATIVE_CATALOG_SOURCE_PATH);
-    protectPrivateFile(NATIVE_CATALOG_SOURCE_PATH);
-  } catch (error) {
-    if (existsSync(temporary)) unlinkSync(temporary);
-    throw error;
-  }
+  writePrivateFile(NATIVE_CATALOG_SOURCE_PATH, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 export function prepareNativeCatalogSourceFromConfig() {

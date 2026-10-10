@@ -1,21 +1,23 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { openPort } from "./port-pool.mjs";
 
+import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-api-key-diagnostics-"));
+const testRoot = setupFixtureRoot("codex-router-api-key-diagnostics-");
 const stateDir = path.join(testRoot, "state");
 const credentialStorePath = path.join(stateDir, "provider-credentials.json");
 const poolStatePath = path.join(stateDir, "provider-api-key-pools.json");
 const internalKey = "test-provider-pool-diagnostics-internal-key";
 mkdirSync(stateDir, { recursive: true, mode: 0o700 });
 
+Object.assign(process.env, setupFixtureEnvironment(testRoot, stateDir));
 process.env.CODEX_HOME = path.join(testRoot, "codex");
 process.env.CODEX_ROUTER_STATE_DIR = stateDir;
 process.env.MODEL_ROUTER_STATE_DIR = stateDir;
@@ -43,8 +45,8 @@ function selectProviders(providers) {
   );
 }
 
-function runDoctor(environment = {}) {
-  return spawnSync(process.execPath, [path.join(repoRoot, "src", "doctor.mjs"), "--json"], {
+function runDoctor(environment = {}, args = []) {
+  return spawnSync(process.execPath, [path.join(repoRoot, "src", "doctor.mjs"), "--json", ...args], {
     cwd: repoRoot,
     env: {
       ...process.env,
@@ -67,7 +69,7 @@ test("doctor fails an authoritative pool whose active reference cannot resolve",
   assert.doesNotMatch(JSON.stringify(pool), /OPENCODE_API_KEY|Bearer /);
 });
 
-test("doctor keeps unselected and discovery-disabled pool failures advisory", { timeout: 60_000 }, () => {
+test("doctor suppresses unselected pools by default and keeps explicit inventory and discovery-disabled failures advisory", { timeout: 60_000 }, () => {
   try {
     selectProviders([]);
     const unselected = runDoctor();
@@ -75,8 +77,13 @@ test("doctor keeps unselected and discovery-disabled pool failures advisory", { 
     const unselectedPool = JSON.parse(unselected.stdout).checks.find(
       (check) => check.name === "Provider API-key pools",
     );
-    assert.equal(unselectedPool.status, "warn");
-    assert.match(unselectedPool.detail, /unselected authoritative pool unavailable/);
+    assert.equal(unselectedPool, undefined);
+    const inventory = runDoctor({}, ["--all"]);
+    assert.notEqual(inventory.error?.code, "ETIMEDOUT", inventory.error?.message);
+    const inventoryPool = JSON.parse(inventory.stdout).checks.find((check) => check.name === "Provider API-key pools");
+    assert.equal(inventoryPool.status, "warn");
+    assert.match(inventoryPool.detail, /unselected authoritative pool unavailable/);
+    assert.doesNotMatch(JSON.stringify(inventoryPool), /OPENCODE_API_KEY|Bearer /);
 
     selectProviders(["opencode-go"]);
     const undiscovered = runDoctor({ CODEX_ROUTER_NO_DISCOVERY: "1" });

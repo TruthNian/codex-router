@@ -168,11 +168,9 @@ const SESSION_LIST_LIMIT = 500;
 // and committing all coupled model files. Leave room for both the bounded
 // lock wait and the build itself; killing the lock holder at the old 30/120s
 // limits would strand a stale lock and force a rollback to race recovery.
-// A restart-bearing model-overlay mutation owns two complete 640-second
-// epochs: each has five minutes for publication followed by the service's
-// status/platform/readiness envelope. The runner and control owner retain
-// their process-tree cleanup margins outside the 1,280-second transaction.
-const CATALOG_MUTATION_TIMEOUT_MS = 1_320_000;
+// Dependency preparation, adoption, publication and rollback are bounded;
+// retain the control owner's cleanup margin outside its 45-minute ceiling.
+const CATALOG_MUTATION_TIMEOUT_MS = 45 * 60_000 + 20_000;
 // Provider usage combines the local retained ledger with optional account
 // quota reads. OAuth refreshes alone may take 30 seconds, and a rejected token
 // can require a second refresh before the provider answers. Keep this aligned

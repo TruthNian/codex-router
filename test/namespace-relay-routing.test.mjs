@@ -18,14 +18,12 @@ import {
   GROK_APPLY_PATCH_UPDATE_EXAMPLE,
 } from "../src/grok-apply-patch-guidance.mjs";
 
-// End-to-end proof of the namespace relay through the REAL router: a routed
-// request carrying the client's namespace toolset must reach the (mock)
-// gateway with every namespace flattened into plain functions -- including the
-// MCP namespaces (mcp__node_repl__js and friends) that LiteLLM's bridge drops
-// when left as namespace entries -- and function calls streaming back must be
-// restored to the client's native { name, namespace } shape. The router must
-// not execute any app tool itself. The whole scenario runs twice and must
-// produce byte-identical outgoing and incoming bodies (determinism).
+// Exercise real Router preparation and client restoration against explicit
+// local gateway and API-hop stubs. Chat routes flatten namespaces for the
+// gateway; Responses routes retain their native declaration/history contract.
+// The API stub observes Router input, before API-forwarder model/credential
+// normalization. The real Router+API contract is tested separately in
+// direct-responses-runtime.test.mjs. The Router never executes an app tool.
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CALLER_KEY = "test-router-caller-capability-with-sufficient-length";
@@ -90,6 +88,15 @@ function run(script, env) {
       CODEX_ROUTER_CALLER_KEY: CALLER_KEY,
       CODEX_ROUTER_INTERNAL_KEY: INTERNAL_KEY,
       CODEX_ROUTER_SHOW_ALL_MODELS: "1",
+      CODEX_NATIVE_BASE_URL: `${env.CODEX_ROUTER_GATEWAY_BASE_URL}/forbidden-native`,
+      CODEX_ROUTER_API_BASE_URL: env.CODEX_ROUTER_GATEWAY_BASE_URL,
+      CODEX_ROUTER_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_API_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_GROK_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_GATEWAY_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: "9",
+      MODEL_ROUTER_DEVIN_CLI_PORT: "9",
+      MODEL_ROUTER_LOCAL_BASE_URL: "http://127.0.0.1:9/v1",
       ...env,
     },
     stdio: ["ignore", "ignore", "pipe"],
@@ -906,6 +913,7 @@ async function scenario(
 ) {
   const gatewayBodies = [];
   const gatewayHeaders = [];
+  const upstreamPaths = [];
   const visionBodies = [];
   const gateway = await mockServer(async (request, response) => {
     if (request.url === "/vision/v1/chat/completions" && visionJsonBody) {
@@ -918,7 +926,8 @@ async function scenario(
       );
       return;
     }
-    if (request.url === "/v1/responses") {
+    if (["/gateway/v1/responses", "/api/v1/responses"].includes(request.url)) {
+      upstreamPaths.push(request.url);
       const gatewayBody = await bodyJson(request);
       gatewayBodies.push(gatewayBody);
       gatewayHeaders.push(request.headers);
@@ -942,7 +951,8 @@ async function scenario(
     : {};
   const router = run("router.mjs", {
     CODEX_ROUTER_PORT: String(routerPort),
-    CODEX_ROUTER_GATEWAY_BASE_URL: `http://127.0.0.1:${gateway.port}/v1`,
+    CODEX_ROUTER_GATEWAY_BASE_URL: `http://127.0.0.1:${gateway.port}/gateway/v1`,
+    CODEX_ROUTER_API_BASE_URL: `http://127.0.0.1:${gateway.port}/api/v1`,
     CODEX_ROUTER_QUIET: "1",
     ...routerEnv,
     ...preparedRouterEnv,
@@ -960,7 +970,7 @@ async function scenario(
     });
     assert.equal(response.status, expectedStatus, `router status ${response.status}`);
     const clientBody = await response.text();
-    return { gatewayBodies, gatewayHeaders, visionBodies, clientBody, router, status: response.status };
+    return { gatewayBodies, gatewayHeaders, upstreamPaths, visionBodies, clientBody, router, status: response.status };
   } finally {
     await stopChild(router);
     await closeServer(gateway.server);
@@ -2145,6 +2155,7 @@ test("Responses-native routes preserve pre-flattened tools and restore call iden
       jsonBody: () => ({ id: "resp_flat_json", output: [call] }),
     });
     assert.equal(result.gatewayBodies.length, 1);
+    assert.deepEqual(result.upstreamPaths, ["/api/v1/responses"], "Responses preparation must reach the declared API-hop stub");
     const outgoing = result.gatewayBodies[0];
     assert.equal(outgoing.model, "meta-muse-spark-1-2");
     assert.equal(
@@ -2175,6 +2186,7 @@ test("Responses-native routed providers inherit the model on fresh local thread 
     requestPayload: routedToolSearchHistoryPayload,
   };
   const streamed = await scenario(true, options);
+  assert.deepEqual(streamed.upstreamPaths, ["/api/v1/responses"]);
   assert.equal(streamed.gatewayBodies[0].model, "meta-muse-spark-1-2");
   assert.ok(
     streamed.gatewayBodies[0].tools.some((tool) => tool?.type === "namespace"),

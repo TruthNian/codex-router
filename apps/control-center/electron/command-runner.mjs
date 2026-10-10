@@ -16,10 +16,9 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TIMEOUT_MS = 30_000;
-// A restart-bearing overlay transaction owns two 640-second publication
-// epochs plus nested process-tree cleanup. Keep a finite ceiling beyond the
-// 1,320-second catalog UI owner instead of truncating it to the old 11 minutes.
-const MAX_TIMEOUT_MS = 22 * 60_000;
+// The runner's finite ceiling preserves the catalog owner's dependency,
+// adoption and independent rollback budgets plus process-tree cleanup.
+const MAX_TIMEOUT_MS = 46 * 60_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const SECRET_WORD = /(api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|secret|credential)/i;
 const APP_CONTRACT_LIMIT = 1024 * 1024;
@@ -32,7 +31,7 @@ const OWNER_SIGNAL_CLOSE_WAIT_MS = 200;
 const OWNER_SIGNAL_BUDGET_ENV = "CODEX_ROUTER_OWNER_SIGNAL_BUDGET_MS";
 const OWNER_SIGNAL_BARRIER_DIR_ENV = "CODEX_ROUTER_OWNER_SIGNAL_BARRIER_DIR";
 const OWNER_SIGNAL_BARRIER_PREFIX = "barrier-";
-const MAX_OWNER_SIGNAL_BARRIER_MS = 11 * 60_000;
+const MAX_OWNER_SIGNAL_BARRIER_MS = 23 * 60_000;
 const MAX_OWNER_SIGNAL_BARRIER_FILE_BYTES = 1_024;
 const OWNER_SIGNALS = ["SIGINT", "SIGTERM"];
 

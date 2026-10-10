@@ -1,3 +1,4 @@
+import { rejectGenerationRedirect } from "./generation-redirect.mjs";
 import { readFileSync } from "node:fs";
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
@@ -67,6 +68,9 @@ import {
 } from "./leaked-tool-call-recovery.mjs";
 import { moonshotSchemaRoute } from "./moonshot-schema-routes.mjs";
 import { reasoningTagStripperTransform } from "./reasoning-tag-stripper.mjs";
+import { reasoningTagOptionsForRoute } from "./reasoning-tag-policy.mjs";
+import { resolveGenerationOutcome } from "./response-outcome.mjs";
+import { createExecutionPlan, routeExecution } from "./route-execution-plan.mjs";
 import {
   messageEnvelopeCompatTransform,
 } from "./zai-responses-compat.mjs";
@@ -101,6 +105,7 @@ import {
 } from "./paths.mjs";
 import {
   MODEL_BY_SLUG,
+  MODELS,
   RUNTIME_PROVIDERS,
   USER_MODELS_SKIPPED,
   providerForModel,
@@ -164,7 +169,7 @@ import {
   isRemoteCompactV2Trigger,
   skippableCompactionTokens,
 } from "./compaction-limit.mjs";
-import { fetchWithRetry } from "./upstream-retry.mjs";
+import { fetchWithRetry, NATIVE_RETRY_POLICY, transportDeliveryState } from "./upstream-retry.mjs";
 import { repairGeminiToolSchemas } from "./gemini-tool-schema.mjs";
 import { applyGrokApplyPatchGuidance } from "./grok-apply-patch-guidance.mjs";
 import { GROK_OAUTH_PROVIDER, isGrokOauthAgenticRoute } from "./grok-oauth-routes.mjs";
@@ -241,7 +246,7 @@ import {
   invalidCompletedFunctionCallTransform,
   isInvalidFunctionCallArgumentsError,
 } from "./invalid-function-call.mjs";
-import { describeTransportFailure } from "./transport-failure.mjs";
+import { describeTransportFailure, PROVIDER_DELIVERY_STATE_HEADER } from "./transport-failure.mjs";
 import {
   endpointCapabilityError,
   supportsOpenAIModelEndpoint,
@@ -331,6 +336,15 @@ const API_BASE = (
   process.env.CODEX_ROUTER_API_BASE_URL ||
   loopback(PORTS.api, "/v1")
 ).replace(/\/+$/, "");
+// Only our authenticated loopback hop can attest to transport delivery. An
+// externally configured Responses endpoint cannot grant itself replay rights.
+const trustedApiTransport = (() => {
+  try {
+    const url = new URL(API_BASE);
+    return url.protocol === "http:" && Number(url.port || 80) === PORTS.api &&
+      ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+  } catch { return false; }
+})();
 const GROK_OAUTH_HEALTH =
   process.env.CODEX_ROUTER_GROK_OAUTH_HEALTH_URL ||
   loopback(PORTS.grokOauth, "/health");
@@ -420,14 +434,17 @@ function isGrokOauthRoute(route) {
 
 // Grok keeps its stall-guard-sized pool. Local Ollama uses a separate pool
 // whose headers and body idle bounds outlast its LiteLLM timeout.
-function fetchForRoute(route, url, init) {
+async function fetchForRoute(route, url, init) {
+  // A redirected POST can have executed at its first origin before the next
+  // connection fails. Do not let fetch hide that delivery behind a new error.
+  if (String(init?.method).toUpperCase() === "POST") init = { ...init, redirect: "manual" };
   if (isGrokOauthRoute(route)) {
-    return longIdleStreamFetch(url, init, { bodyTimeoutMs: GROK_TRANSPORT_IDLE_TIMEOUT_MS });
+    return rejectGenerationRedirect(await longIdleStreamFetch(url, init, { bodyTimeoutMs: GROK_TRANSPORT_IDLE_TIMEOUT_MS }));
   }
   if (route && canonicalProviderId(route.provider) === "local") {
-    return longIdleStreamFetch(url, init, { bodyTimeoutMs: LOCAL_TRANSPORT_IDLE_TIMEOUT_MS });
+    return rejectGenerationRedirect(await longIdleStreamFetch(url, init, { bodyTimeoutMs: LOCAL_TRANSPORT_IDLE_TIMEOUT_MS }));
   }
-  return fetch(url, init);
+  return rejectGenerationRedirect(await fetch(url, init));
 }
 
 // Codex sends the service tier the operator picked, and a priority tier bills
@@ -641,10 +658,10 @@ function beginRequestActivity({ request, response, controller } = {}) {
   let finished = false;
   let deadlineExceeded = false;
   let executionTimer;
-  const finish = (status) => {
+  const finish = (status, outcome) => {
     if (finished) return;
     finished = true;
-    progress.finish(status);
+    progress.finish(status, outcome);
     if (executionTimer) clearTimeout(executionTimer);
     activityRecords.delete(requestId);
     inFlightRequests.delete(requestId);
@@ -1112,14 +1129,18 @@ async function nativeResponsesWebSocketFetch(url, init, { fallbackFetch, onSent,
 }
 
 function routedResponsesTarget(route) {
-  // WebSocket-transport providers terminate at the api-forwarder directly,
-  // exactly like DeepSeek Responses: LiteLLM has no WebSocket leg, and the
-  // forwarder owns both the credential boundary and the pooled upstream
-  // connections. Their litellm.yaml entries stay but go unused.
-  if (usesDeepSeekResponses(route) || usesProviderResponsesWebSocket(route)) {
+  // The API forwarder retains credential resolution, canonical preparation,
+  // frame validation and pooled transport. Responses-to-Responses routes do
+  // not require an additional protocol translator, on normal or compact turns.
+  if (routeExecution(route, { providerForModel }).transport === "direct-responses") {
     return `${API_BASE}/responses`;
   }
   return `${GATEWAY_BASE}/responses`;
+}
+
+function trustedProviderDeliveryState(route, upstream) {
+  return trustedApiTransport && route && routeExecution(route, { providerForModel }).transport === "direct-responses"
+    ? upstream.headers.get(PROVIDER_DELIVERY_STATE_HEADER) : undefined;
 }
 
 // LiteLLM translates Codex Responses requests into Chat Completions only after
@@ -1628,58 +1649,64 @@ function catalogModels() {
 // one probe per service per window instead of three per poll.
 const healthCache = createHealthCache({ staleWhileRevalidate: true });
 
-function serviceHealth(url) {
-  return healthCache(url, () => probeService(url));
+// The registry and its listeners are adopted together at process startup.
+// Candidate selection files may change during a publication transaction; they
+// cannot make this process advertise services or routes it has not loaded.
+const adoptedProviders = new Set(readProviderSelection());
+const adoptedConfiguredListedModels = () => selectedConfiguredListedModels({ selectedProviders: adoptedProviders });
+const adoptedExecutionPlan = createExecutionPlan({
+  models: MODELS,
+  providerForModel,
+  routeEnabled: (model) => routeProviderEnabled(model.provider),
+  pendingAntigravity: process.env.MODEL_ROUTER_PENDING_ANTIGRAVITY === "1",
+});
+if (process.env.MODEL_ROUTER_EXECUTION_PLAN_FINGERPRINT
+  && process.env.MODEL_ROUTER_EXECUTION_PLAN_FINGERPRINT !== adoptedExecutionPlan.fingerprint) {
+  throw new Error("The router registry changed during startup; no candidate generation was adopted.");
 }
 
-async function probeService(url) {
+function serviceHealth(url, options) {
+  return healthCache(url, () => probeService(url, options));
+}
+
+async function probeService(url, { authenticate = true, ollama = false } = {}) {
   try {
     // No dispatcher argument: `loopbackProbeFetch` owns one shared probe pool
     // for the process, so this cannot fork a second one.
     const response = await loopbackProbeFetch(url, {
-      headers: { Authorization: `Bearer ${INTERNAL_KEY}` },
+      ...(authenticate ? { headers: { Authorization: `Bearer ${INTERNAL_KEY}` } } : {}),
       signal: AbortSignal.timeout(3_000),
     });
     const raw = await response.json().catch(() => undefined);
     const payload = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-    return { ...payload, reachable: response.ok };
+    return { ...payload, reachable: response.ok && (!ollama || typeof payload.version === "string") };
   } catch {
     return { reachable: false };
   }
 }
 
 async function healthPayload() {
-  const enabled = new Set(readProviderSelection());
-  const apiEnabled = [...RUNTIME_PROVIDERS.values()].some(
-    (provider) => provider.kind === "openai-compatible" && (
-      provider.generic === true || enabled.has(provider.id)
-    ),
-  );
-  const [oauth, api, grokOauth, gateway] = await Promise.all([
-    enabled.has("kimi-oauth")
-      ? serviceHealth(OAUTH_HEALTH)
-      : { reachable: true, enabled: false },
-    apiEnabled ? serviceHealth(API_HEALTH) : { reachable: true, enabled: false },
-    // The Grok OAuth forwarder is started unconditionally but is only a real
-    // dependency for an operator who selected the provider, so it is gated the
-    // way the Kimi OAuth forwarder is: an unselected provider reports standby
-    // rather than being probed on a port nobody routes through.
-    enabled.has("grok-oauth")
-      ? serviceHealth(GROK_OAUTH_HEALTH)
-      : { reachable: true, enabled: false },
-    serviceHealth(GATEWAY_HEALTH),
-  ]);
+  const required = new Set(adoptedExecutionPlan.services);
+  const checks = [
+    ["oauth", "kimi", OAUTH_HEALTH],
+    ["api", "api", API_HEALTH],
+    ["grokOauth", "grok", GROK_OAUTH_HEALTH],
+    ["antigravityOauth", "antigravity", loopback(PORTS.antigravityOauth, "/health")],
+    ["devinCli", "devin", loopback(PORTS.devinCli, "/health")],
+    ["gateway", "gateway", GATEWAY_HEALTH],
+    ["ollama", "ollama", `${(process.env.MODEL_ROUTER_LOCAL_BASE_URL || "http://127.0.0.1:11434/v1").replace(/\/v1\/?$/, "").replace(/\/+$/, "")}/api/version`,
+      { authenticate: false, ollama: true }],
+  ];
+  const dependencies = Object.fromEntries(await Promise.all(checks.map(async ([name, service, url, options]) => [
+    name,
+    required.has(service) ? await serviceHealth(url, options) : { reachable: true, enabled: false },
+  ])));
   // Naming the unreachable dependency is the difference between "the router is
   // broken" and "the gateway is restarting". It costs nothing to carry: these
-  // are four fixed local service names, so it is safe on the unauthenticated
+  // are fixed local service names, so it is safe on the unauthenticated
   // leaf too, which is the only one `waitForRouterHealth` and therefore doctor
   // can read.
-  const degraded = [
-    ["oauth", oauth],
-    ["api", api],
-    ["grokOauth", grokOauth],
-    ["gateway", gateway],
-  ]
+  const degraded = Object.entries(dependencies)
     .filter(([, service]) => !service.reachable)
     .map(([name]) => name);
   return {
@@ -1690,10 +1717,8 @@ async function healthPayload() {
     degraded,
     activity: activityPayload(),
     resources: resourceLimitsPayload(),
-    oauth,
-    api,
-    grokOauth,
-    gateway,
+    executionPlan: adoptedExecutionPlan,
+    ...dependencies,
   };
 }
 
@@ -1705,7 +1730,7 @@ async function healthPayload() {
 // reference produces the promised 503 instead of being mislabeled as hidden.
 function routeProviderEnabled(providerId) {
   const provider = RUNTIME_PROVIDERS.get(providerId);
-  return provider?.generic === true || readProviderSelection().includes(providerId);
+  return provider?.generic === true || adoptedProviders.has(providerId);
 }
 
 function messageItem(text) {
@@ -2028,25 +2053,8 @@ const agentPayloadCachePurgeTimer = setInterval(
 );
 agentPayloadCachePurgeTimer.unref?.();
 
-// Periodically refresh the native account catalog, compare it with the last
-// capture, and republish changes. Codex stops updating models_cache.json while
-// model_catalog_json points at the router, so the refresh cannot depend on
-// Codex rewriting that file itself.
-const nativeCatalogDriftCheckTimer = setInterval(
-  async () => {
-    try {
-      const { republishOnNativeDrift } = await import("./native-catalog-drift.mjs");
-      await republishOnNativeDrift();
-    } catch (error) {
-      // Drift check is best-effort; log but don't crash the router
-      if (!String(error.message).includes("Native catalog drift detected")) {
-        console.error(`[codex-router] Periodic native drift check failed: ${error.message}`);
-      }
-    }
-  },
-  5 * 60_000, // Every 5 minutes
-);
-nativeCatalogDriftCheckTimer.unref?.();
+// The supervisor owns catalog observation and its daily fallback. A second
+// scheduler in this child would multiply refreshes and ignore that policy.
 
 async function relayEncryptedAgentPayloadOnce(
   item,
@@ -2347,6 +2355,10 @@ async function readVisionEvidence({ url, engine, nativeCall, effort, question, k
       engine,
       imageUrl: url,
       gatewayBase: GATEWAY_BASE,
+      responsesTarget: engine.native || engine.local ? undefined :
+        routedResponsesTarget(MODEL_BY_SLUG.get(engine.slug) ?? engine),
+      trustedTransportResponse: trustedApiTransport && !engine.native && !engine.local &&
+        routeExecution(MODEL_BY_SLUG.get(engine.slug) ?? engine, { providerForModel }).transport === "direct-responses",
       headers: routedHeaders(),
       nativeCall,
       effort,
@@ -2549,7 +2561,7 @@ async function bridgeVisionInput(input, route, request) {
   // paste rather than at the next catalog rebuild.
   const engines = resolveVisionEngines(
     () => [
-      ...selectedConfiguredListedModels(),
+      ...adoptedConfiguredListedModels(),
       ...(request && hasNativeSession(nativeHeaders(request))
         ? installedNativeVisionEngines({ hidden: readHiddenModels() })
         : []),
@@ -2608,6 +2620,8 @@ async function bridgeVisionInput(input, route, request) {
         return { text, engineName: engine.displayName || engine.slug };
       } catch (error) {
         lastError = error;
+        if (["possibly_sent", "response_started"].includes(error?.deliveryState)
+          && NATIVE_RETRY_POLICY !== "availability") throw error;
         if (error?.failureKind === "out_of_usage") exhaustedProviders.add(provider);
       }
     }
@@ -3029,7 +3043,7 @@ function compactionAttempts(route, aged, searchContract, { allowFailover = true 
   const settings = readFailoverSettings();
   if (!settings.enabled) return [route];
   const candidates = rankFailoverCandidates(
-    selectedConfiguredListedModels().filter(
+    adoptedConfiguredListedModels().filter(
       (model) => !readHiddenModels().has(model.slug),
     ),
     {
@@ -3060,7 +3074,7 @@ function rankCompactionOverflowCandidates({
   chain,
 }) {
   return rankFailoverCandidates(
-    selectedConfiguredListedModels().filter(
+    adoptedConfiguredListedModels().filter(
       (model) => !readHiddenModels().has(model.slug),
     ),
     {
@@ -3390,6 +3404,7 @@ async function summarize(request, payload, route, signal, { allowFailover = true
     const verdict = classifyRoutedFailure({
       status: upstreamStatus,
       bodyText,
+      trustedDeliveryState: trustedProviderDeliveryState(attemptRoute, sent.upstream),
       retryAfterSeconds: retryAfterSeconds(sent.upstream.headers),
     });
     const overflow = contextLengthFailure(bodyText);
@@ -4226,7 +4241,7 @@ function logImageRejectionRetry(route, path, attempt, stats) {
 function failoverCandidates({ route, agedInput, flattenedNamespaces, searchContract, chain }) {
   const hidden = readHiddenModels();
   return rankFailoverCandidates(
-    selectedConfiguredListedModels().filter((model) => !hidden.has(model.slug)),
+    adoptedConfiguredListedModels().filter((model) => !hidden.has(model.slug)),
     {
       from: route,
       // Context fit is checked after rebuilding the request for each
@@ -4257,7 +4272,7 @@ function subagentTransportFailoverCandidates({ request, route, agedInput, search
   if (subagentEligibility(route)) return [];
   const hidden = readHiddenModels();
   let ranked = rankSubagentCandidates(
-    selectedConfiguredListedModels().filter((model) => !hidden.has(model.slug)),
+    adoptedConfiguredListedModels().filter((model) => !hidden.has(model.slug)),
     {
       chain,
       requiredCapabilities: [
@@ -4329,6 +4344,7 @@ async function attemptModelFailover({
   agingEnabled,
   searchContract,
   progress,
+  fetchUpstream,
 }) {
   const settings = readFailoverSettings();
   if (!settings.enabled) return undefined;
@@ -4386,14 +4402,14 @@ async function attemptModelFailover({
       // Name the candidate now: it may wait a long time for headers, and
       // `/activity` must not credit that wait to the provider that failed.
       progress?.setRoute({ provider: canonicalProviderId(model.provider), model: model.slug });
-      progress?.attempt();
-      upstream = await fetchForRoute(model, built.target, {
+      if (!fetchUpstream) progress?.attempt();
+      upstream = await (fetchUpstream || fetchForRoute)(model, built.target, {
         method: "POST",
         headers: built.headers,
         body: built.body,
         signal,
       });
-      progress?.headers();
+      if (!fetchUpstream) progress?.headers();
     } catch (error) {
       if (signal.aborted) throw error;
       const compatibilityCode = candidateBuildCompatibilityCode(error);
@@ -4406,6 +4422,8 @@ async function attemptModelFailover({
           ? `compatibility/${compatibilityCode}`
           : `transport/${error?.name || "Error"}`,
       );
+      if (!compatibilityCode && transportDeliveryState(error) !== "not_sent"
+        && NATIVE_RETRY_POLICY !== "availability") throw error;
       continue;
     }
     if (upstream.ok) {
@@ -4423,12 +4441,14 @@ async function attemptModelFailover({
     const hopVerdict = classifyRoutedFailure({
       status: upstream.status,
       bodyText: hopBodyText,
+      trustedDeliveryState: trustedProviderDeliveryState(model, upstream),
       retryAfterSeconds: retryAfterSeconds(upstream.headers),
     });
     // A transport retry stops as soon as another provider gives any real HTTP
     // answer. Walking onward would turn an application failure into a silent
     // cross-provider retry, outside the authority this path was given.
-    if (transportFallback && hopVerdict.reason !== "transport") {
+    if (hopVerdict.reason === "transport_ambiguous" ||
+      (transportFallback && hopVerdict.reason !== "transport")) {
       logFailover(route, model, verdict.reason, status, upstream.status);
       return { route: model, built, upstream, failedBodyText: hopBodyText };
     }
@@ -4460,11 +4480,35 @@ async function handleResponses(request, response, requestUrl) {
   const startedAt = Date.now();
   const controller = new AbortController();
   const activity = beginRequestActivity({ request, response, controller });
-  const fetchObservedUpstream = async (url, init) => {
+  let ingressMs;
+  let preparationMs;
+  let upstreamHeadersMs = 0;
+  const attemptsForResponse = new WeakMap();
+  const fetchObservedUpstream = async (url, init, { attemptRoute = route } = {}) => {
     activity.progress.attempt();
-    const upstream = await fetchForRoute(route, url, init);
-    activity.progress.headers();
-    return upstream;
+    const dispatchAt = Date.now();
+    preparationMs ??= Math.max(0, dispatchAt - startedAt - (ingressMs ?? 0));
+    try {
+      const upstream = await fetchForRoute(attemptRoute, url, init);
+      activity.progress.headers();
+      if (attemptRoute && upstreamAttempts.length < 6) {
+        const event = { attempt: upstreamAttempts.length + 1, deliveryState: "response_started",
+          status: upstream.status, durationMs: Math.max(0, Date.now() - dispatchAt), retryScheduled: false };
+        upstreamAttempts.push(event);
+        attemptsForResponse.set(upstream, event);
+      }
+      return upstream;
+    } catch (error) {
+      if (attemptRoute && upstreamAttempts.length < 6) upstreamAttempts.push({
+        attempt: upstreamAttempts.length + 1, deliveryState: transportDeliveryState(error),
+        durationMs: Math.max(0, Date.now() - dispatchAt), retryScheduled: false,
+      });
+      throw error;
+    } finally {
+      // This includes local adapter and network/provider wait, not provider
+      // processing alone. Sum retries/failover so failed attempts stay visible.
+      upstreamHeadersMs += Math.max(0, Date.now() - dispatchAt);
+    }
   };
   const diagnostics = { requestId: activity.requestId };
   let clientGone = false;
@@ -4506,6 +4550,31 @@ async function handleResponses(request, response, requestUrl) {
   let finalStatus;
   let activityStatus;
   let usageRecorded = false;
+  let generationOutcome;
+  let turnHttpStatus;
+  const upstreamAttempts = [];
+  let deliveryPolicy = NATIVE_RETRY_POLICY;
+  const recordTurnUsage = (fields, metadata) => {
+    const observer = retryUsageTransform ?? usageTransform;
+    generationOutcome = resolveGenerationOutcome({
+      observed: observer?.generationOutcome(),
+      status: fields.status,
+      canceled: fields.status === 0,
+      failed: fields.streamAborted || fields.emptyCompletion ||
+        fields.emptyCompletionUnrepairable || fields.requestDeadlineExceeded,
+      expectsTerminal: !!observer,
+    });
+    // Preserve the committed HTTP envelope even if an SSE terminal error made
+    // the historical accounting status 502. No response head can be changed
+    // after output has started.
+    turnHttpStatus = response.headersSent ? response.statusCode :
+      fields.status >= 100 ? fields.status : upstreamStatus;
+    recordObservedUsage({ ...fields, httpStatus: turnHttpStatus, generationOutcome,
+      retries: fields.retries ?? upstreamRetries,
+      ingressMs, preparationMs, upstreamHeadersMs,
+      ...(upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy } : {}),
+    }, metadata);
+  };
   bindClientAbort(request, response, () => {
     clientGone = true;
     activity.progress.cancel("client_disconnected");
@@ -4522,6 +4591,7 @@ async function handleResponses(request, response, requestUrl) {
       maxWireBytes: INCOMING_HISTORY_WIRE_BYTES,
       maxHistoryBytes: INCOMING_HISTORY_DECODED_BYTES,
     });
+    ingressMs = Date.now() - startedAt;
     let payload = received.payload;
     if (received.stats.imagesDropped > 0) {
       console.error(`[codex-router] bounded incoming image history dropped=${received.stats.imagesDropped} image-bytes-saved=${received.stats.imageBytesSaved} decoded-bytes=${received.stats.decodedBytes}`);
@@ -4590,7 +4660,7 @@ async function handleResponses(request, response, requestUrl) {
             invalidHistoryCall.toolName || "unknown"
           } ${invalidHistoryCall.param || ""} status=400`,
         );
-        recordObservedUsage({
+        recordTurnUsage({
           model: route.slug,
           provider: canonicalProviderId(route.provider),
           status: 400,
@@ -4666,7 +4736,7 @@ async function handleResponses(request, response, requestUrl) {
           `[codex-router] skipped-unnecessary-compaction model=${route.slug} provider=${route.provider} estimated-input=${skipEstimatedTokens}`,
         );
       }
-      recordObservedUsage(
+      recordTurnUsage(
         {
           model: route.slug,
           provider: canonicalProviderId(route.provider),
@@ -4976,24 +5046,42 @@ async function handleResponses(request, response, requestUrl) {
         // error translation and Retry-After handling below; leave it exactly
         // as it was.
         fetchImpl: nativeWsTransport
-          ? (url, init) => nativeResponsesWebSocketFetch(url, init, {
-              fallbackFetch: fetchObservedUpstream,
-              onSent: () => { nativeWsSent = true; activity.progress.attempt(); },
-              onHeaders: () => activity.progress.headers(),
-            })
+          ? async (url, init) => {
+              const dispatchAt = Date.now();
+              preparationMs ??= Math.max(0, dispatchAt - startedAt - (ingressMs ?? 0));
+              try {
+                return await nativeResponsesWebSocketFetch(url, init, {
+                  fallbackFetch: async (fallbackUrl, fallbackInit) => {
+                    activity.progress.attempt();
+                    const fetched = await fetchForRoute(undefined, fallbackUrl, fallbackInit);
+                    activity.progress.headers();
+                    return fetched;
+                  },
+                  onSent: () => { nativeWsSent = true; activity.progress.attempt(); },
+                  onHeaders: () => activity.progress.headers(),
+                });
+              } finally { upstreamHeadersMs += Math.max(0, Date.now() - dispatchAt); }
+            }
           : fetchObservedUpstream,
         retries: route ? 0 : undefined,
         canRetry: () => !nativeWsSent && nothingRelayed(response),
-        onRetry: (event) => logUpstreamRetry(event, requestedModel, requestUrl.pathname),
+        onAttempt: (event) => {
+          if (!route) {
+            upstreamRetries = Math.max(upstreamRetries || 0, event.attempt - 1);
+            if (upstreamAttempts.length < 6) upstreamAttempts.push(event);
+          }
+        },
+        onRetry: (event) => {
+          deliveryPolicy = event.deliveryPolicy;
+          logUpstreamRetry(event, requestedModel, requestUrl.pathname);
+        },
       },
     );
     upstreamRetries = retries;
     upstreamStatus = upstream.status;
-    // Time until the upstream chain answered the request. Everything before
-    // this is router-side work (body read, normalization, flattening, vision
-    // bridge) plus the upstream's own time to produce response headers. For a
-    // routed turn that means the full router -> litellm -> api-forwarder ->
-    // provider path, so a stall here is the provider's, not the router's.
+    // Time until the whole chain answered: ingress, router preparation, local
+    // adapters, network and provider processing. This end-to-end measurement
+    // cannot by itself attribute a delay to the provider.
     upstreamLatencyMs = Date.now() - startedAt;
     // The body of a failed routed attempt, read once: the failover classifier
     // and the error translation below both need it, and it can only be read
@@ -5008,20 +5096,21 @@ async function handleResponses(request, response, requestUrl) {
       let verdict = classifyRoutedFailure({
         status: upstream.status,
         bodyText: failedBodyText,
+        trustedDeliveryState: trustedProviderDeliveryState(route, upstream),
         retryAfterSeconds: retryAfterSeconds(upstream.headers),
       });
-      // The provider forwarder emits the reserved transport marker only when
-      // it failed before any provider response was available. Cross-model
-      // failover already treats that marker as replay-safe, but an ordinary
-      // turn (or a single-provider install) has no fallback candidate. Retry
-      // the exact same materialized request once before changing models or
-      // surfacing the 502. Generic provider 5xx bodies never enter this branch,
-      // and nothing can be replayed after caller bytes have been sent.
+      // A missing provider response cannot prove the POST was not executed.
+      // Only the local API forwarder's origin-stripped delivery header can
+      // certify a pre-send failure; availability explicitly allows ambiguity.
+      // Caller bytes and cancellation still prohibit every transport replay.
+      const failedAttempt = attemptsForResponse.get(upstream);
+      if (failedAttempt && verdict.deliveryState) failedAttempt.deliveryState = verdict.deliveryState;
       if (
         verdict.reason === "transport" &&
         nothingRelayed(response) &&
         !controller.signal.aborted
       ) {
+        if (failedAttempt) failedAttempt.retryScheduled = true;
         console.error(
           `[codex-router] routed transport retry 1/1 model=${route.slug} path=${requestUrl.pathname}`,
         );
@@ -5046,8 +5135,11 @@ async function handleResponses(request, response, requestUrl) {
           : classifyRoutedFailure({
               status: upstream.status,
               bodyText: failedBodyText,
+              trustedDeliveryState: trustedProviderDeliveryState(route, upstream),
               retryAfterSeconds: retryAfterSeconds(upstream.headers),
             });
+        const repeatedAttempt = attemptsForResponse.get(upstream);
+        if (repeatedAttempt && verdict.deliveryState) repeatedAttempt.deliveryState = verdict.deliveryState;
       }
       // The image budget is a measurement, not the provider's contract. A
       // provider that still refuses the image content gets the same model again
@@ -5094,6 +5186,7 @@ async function handleResponses(request, response, requestUrl) {
           : classifyRoutedFailure({
               status: upstream.status,
               bodyText: failedBodyText,
+              trustedDeliveryState: trustedProviderDeliveryState(route, upstream),
               retryAfterSeconds: retryAfterSeconds(upstream.headers),
             });
       }
@@ -5103,6 +5196,7 @@ async function handleResponses(request, response, requestUrl) {
         // rejection again.
         recordProviderCooldown(route.provider, verdict);
         const moved = await attemptModelFailover({
+          fetchUpstream: (model, url, init) => fetchObservedUpstream(url, init, { attemptRoute: model }),
           progress: activity.progress,
           request,
           response,
@@ -5122,7 +5216,7 @@ async function handleResponses(request, response, requestUrl) {
           // cost the provider something, so it is metered on its own row. The
           // serving row below carries `failoverFrom`, which is what makes a
           // rescued turn distinguishable from one that never failed.
-          recordObservedUsage({
+          recordTurnUsage({
             model: route.slug,
             provider: canonicalProviderId(route.provider),
             status: upstream.status,
@@ -5210,7 +5304,7 @@ async function handleResponses(request, response, requestUrl) {
         provider: route.provider,
         stream: payload.stream === true,
       });
-      recordObservedUsage({
+      recordTurnUsage({
         model: route.slug,
         provider: canonicalProviderId(route.provider),
         status: upstream.status,
@@ -5370,22 +5464,12 @@ async function handleResponses(request, response, requestUrl) {
           }),
         );
       }
-      // Strip inline `<think>...</think>` reasoning that routed providers leak
-      // into the visible answer, when their chat-completions -> Responses bridge
-      // relays the model's chain-of-thought as `output_text` instead of on the
-      // reasoning channel. Runs before the lifecycle normalizer so the reorder
-      // sees already-cleaned message text. Native OpenAI streams (no route) never
-      // carry these tags and are left untouched.
-      // Hy4 spells its own delimiters with a per-message nonce
-      // (`</think:6124c78e>`), and a stack that eats the opening tag leaves the
-      // planning prose in the answer with only that orphan close behind it
-      // (#654). Reading the suffix -- and the prose in front of an orphan close
-      // -- is gated to the family that writes the nonce, the same gate the
-      // tool-call recovery above uses.
-      const tagStripper = route
-        ? reasoningTagStripperTransform(contentType, {
-            nonceDelimiters: usesHy4NonceMarkup(route),
-          })
+      // Visible XML and source examples are ordinary answer text by default.
+      // Only an evidenced route contract or explicit operator policy enables
+      // legacy inline cleanup; nonce cleanup retains its strict Hy4 gate.
+      const tagOptions = reasoningTagOptionsForRoute(route);
+      const tagStripper = tagOptions
+        ? reasoningTagStripperTransform(contentType, tagOptions)
         : undefined;
       if (tagStripper) transforms.push(tagStripper);
       // Restore sequential output-item lifecycles for routed providers, whose
@@ -5743,7 +5827,7 @@ async function handleResponses(request, response, requestUrl) {
     // is already gone) and only rejects for an upstream that actually failed.
     // A cancel is not a router failure, so it meters as 0 rather than the
     // committed 200 that the client never finished reading.
-    recordObservedUsage({
+    recordTurnUsage({
       model: route?.slug || requestedModel,
       provider: route ? canonicalProviderId(route.provider) : "openai",
       status: finalStatus,
@@ -5772,7 +5856,8 @@ async function handleResponses(request, response, requestUrl) {
     // The same usage this turn just metered, and the same two disqualifiers
     // context-window-drift.mjs applies to it: a substituted estimate and a
     // retry-doubled count are not measurements of what the child sent.
-    observeSubagentOutcome(request, route, finalStatus, {
+    observeSubagentOutcome(request, route,
+      generationOutcome === "completed" ? finalStatus : finalStatus === 0 ? 0 : 502, {
       emptyCompletion,
       usage,
       estimatedInputTokens,
@@ -5817,7 +5902,7 @@ async function handleResponses(request, response, requestUrl) {
       finalStatus = 504;
       activityStatus = 504;
       if (!usageRecorded) {
-        recordObservedUsage({
+        recordTurnUsage({
           model: route?.slug || requestedModel,
           provider: route ? canonicalProviderId(route.provider) : "openai",
           status: 504,
@@ -5855,7 +5940,7 @@ async function handleResponses(request, response, requestUrl) {
           param: error.param ?? null,
         },
       });
-      recordObservedUsage({
+      recordTurnUsage({
         model: route?.slug || requestedModel,
         provider: route ? canonicalProviderId(route.provider) : "openai",
         status: finalStatus,
@@ -5875,7 +5960,7 @@ async function handleResponses(request, response, requestUrl) {
         message: error.message,
       });
       if (!response.writableEnded && !response.destroyed) response.end();
-      recordObservedUsage({
+      recordTurnUsage({
         model: route?.slug || requestedModel,
         provider: route ? canonicalProviderId(route.provider) : "openai",
         status: 502,
@@ -5902,7 +5987,7 @@ async function handleResponses(request, response, requestUrl) {
           message: error.message,
         },
       });
-      recordObservedUsage({
+      recordTurnUsage({
         model: route?.slug || requestedModel,
         provider: route ? canonicalProviderId(route.provider) : "openai",
         status: error.status,
@@ -5921,7 +6006,7 @@ async function handleResponses(request, response, requestUrl) {
           message: error.message,
         },
       });
-      recordObservedUsage({
+      recordTurnUsage({
         model: route?.slug || requestedModel,
         provider: route ? canonicalProviderId(route.provider) : "openai",
         status: error.status,
@@ -5969,7 +6054,7 @@ async function handleResponses(request, response, requestUrl) {
         clearStagedResponseHead(response);
         writeJson(response, 400, { error: { type: "generation_guard_error", code: error.code, message: error.message } });
       }
-      recordObservedUsage({
+      recordTurnUsage({
         model: route?.slug || requestedModel,
         provider: route ? canonicalProviderId(route.provider) : "openai",
         status: finalStatus,
@@ -5995,7 +6080,7 @@ async function handleResponses(request, response, requestUrl) {
       finalStatus = upstreamStatus ?? response.statusCode;
       activityStatus = finalStatus;
       if (!usageRecorded) {
-        recordObservedUsage({
+        recordTurnUsage({
           model: requestedModel,
           provider: "openai",
           status: finalStatus,
@@ -6030,7 +6115,7 @@ async function handleResponses(request, response, requestUrl) {
       finalStatus = 0;
       activityStatus = 0;
       if (!usageRecorded) {
-        recordObservedUsage({
+        recordTurnUsage({
           model: route?.slug || requestedModel,
           provider: route ? canonicalProviderId(route.provider) : "openai",
           status: 0,
@@ -6057,7 +6142,7 @@ async function handleResponses(request, response, requestUrl) {
     finalStatus = response.headersSent ? 502 : httpErrorStatus(error);
     activityStatus = finalStatus;
     if (!usageRecorded) {
-      recordObservedUsage({
+      recordTurnUsage({
         model: route?.slug || requestedModel,
         provider: route ? canonicalProviderId(route.provider) : "openai",
         status: finalStatus,
@@ -6082,7 +6167,7 @@ async function handleResponses(request, response, requestUrl) {
     throw error;
   } finally {
     const status = activityStatus ?? finalStatus ?? response.statusCode;
-    activity.finish(status);
+    activity.finish(status, { generationOutcome, httpStatus: turnHttpStatus });
     // Timestamped per-request timing for latency diagnosis. Never gated on
     // QUIET: the production LaunchAgent hard-sets CODEX_ROUTER_QUIET=1. A
     // missing provider count is logged as unknown, not zero; an explicit zero
@@ -6618,6 +6703,10 @@ async function handleRequest(request, response) {
     request.url || "/",
     `http://${request.headers.host || LISTEN_HOST}`,
   );
+  if (request.method === "GET" && requestUrl.pathname === "/health/live") {
+    writeJson(response, 200, { ok: true, service: "codex-router", version: VERSION });
+    return;
+  }
   if (request.method === "GET" && requestUrl.pathname === "/health") {
     const health = await healthPayload();
     writeJson(response, health.ok ? 200 : 503, {
@@ -6626,6 +6715,7 @@ async function handleRequest(request, response) {
       version: health.version,
       degraded: health.degraded,
       activity: health.activity,
+      executionPlan: health.executionPlan,
     });
     return;
   }
@@ -6858,3 +6948,5 @@ server.listen(LISTEN_PORT, LISTEN_HOST, () => {
 installGracefulShutdown(server, { label: "codex-router" });
 process.once("SIGTERM", () => nativeWsPools.closeAll());
 process.once("SIGINT", () => nativeWsPools.closeAll());
+// Retire pooled upstream sockets after the supervisor's IPC drain completes.
+process.once("disconnect", () => nativeWsPools.closeAll());

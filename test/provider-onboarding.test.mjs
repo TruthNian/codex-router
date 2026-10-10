@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { spawnEnvironment } from "../src/npm-global-install.mjs";
 import { oauthLoginArgs } from "../src/provider-onboarding.mjs";
 import { freePort } from "./port-pool.mjs";
+import { stageProviderControlRuntime } from "./fixtures/provider-control-runtime.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const inactiveRouterPort = await freePort();
@@ -77,9 +78,18 @@ function isolatedPath() {
 }
 
 function isolatedEnvironment(testRoot) {
+  assert.ok(path.isAbsolute(testRoot));
+  assert.ok(testRoot !== os.homedir());
   return {
     ...process.env,
     HOME: testRoot,
+    USERPROFILE: testRoot,
+    APPDATA: path.join(testRoot, "appdata"),
+    LOCALAPPDATA: path.join(testRoot, "localappdata"),
+    CODEX_HOME: path.join(testRoot, "codex"),
+    CODEX_ROUTER_NO_DISCOVERY: "0",
+    CODEX_ROUTER_STATE_DIR: path.join(testRoot, "state"),
+    ...stageProviderControlRuntime(testRoot),
     PATH: isolatedPath(),
     // Onboarding falls back to npm's own global bin directory when PATH and
     // the guessed locations come up empty, so an isolated home is not enough
@@ -143,7 +153,7 @@ function cachedProviders(stateDir) {
 }
 
 test("provider onboarding reports install, login, and API key actions without secrets", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-onboarding-"));
+  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-onboarding-"));
   try {
     const output = execFileSync(
       process.execPath,
@@ -187,7 +197,7 @@ test("provider onboarding reports install, login, and API key actions without se
 });
 
 test("provider onboarding follows authoritative pool readiness instead of a legacy key", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-pool-onboarding-"));
+  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-pool-onboarding-"));
   const readyEnvironment = {
     ...isolatedEnvironment(testRoot),
     OPENCODE_API_KEY: "TEST_ONBOARDING_POOL_KEY",
@@ -234,7 +244,7 @@ test("provider onboarding follows authoritative pool readiness instead of a lega
 });
 
 test("control accepts an API key only through stdin and stores it privately", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-key-control-"));
+  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-key-control-"));
   const testKey = "TEST_TRAY_XAI_KEY";
   try {
     const result = spawnSync(
@@ -259,7 +269,7 @@ test("control accepts an API key only through stdin and stores it privately", ()
 });
 
 test("control clears every catalog source when a shared credential changes", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-family-cache-control-"));
+  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-family-cache-control-"));
   const environment = isolatedEnvironment(testRoot);
   const stateDir = environment.MODEL_ROUTER_STATE_DIR;
   try {
@@ -290,7 +300,7 @@ test("control clears every catalog source when a shared credential changes", () 
 });
 
 test("control removes a stored API key and disables the provider", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-key-remove-"));
+  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-key-remove-"));
   const environment = isolatedEnvironment(testRoot);
   const keyPath = path.join(testRoot, "state", "xai-api-key.secret");
   try {
@@ -326,7 +336,7 @@ test("control removes a stored API key and disables the provider", () => {
 });
 
 test("removing an absent API key reports no change instead of failing", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-key-remove-absent-"));
+  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-key-remove-absent-"));
   try {
     const result = spawnSync(
       process.execPath,
@@ -341,7 +351,7 @@ test("removing an absent API key reports no change instead of failing", () => {
 });
 
 test("provider-key remove awaits removal and reports the deleted credential", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-key-await-remove-"));
+  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-key-await-remove-"));
   const stateDir = path.join(testRoot, "state");
   const keyPath = path.join(stateDir, "deepseek-api-key.secret");
   try {
@@ -362,7 +372,7 @@ test("provider-key remove awaits removal and reports the deleted credential", ()
 });
 
 test("provider-key remove clears every catalog source sharing the credential", () => {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-family-cache-cli-"));
+  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-family-cache-cli-"));
   const environment = isolatedEnvironment(testRoot);
   const stateDir = environment.MODEL_ROUTER_STATE_DIR;
   const keyPath = path.join(stateDir, "opencode-go-api-key.secret");

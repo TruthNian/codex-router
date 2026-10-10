@@ -1,14 +1,10 @@
 import {
   existsSync,
-  mkdirSync,
   readFileSync,
-  renameSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
-import path from "node:path";
 
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import { CODEX_DEFAULT_MODEL_PATH } from "./paths.mjs";
 
 // This is intentionally a small claim over Codex's `model` setting, not a
@@ -48,20 +44,7 @@ export function writeCodexRouterDefault(state) {
   if (!value.model || (value.previousPresent && typeof value.previousModel !== "string")) {
     throw new Error("Invalid Codex router default state.");
   }
-  mkdirSync(path.dirname(CODEX_DEFAULT_MODEL_PATH), { recursive: true, mode: 0o700 });
-  const temporary = `${CODEX_DEFAULT_MODEL_PATH}.tmp.${process.pid}`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  try {
-    protectPrivateFile(temporary);
-    renameSync(temporary, CODEX_DEFAULT_MODEL_PATH);
-    protectPrivateFile(CODEX_DEFAULT_MODEL_PATH);
-  } catch (error) {
-    if (existsSync(temporary)) unlinkSync(temporary);
-    throw error;
-  }
+  writePrivateFile(CODEX_DEFAULT_MODEL_PATH, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 export function clearCodexRouterDefault() {

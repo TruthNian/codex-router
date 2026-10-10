@@ -1,14 +1,22 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { flattenNamespaceTools } from "../src/namespace-relay.mjs";
-import { subagentToolAvailable } from "../src/subagent-completion.mjs";
-
 const stateDir = mkdtempSync(path.join(os.tmpdir(), "model-failover-test-"));
 process.env.CODEX_ROUTER_STATE_DIR = stateDir;
+process.env.MODEL_ROUTER_STATE_DIR = stateDir;
+process.env.CODEX_HOME = path.join(stateDir, "codex");
+test.after(() => {
+  const resolved = path.resolve(stateDir);
+  assert.ok(resolved.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`) &&
+    path.basename(resolved).startsWith("model-failover-test-"));
+  rmSync(resolved, { recursive: true, force: true });
+});
+
+const { flattenNamespaceTools } = await import("../src/namespace-relay.mjs");
+const { subagentToolAvailable } = await import("../src/subagent-completion.mjs");
 
 const {
   FAILOVER_TIER,
@@ -72,18 +80,35 @@ test("classifyRoutedFailure swaps on OpenCode FreeUsageLimitError", () => {
   assert.deepEqual(verdict, { swap: true, reason: "out_of_usage" });
 });
 
-test("classifyRoutedFailure swaps only a marked provider transport 5xx", () => {
+test("classifyRoutedFailure swaps only proven pre-send transport errors by default", () => {
   assert.deepEqual(
     classifyRoutedFailure({
       status: 502,
       bodyText: JSON.stringify({ error: { type: "provider_transport_error" } }),
+      trustedDeliveryState: "not_sent",
+      deliveryPolicy: "at-most-once",
     }),
-    { swap: true, reason: "transport" },
+    { swap: true, reason: "transport", deliveryState: "not_sent" },
   );
   assert.deepEqual(
     classifyRoutedFailure({ status: 502, bodyText: "provider unavailable" }),
     { swap: false },
   );
+});
+
+test("legacy and origin-claimed transport evidence require explicit availability", () => {
+  for (const marker of [
+    { type: "provider_transport_error" },
+    { type: "provider_transport_error", code: "ECONNREFUSED", deliveryState: "not_sent" },
+  ]) {
+    const failure = { status: 502, bodyText: JSON.stringify({ error: marker }) };
+    assert.deepEqual(classifyRoutedFailure({ ...failure, deliveryPolicy: "at-most-once" }), {
+      swap: false, reason: "transport_ambiguous", deliveryState: "possibly_sent",
+    });
+    assert.deepEqual(classifyRoutedFailure({ ...failure, deliveryPolicy: "availability" }), {
+      swap: true, reason: "transport", deliveryState: "possibly_sent",
+    });
+  }
 });
 
 test("classifyRoutedFailure never swaps a local tool-argument conversion", () => {

@@ -11,10 +11,9 @@ const CONTROL_TIMEOUT_MS = 120_000;
 // execFile owns a control wrapper, which in turn contracts its service child.
 // Keep both ten-second tree reserves outside the platform + readiness phase.
 const SERVICE_START_TIMEOUT_MS = 350_000;
-// Two complete 640-second overlay epochs plus nested owner cleanup. A nominal
-// five-minute UI timeout deterministically truncated LiteLLM's own five-minute
-// readiness allowance after publication and service-status overhead.
-const CATALOG_MUTATION_TIMEOUT_MS = 1_320_000;
+// Dependency preparation, adoption and client publication each have bounded
+// epochs. The outer desktop owner also preserves control/tree cleanup margins.
+const CATALOG_MUTATION_TIMEOUT_MS = 45 * 60_000 + 20_000;
 const OAUTH_LOGIN_TIMEOUT_MS = 11 * 60_000;
 
 const SELF_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

@@ -121,7 +121,15 @@ async function run(platform, command, mode = 'success', { wrapper = false } = {}
       events.push({ kind: 'platform-spawn' }); return { status: 0 };
     } },
     './paths.mjs': { CODEX_HOME: fixturePath.join(fixtureRoot, 'codex'), LOG_PATH: fixturePath.join(fixtureRoot, 'log'), PORTS: { router: 4200 }, SOURCE_ROOT: sourceRoot, STATE_DIR: stateDir, TARGET: 'codex', TARGET_DISPLAY_NAME: 'Codex Router', SERVICE_LABEL: 'io.github.codex-router', LAUNCH_AGENT_PATH: fixturePath.join(fixtureRoot, 'router.plist'), SERVICE_PROCESS_STATE_PATH: fixturePath.join(stateDir, 'service-process.json') },
-    './file-security.mjs': { ensureCheckoutReadable: () => {}, protectPrivateFile: () => {}, writePrivateJson: (file, value) => { if (String(file).endsWith('startup-attempts.json')) record = value; } },
+    './file-security.mjs': {
+      ensureCheckoutReadable: () => {},
+      protectPrivateFile: () => {},
+      writePrivateFile: (file, contents) => {
+        assert.equal(fixturePath.dirname(file), stateDir, 'launcher writes must stay inside the simulated state directory');
+        assert.ok(Buffer.isBuffer(contents), 'launcher encodings must reach the shared writer as bytes');
+      },
+      writePrivateJson: (file, value) => { if (String(file).endsWith('startup-attempts.json')) record = value; },
+    },
     './log-rotation.mjs': { rotateLog: () => {} },
     './provider-api-key-service-environment.mjs': { providerApiKeyServiceEnvironment: noopEnvironment },
     './zai-stream-timeouts.mjs': { serviceZaiCodingStreamEnvironment: noopEnvironment },

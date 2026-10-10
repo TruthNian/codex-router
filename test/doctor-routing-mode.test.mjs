@@ -74,7 +74,7 @@ test(
   "catalog then ordinary enable stays healthy and native-only when signed routing is off",
   { timeout: 30_000 },
   () => {
-    const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-router-doctor-direct-"));
+    const codexHome = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "codex-router-doctor-direct-"));
     const stateDir = path.join(codexHome, "router-state");
     const configPath = path.join(codexHome, "config.toml");
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -109,6 +109,11 @@ wire_api = "responses"
       ...process.env,
       CODEX_BIN: writeCodexStub(codexHome),
       CODEX_HOME: codexHome,
+      HOME: codexHome,
+      USERPROFILE: codexHome,
+      APPDATA: path.join(codexHome, "AppData", "Roaming"),
+      LOCALAPPDATA: path.join(codexHome, "AppData", "Local"),
+      CODEX_ROUTER_NO_DISCOVERY: "0",
       CODEX_ROUTER_PORT: "46192",
       CODEX_ROUTER_STATE_DIR: stateDir,
       MODEL_ROUTER_STATE_DIR: stateDir,
@@ -217,7 +222,7 @@ test(
   "a routed catalog waiting for Codex restart is a warning, not a failed repair",
   { timeout: 30_000 },
   () => {
-    const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-router-doctor-restart-"));
+    const codexHome = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "codex-router-doctor-restart-"));
     const stateDir = path.join(codexHome, "router-state");
     const configPath = path.join(codexHome, "config.toml");
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -261,6 +266,11 @@ test(
       ...process.env,
       CODEX_BIN: writeCodexStub(codexHome),
       CODEX_HOME: codexHome,
+      HOME: codexHome,
+      USERPROFILE: codexHome,
+      APPDATA: path.join(codexHome, "AppData", "Roaming"),
+      LOCALAPPDATA: path.join(codexHome, "AppData", "Local"),
+      CODEX_ROUTER_NO_DISCOVERY: "0",
       CODEX_ROUTER_PORT: "46193",
       CODEX_ROUTER_STATE_DIR: stateDir,
       MODEL_ROUTER_STATE_DIR: stateDir,

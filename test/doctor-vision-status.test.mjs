@@ -36,6 +36,9 @@ function isolatedEnvironment(codexHome, stateDir, launchAgents, codexBin) {
       : {}),
     CODEX_BIN: codexBin,
     CODEX_HOME: codexHome,
+    APPDATA: path.join(codexHome, "AppData", "Roaming"),
+    LOCALAPPDATA: path.join(codexHome, "AppData", "Local"),
+    CODEX_ROUTER_NO_DISCOVERY: "0",
     CODEX_ROUTER_SERVICE_PLATFORM: process.platform === "win32" ? "darwin" : "win32",
     MODEL_ROUTER_LAUNCH_AGENTS_DIR: launchAgents,
     CODEX_ROUTER_STATE_DIR: stateDir,
@@ -46,7 +49,7 @@ function isolatedEnvironment(codexHome, stateDir, launchAgents, codexBin) {
 }
 
 test("Codex doctor gates installed native vision engines on the live sign-in probe", { timeout: 30_000 }, () => {
-  const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-router-doctor-vision-"));
+  const codexHome = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "codex-router-doctor-vision-"));
   const stateDir = path.join(codexHome, "router-state");
   const launchAgents = path.join(codexHome, "launch-agents");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });

@@ -25,6 +25,10 @@
   actually touched. The union driver stays for pull requests opened before
   fragments landed.
 
+The current execution, installation, publication, delivery, catalog, private-write,
+and shutdown boundaries are documented in
+[Optimization runtime contracts](docs/maintenance/optimization-runtime-contracts.md).
+
 These instructions apply when a user asks an agent to install this repository.
 
 ## Choose the target
@@ -44,8 +48,8 @@ These instructions apply when a user asks an agent to install this repository.
   router's separately keyed, app-only edge on port 4214. Never expose the main
   caller capability or the router port itself to the public Internet.
 - **A target is a client, not a router.** One installation serves all of them:
-  one background service, one gateway, one set of provider credentials, one
-  provider selection, one set of ports. `MODEL_ROUTER_TARGET` selects which
+  one background service, at most one gateway, one set of provider credentials,
+  one provider selection, one set of ports. `MODEL_ROUTER_TARGET` selects which
   client's configuration a command writes. It must never fork the state
   directory, the service, or the credential store — a user who installs two
   would otherwise be asked for every API key twice and would run two gateways
@@ -65,9 +69,13 @@ user.
 
 ## Codex procedure
 
-1. Read the host platform and check for Codex, Git, Node.js 22.19+, and `uv` or
-   Python 3.10+. On Windows, also verify that Windows PowerShell reports
-   `FullLanguage` and permits `Add-Type`; the process-tree safety boundary fails
+1. Read the host platform and check for Codex, Git, and Node.js 22.19+. Check
+   for `uv` or Python 3.10+ when the selected routes require LiteLLM; native
+   and actual Responses-only routes skip Python installation and probes.
+   `src/runtime-dependency-requirements.mjs --gateway-required` reports this
+   after Node dependencies are available. Explicit dependency repair still
+   rebuilds both Node and Python. On Windows, also verify that PowerShell
+   reports `FullLanguage` and permits `Add-Type`; the process-tree boundary fails
    closed before mutation under Constrained Language, AppLocker, or WDAC.
    Read-only checks are allowed. Do not install a package manager or system
    runtime without the user's permission.
@@ -216,9 +224,10 @@ nothing to restart and nothing to tell the user to quit.
 ## DeepSeek Harness procedure
 
 1. Steps 1-6 of the Codex procedure apply unchanged, except that Codex itself is
-   not a prerequisite: a harness-only machine needs Node 22.19+, `uv` or Python
-   3.10+, and the harness. Do not run `src/catalog.mjs` there — it asks the
-   Codex CLI whether the session is signed in and refuses to publish when it
+   not a prerequisite: a harness-only machine needs Node 22.19+ and the harness,
+   plus `uv` or Python 3.10+ if its routes require LiteLLM. Do not run
+   `src/catalog.mjs` there — it asks the Codex CLI whether the session is signed
+   in and refuses to publish when it
    cannot ask, which is a failure, not a fallback.
 2. Run `./install.sh --target dsh --auto --providers IDS` (macOS/Linux) or
    `./install.ps1 -Target dsh -Auto -Providers IDS` (Windows).
@@ -241,9 +250,9 @@ file, never open its `settings.json` for writing, and leave the user's next
 ## Gemini CLI procedure
 
 1. Steps 1-6 of the Codex procedure apply unchanged, except that Codex itself is
-   not a prerequisite: a Gemini-only machine needs Node 22.19+, `uv` or Python
-   3.10+, and the `gemini` CLI. Do not run `src/catalog.mjs` there, for the same
-   reason the harness does not.
+   not a prerequisite: a Gemini-only machine needs Node 22.19+ and the `gemini`
+   CLI, plus `uv` or Python 3.10+ if its routes require LiteLLM. Do not run
+   `src/catalog.mjs` there, for the same reason the harness does not.
 2. Run `./install.sh --target gemini --auto --providers IDS` (macOS/Linux) or
    `./install.ps1 -Target gemini -Auto -Providers IDS` (Windows).
    `--migrate-known` and `--adopt-native-catalog` are refused here: both act on
@@ -562,8 +571,10 @@ beside ours, so everything else in them is somebody else's work.
 
 ## The Python gateway is installed from a hash-verified lock
 
-The router's gateway is LiteLLM, so every install executes a large Python
-dependency tree. That tree is pinned and hashed rather than re-resolved.
+When selected routes require LiteLLM, the installer prepares its pinned,
+hash-verified Python tree. Ordinary native/Responses-only installs skip it;
+`--force-deps` / `-ForceDeps` and checkout `doctor --fix` still rebuild both
+dependency trees, including Python, to preserve the explicit repair contract.
 
 1. `requirements/python.txt` is the lock: the full transitive closure of
    `PYTHON_REQUIREMENTS` in `src/install-plan.mjs`, every distribution pinned
@@ -668,34 +679,30 @@ The service definition still looked correct at every glance.
    proxy restore regression. `test/startup-cleanup.test.mjs` boots the
    foreground entry past the Windows service-process record.
 
-## The gateway is restarted in place; the router is not taken down with it
+## Selected dependency failures leave independent routes serving
 
-`src/gateway-supervisor.mjs` watches the LiteLLM child and replaces it when it
-dies. It exists because the gateway is the one child of the service that is not
-ours: a bug anywhere in that pinned Python tree can end the process rather than
-the request, and issue #261 is exactly that — mapping an upstream 429 raised out
-of LiteLLM's own request handler and the proxy exited 1. `start.mjs` raced every
-child's exit, so one failed request killed the router and all three forwarders
-and every client saw a bare "Connection error" naming nothing.
+`start.mjs` boots the frontend first and supervises the dependencies required by
+its immutable execution plan. `src/gateway-supervisor.mjs` provides bounded
+restart handling for the gateway and required forwarders. The gateway also has
+a liveness watchdog. `/health/live` describes the frontend; `/health` describes
+all selected dependencies and the adopted execution-plan fingerprint.
 
-1. **Only the gateway is supervised.** The forwarders and the router are ours;
-   when one of them dies the service still exits and the OS supervisor rebuilds
-   it. Do not extend the supervisor to them to "be consistent" — a crash in our
-   own code is a bug report, and papering over it costs the incident.
-2. **Supervision starts only after the gateway has been healthy once.** A
-   gateway that never came up is a dependency or configuration failure, and
-   retrying it buries the message the operator needs. Startup failure is
-   unchanged: it throws out of `main()` and takes the service down, which is
-   what `test/startup-cleanup.test.mjs` asserts.
+1. **Supervise only adopted dependencies.** Unused forwarders and LiteLLM are
+   not spawned. The frontend's own exit still ends the service so the OS
+   supervisor can rebuild it; dependency restarts do not reload its registry.
+2. **Liveness is separate from readiness.** A required dependency that never
+   becomes healthy leaves the frontend serving independent native/direct
+   routes with degraded readiness. A missing gateway runtime is diagnosed
+   without taking those routes down. Client publication and pending
+   Antigravity activation remain gated on full readiness.
 3. **Bounded, and bounded *in a window*.** At most five restarts inside ten
    minutes, backing off 1s, 2s, 4s, 8s, 16s, capped at 30s. The window is
    load-bearing in both directions: a lifetime budget would eventually stop
    restarting an install that crashes once a month, and no bound at all turns a
-   gateway that dies on every request into a spawn loop. Past the bound the
-   supervisor returns and the service exits exactly as it used to, so launchd's
-   `KeepAlive`, systemd's `Restart=always`, and Task Scheduler get their clean
-   restart. `CODEX_ROUTER_GATEWAY_RESTARTS=0` disables it entirely and restores
-   the pre-#261 behaviour, which is what a crash investigation wants.
+   gateway that dies on every request into a spawn loop. Past the bound,
+   dependency recovery stops while independent routes keep serving with
+   degraded readiness. A manual service restart starts a new recovery epoch.
+   `CODEX_ROUTER_GATEWAY_RESTARTS=0` disables dependency restarts.
 4. **Never silent.** The production LaunchAgent hard-sets `CODEX_ROUTER_QUIET`,
    and a router that quietly resurrects a crashing gateway is indistinguishable
    from one that never failed. Every crash, every restart, and the decision to
@@ -704,7 +711,7 @@ and every client saw a bare "Connection error" naming nothing.
    Otherwise the loop waits on an exit that only an external kill can produce,
    and a hung gateway looks like a healthy one.
 6. **`/health` names the unreachable dependency.** The unauthenticated leaf
-   carries `degraded: ["gateway"]` — a closed set of three fixed local service
+   carries `degraded: ["gateway"]` — a closed set of fixed local service
    names, never a URL, a credential, or the per-service payloads the protected
    leaf carries, and `test/routing.test.mjs` asserts that boundary. It is what
    lets doctor report "serving but reports gateway unreachable" instead of "not
@@ -1962,11 +1969,11 @@ almost never. Keep the SVG free of `--` inside comments and of SVG filter
 primitives — CoreSVG, which is what `sips` uses, rejects the first and silently
 drops the second.
 
-## Upstream retries are legal only before the first relayed byte
+## Transport replay requires delivery evidence and no relayed bytes
 
-`src/upstream-retry.mjs` retries a native upstream request a bounded number of
-times. One rule governs it, and breaking it corrupts responses rather than
-merely failing them.
+`src/upstream-retry.mjs` retries a native upstream request within bounded
+attempt and time limits. Nothing relayed to the caller is necessary, but does
+not prove that the origin never executed a generation request.
 
 1. A retry is legal only while **nothing has been relayed**. The loop lives
    entirely before its callers touch their `ServerResponse`, and the `canRetry`
@@ -1978,12 +1985,13 @@ merely failing them.
    bytes, and replaying it appends a second response to a stream the client is
    reading. `test/native-retry.test.mjs` asserts the caller received the partial
    stream exactly once.
-2. Only failures where an intermediary never obtained a response qualify: 502,
-   503, 504, Cloudflare's 520-524, and connect-level socket errors. Do not add
-   429 — it is rate limiting, its `Retry-After` is relayed, and sleeping for the
-   upstream's suggested delay is the hang the bound exists to prevent. Do not
-   add 4xx, and do not add 500, where the origin ran and a repeat risks a second
-   execution.
+2. The default `at-most-once` delivery policy repeats generation POSTs only
+   with positive `not_sent` transport evidence, such as DNS failure, refused
+   connection, or connect timeout. A reset, headers timeout, or 5xx can follow
+   an executed request. The transient-status set (502/503/504/520-524) remains
+   eligible for safe methods or explicit
+   `CODEX_ROUTER_NATIVE_RETRY_POLICY=availability`, which accepts that
+   uncertainty. 429, other 4xx, and 500 stay excluded from this retry helper.
 3. Keep the bound small. Codex retries roughly five times on its own and the
    two loops multiply, so the router's share (2 retries, 250ms then 750ms) has
    to keep the product a fast failure. A retry is also only *started* while the
@@ -2012,6 +2020,11 @@ merely failing them.
    turn the router rescued is distinguishable from one that never failed. Log
    the status or the transport error's own name and code — never a response
    body, and never the caller capability path.
+7. This is a transport-replay policy, not an end-to-end exactly-once guarantee.
+   Semantic repairs, quota failover, client retries, and LiteLLM/provider retry
+   layers have their own limits. HTTP delivery and generation completion are
+   recorded separately; an HTTP 200 without a valid terminal event does not
+   prove a completed generation.
 
 ## Moving a turn to another model is legal only before the first relayed byte
 
@@ -2027,14 +2040,17 @@ purpose; several of them exist because the obvious wider version is wrong.
    and duplicates any tool call the client has already executed. That second
    hazard is worse than the duplicated stream and has no equivalent in the retry
    path.
-2. Only **"your usage is gone"** qualifies: `upstreamFailureKind` returning
-   `out_of_usage`, a 402, or a 429 whose `Retry-After` exceeds sixty seconds. Do
+2. **Quota failover requires "your usage is gone":** `upstreamFailureKind`
+   returning `out_of_usage`, a 402, or a 429 whose `Retry-After` exceeds sixty
+   seconds. Do
    not add 401 or 403 — a swap would hide the rejected credential that is the
    only thing worth telling the operator. Do not add 404 or 400, which are
-   deterministic. Do not add 5xx: `upstream-retry.mjs` already absorbs the
-   transient shapes, and masking a provider outage costs an incident somebody
-   would want to see. Do not lower the 429 threshold; trading a twenty-second
-   wait for a cold prompt cache is a bad deal for the rest of the session.
+   deterministic. Generic 5xx do not qualify. Default transport failover
+   requires the API forwarder's confined header to prove `not_sent`; an
+   upstream body cannot grant that permission. Explicit availability policy
+   also permits ambiguous marked transport failures. Do not lower the 429
+   threshold; trading a twenty-second wait for a cold prompt cache is a bad
+   deal for the rest of the session.
    Entitlement failures are classified **before** quota ones and never swap,
    because "upgrade your plan" appears in both vocabularies and no other
    provider's quota makes a missing entitlement true.

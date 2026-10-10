@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { CODEX_HOME, STATE_DIR } from "../src/paths.mjs";
 
 import {
   AUTO_ANNOUNCE_WINDOW_MS,
@@ -760,9 +761,28 @@ test("login-free catalog keeps overflow models visible under their own slugs", (
 });
 
 function withCredentialEnvironment(kimiHome, run) {
-  const previousKimi = process.env.KIMI_CODE_HOME;
-  const previousGrok = process.env.GROK_AUTH_PATH;
   const dir = mkdtempSync(path.join(os.tmpdir(), "catalog-login-free-"));
+  assert.equal(path.dirname(dir), path.resolve(os.tmpdir()));
+  assert.ok(path.basename(dir).startsWith("catalog-login-free-"));
+  // These pure catalog imports freeze paths before this fixture runs. Discovery
+  // is safe only when the outer runner supplied an isolated home and state.
+  const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  for (const target of [CODEX_HOME, STATE_DIR]) {
+    const isolated = [os.tmpdir(), workspace].some((base) => {
+      const relative = path.relative(path.resolve(base), path.resolve(target));
+      return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+    });
+    assert.equal(isolated, true, "credential fixtures require an isolated outer runner");
+  }
+  const overrides = {
+    CODEX_ROUTER_NO_DISCOVERY: "0",
+    KIMI_CODE_HOME: path.join(dir, "kimi-home"),
+    GROK_AUTH_PATH: path.join(dir, "grok", "auth.json"),
+    DEVIN_CREDENTIALS_PATH: path.join(dir, "devin", "credentials.toml"),
+    GCLOUD_BIN: path.join(dir, "missing-gcloud"),
+  };
+  const previous = Object.fromEntries(Object.keys(overrides).map((name) => [name, process.env[name]]));
+  Object.assign(process.env, overrides);
   if (kimiHome === "unconfigured") {
     process.env.KIMI_CODE_HOME = path.join(dir, "kimi-home");
   } else {
@@ -784,10 +804,10 @@ function withCredentialEnvironment(kimiHome, run) {
   try {
     return run();
   } finally {
-    if (previousKimi === undefined) delete process.env.KIMI_CODE_HOME;
-    else process.env.KIMI_CODE_HOME = previousKimi;
-    if (previousGrok === undefined) delete process.env.GROK_AUTH_PATH;
-    else process.env.GROK_AUTH_PATH = previousGrok;
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -1526,6 +1546,9 @@ test(
   () => {
     const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-router-picker-migration-"));
     const stateDir = path.join(codexHome, "router-state");
+    assert.equal(path.dirname(codexHome), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(codexHome).startsWith("codex-router-picker-migration-"));
+    assert.equal(path.dirname(stateDir), codexHome);
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
     writeFileSync(path.join(codexHome, "config.toml"), 'model = "gpt-5.6-sol"\n', {
       mode: 0o600,
@@ -1565,6 +1588,11 @@ test(
             CODEX_ROUTER_STATE_DIR: stateDir,
             MODEL_ROUTER_STATE_DIR: stateDir,
             MODEL_ROUTER_TARGET: "codex",
+            CODEX_ROUTER_NO_DISCOVERY: "0",
+            KIMI_CODE_HOME: path.join(codexHome, "kimi"),
+            GROK_AUTH_PATH: path.join(codexHome, "grok", "auth.json"),
+            DEVIN_CREDENTIALS_PATH: path.join(codexHome, "devin", "credentials.toml"),
+            GCLOUD_BIN: path.join(codexHome, "missing-gcloud"),
           },
         },
       );

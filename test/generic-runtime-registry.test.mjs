@@ -17,17 +17,41 @@ import { userModelEntry } from "../src/user-models.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function environment(directory, providersFile, userModelsFile) {
-  return {
+  // Discovery is the behavior under test. Bound every path before enabling it,
+  // and use a keyless checked-in fixture so scanning configured providers cannot
+  // consult an operator's system keychain or another CLI's OAuth credential.
+  assert.ok(existsSync(directory), "fixture root must exist before child launch");
+  const registryFile = path.join(directory, "checked-in-registry.json");
+  writeFileSync(registryFile, JSON.stringify({ version: 1,
+    providers: [{ id: "deepseek", displayName: "Fixture DeepSeek", ownedBy: "fixture",
+      kind: "openai-compatible", protocol: "openai", keyless: true,
+      baseUrl: "http://127.0.0.1:9999/v1" }],
+    models: [userModelEntry({ providerId: "deepseek", upstreamId: "fixture-model", priority: 1 })],
+  }));
+  const env = {
     ...process.env,
     HOME: directory,
+    USERPROFILE: directory,
     CODEX_HOME: path.join(directory, "codex"),
+    MODEL_ROUTER_STATE_DIR: path.join(directory, "state"),
     CODEX_ROUTER_STATE_DIR: path.join(directory, "state"),
+    MODEL_ROUTER_REGISTRY: registryFile,
+    CODEX_ROUTER_SOURCE_ROOT: root,
+    CODEX_ROUTER_NO_DISCOVERY: "0",
     MODEL_ROUTER_GENERIC_PROVIDERS: providersFile,
     MODEL_ROUTER_USER_MODELS: userModelsFile,
     MODEL_ROUTER_MODEL_PICKER_STATE: path.join(directory, "state", "model-picker.json"),
     CODEX_ROUTER_SERVICE_PLATFORM: "linux",
     CODEX_ROUTER_SKIP_SYSTEMCTL: "1",
   };
+  for (const key of ["CODEX_HOME", "MODEL_ROUTER_STATE_DIR", "CODEX_ROUTER_STATE_DIR",
+    "MODEL_ROUTER_REGISTRY", "MODEL_ROUTER_GENERIC_PROVIDERS", "MODEL_ROUTER_USER_MODELS",
+    "MODEL_ROUTER_MODEL_PICKER_STATE"]) {
+    const relative = path.relative(directory, env[key]);
+    assert.ok(relative && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
+      `${key} must remain in the synthetic fixture`);
+  }
+  return env;
 }
 
 function provider(id, adapter = "openai-chat", extra = {}) {

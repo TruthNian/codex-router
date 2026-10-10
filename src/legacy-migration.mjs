@@ -6,13 +6,12 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { redactCallerUrl } from "./caller-auth.mjs";
-import { protectPrivateFile } from "./file-security.mjs";
+import { protectPrivateFile, writePrivateFile } from "./file-security.mjs";
 import {
   readNativeCatalogFile,
   readRootStringValues,
@@ -134,14 +133,7 @@ function safeTimestamp() {
 }
 
 function writeProtectedJson(target, value) {
-  const temporary = `${target}.tmp.${process.pid}`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  protectPrivateFile(temporary);
-  renameSync(temporary, target);
-  protectPrivateFile(target);
+  writePrivateFile(target, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function stopService(label) {

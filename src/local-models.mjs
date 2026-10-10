@@ -11,7 +11,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import {
   disableProvider,
   enableProvider,
@@ -74,14 +74,7 @@ function writeSelection(selection) {
   const dir = path.dirname(LOCAL_MODELS_STATE_PATH);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
-  const temporary = `${LOCAL_MODELS_STATE_PATH}.tmp.${process.pid}`;
-  writeFileSync(temporary, `${JSON.stringify(selection, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  protectPrivateFile(temporary);
-  renameSync(temporary, LOCAL_MODELS_STATE_PATH);
-  protectPrivateFile(LOCAL_MODELS_STATE_PATH);
+  writePrivateFile(LOCAL_MODELS_STATE_PATH, `${JSON.stringify(selection, null, 2)}\n`);
   return selection;
 }
 

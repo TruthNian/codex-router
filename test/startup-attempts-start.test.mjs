@@ -29,15 +29,34 @@ function state(t) {
   const directory=mkdtempSync(path.join(os.tmpdir(), 'startup-contract-'));
   const stateDir=path.join(directory,'state');
   mkdirSync(stateDir,{mode:0o700});
+  const userDir = path.join(directory, 'user');
+  const homeDir = path.join(directory, 'codex-home');
+  for (const folder of [userDir, homeDir, path.join(userDir, 'AppData', 'Roaming'), path.join(userDir, 'AppData', 'Local')]) {
+    mkdirSync(folder, {recursive: true, mode: 0o700});
+  }
+  const registryFile = path.join(directory, 'registry.json');
+  writeFileSync(registryFile, JSON.stringify({version: 1, providers: [{id: 'custom', displayName: 'Fixture custom',
+    kind: 'openai-compatible', ownedBy: 'fixture', perModelEndpoint: true, authMode: 'per-model'}],
+    models: [{slug: 'custom/gateway-fixture', gatewayModel: 'gateway-fixture', upstreamModel: 'gateway-fixture',
+      provider: 'custom', listed: false, endpoint: {protocol: 'openai', keyless: true,
+        baseUrl: 'http://127.0.0.1:9999/v1'}}]}));
+  writeFileSync(path.join(stateDir, 'enabled-providers.json'), JSON.stringify({version: 1, providers: ['custom']}));
   t.after(()=>rmSync(directory,{recursive:true,force:true}));
   const env={
     ...startupChildRuntimeEnvironment(),
     TMPDIR:os.tmpdir(),
-    CODEX_HOME:path.join(directory,'codex-home'),
+    HOME:userDir, USERPROFILE:userDir, CODEX_HOME:homeDir,
+    APPDATA:path.join(userDir,'AppData','Roaming'), LOCALAPPDATA:path.join(userDir,'AppData','Local'),
     KIMI_CODE_HOME:path.join(directory,'kimi-home'),
     MODEL_ROUTER_TARGET:'codex',
     MODEL_ROUTER_STATE_DIR:stateDir,
     CODEX_ROUTER_STATE_DIR:stateDir,
+    MODEL_ROUTER_REGISTRY:registryFile,
+    MODEL_ROUTER_USER_MODELS:path.join(stateDir,'user-models.json'),
+    MODEL_ROUTER_GENERIC_PROVIDERS:path.join(stateDir,'generic-providers.json'),
+    CODEX_ROUTER_NO_DISCOVERY:'1', NO_DISCOVERY:'1',
+    MODEL_ROUTER_SHOW_ALL_MODELS:'0', CODEX_ROUTER_SHOW_ALL_MODELS:'0',
+    CODEX_ROUTER_SERVICE_PLATFORM:'test-fixture',
     MODEL_ROUTER_LITELLM_BIN:path.join(directory,'missing-litellm'),
     MODEL_ROUTER_QUIET:'1',
   };
@@ -83,27 +102,27 @@ test('explicit foreground startup bypasses the automatic cooldown',t=>{
   const fixture=state(t);seed(fixture.record);
   const result=run('foreground-start.mjs',fixture.env);
   assert.notEqual(result.status,69,'explicit foreground start was refused by automatic cooldown: '+result.output);
-  assert.match(result.output,/LiteLLM is not installed/);
+  assert.match(result.output,/Internal service key is missing/);
   assert.equal(JSON.parse(readFileSync(fixture.record,'utf8')).consecutiveFailures,3);
 });
 
-test('direct kill switch bypasses cooldown and reveals a permanent launcher error',t=>{
+test('direct kill switch bypasses cooldown and reveals a missing service capability',t=>{
   const fixture=state(t);seed(fixture.record);
   const result=run('start.mjs',{...fixture.env,CODEX_ROUTER_DISABLE_STARTUP_BACKOFF:'1'});
   assert.equal(result.status,1,result.output);
-  assert.match(result.output,/LiteLLM is not installed/);
+  assert.match(result.output,/Internal service key is missing/);
   assert.doesNotMatch(result.output,/backing off/);
 });
 
-test('a permanent preflight launcher error fails fast without creating cooldown',t=>{
+test('a missing service capability fails fast without creating cooldown when the gateway is unavailable',t=>{
   const fixture=state(t);
   const result=run('start.mjs',fixture.env);
   assert.equal(result.status,1,result.output);
-  assert.match(result.output,/LiteLLM is not installed/);
+  assert.match(result.output,/Internal service key is missing/);
   assert.equal(existsSync(fixture.record),false);
 });
 
-test('a permanent bundled venv import error is a setup failure without cooldown',{skip:process.platform==='win32'},t=>{
+test('bundled venv setup diagnostics do not seed cooldown before credential preflight',{skip:process.platform==='win32'},t=>{
   const fixture=state(t);
   const source=path.join(fixture.directory,'source');
   const bin=path.join(source,'.venv','bin');mkdirSync(bin,{recursive:true});
@@ -115,6 +134,7 @@ test('a permanent bundled venv import error is a setup failure without cooldown'
   assert.equal(result.status,1,result.output);
   assert.match(result.output,/virtual environment is broken/);
   assert.match(result.output,/exited with code 1/);
+  assert.match(result.output,/Internal service key is missing/);
   assert.equal(existsSync(fixture.record),false);
 });
 
@@ -182,7 +202,7 @@ test('the real foreground supervisor reaches its children without changing an ac
       MODEL_ROUTER_PORT: String(router), MODEL_ROUTER_GATEWAY_PORT: String(gateway),
       MODEL_ROUTER_OAUTH_PORT: String(oauth), MODEL_ROUTER_API_PORT: String(api), MODEL_ROUTER_GROK_OAUTH_PORT: String(grok),
     },
-    stdio: ['ignore', 'ignore', 'pipe'],
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   });
   let output = '';
   child.stderr.setEncoding('utf8');
@@ -193,18 +213,28 @@ test('the real foreground supervisor reaches its children without changing an ac
   });
   let timer;
   try {
-    const result = await Promise.race([
-      exited,
-      new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`foreground startup did not finish: ${output}`)), 90_000); }),
-    ]);
-    assert.equal(result.signal, null, output);
-    assert.equal(result.code, 1, output);
-    assert.match(output, /startup failed: LiteLLM gateway exited before becoming healthy/);
+    const deadline = Date.now() + 30_000;
+    while (!/serving independent routes/.test(output) && Date.now() < deadline) {
+      assert.equal(child.exitCode, null, output);
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.match(output, /serving independent routes/);
+    assert.match(output, /dependency unavailable: LiteLLM gateway exited before becoming healthy/);
+    assert.equal((await fetch(`http://127.0.0.1:${router}/health/live`)).status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${router}/health`)).status, 503);
     assert.doesNotMatch(output, /backing off|foreground-synthetic-(?:internal|caller)-key/);
     assert.equal(readFileSync(fixture.record, 'utf8'), original);
   } finally {
-    clearTimeout(timer);
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
-    await exited;
+    if (child.exitCode === null && child.signalCode === null) child.send({type: 'model-router:shutdown'});
+    try {
+      const result = await Promise.race([exited, new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`foreground IPC shutdown did not finish: ${output}`)), 15_000);
+      })]);
+      assert.equal(result.signal, null, output);
+      assert.equal(result.code, 0, output);
+    } finally {
+      clearTimeout(timer);
+      if (child.exitCode === null && child.connected) child.disconnect();
+    }
   }
 });

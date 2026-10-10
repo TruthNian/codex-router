@@ -155,6 +155,7 @@ function systemctl(args, options = {}) {
   return execFileSync("systemctl", ["--user", ...args], {
     encoding: "utf8",
     stdio: options.quiet ? ["ignore", "ignore", "ignore"] : ["ignore", "pipe", "pipe"],
+    ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
   });
 }
 
@@ -205,14 +206,35 @@ if (command === "render") {
   }
   process.stdout.write(`${JSON.stringify({ installed: false })}\n`);
 } else if (command === "status") {
-  let state = "stopped";
+  const installed = existsSync(unitPath);
+  let state = "unknown", loaded = false, statusUnknown = true;
   try {
-    state = systemctl(["is-active", unitName]).trim();
+    // An unsuccessful is-active call conflates an inactive unit with denied,
+    // missing, or broken systemctl. Only structured successful queries can
+    // prove that the manager has no unit, including cached/orphaned jobs.
+    const inheritedDeadline = Number(process.env.CODEX_ROUTER_OPERATION_DEADLINE_MS);
+    const remaining = Number.isSafeInteger(inheritedDeadline) && inheritedDeadline > 0
+      ? Math.min(10_000, inheritedDeadline - Date.now()) : 10_000;
+    if (remaining <= 0) throw new Error("The service status query deadline expired.");
+    const output = systemctl(["show", unitName, "--property=LoadState", "--property=ActiveState"], { timeout: remaining });
+    const fields = String(output).trim().split(/\r?\n/);
+    const load = fields.filter((line) => line.startsWith("LoadState="));
+    const active = fields.filter((line) => line.startsWith("ActiveState="));
+    const loadState = load.length === 1 ? load[0].slice("LoadState=".length) : "";
+    const activeState = active.length === 1 ? active[0].slice("ActiveState=".length) : "";
+    const activeStates = new Set(["active", "reloading", "inactive", "failed", "activating", "deactivating", "maintenance"]);
+    if (fields.length === 2 && ["loaded", "not-found", "masked"].includes(loadState) && activeStates.has(activeState)
+        && (loadState !== "not-found" || activeState === "inactive")) {
+      state = activeState === "inactive" ? "stopped" : activeState;
+      loaded = !["inactive", "failed"].includes(activeState)
+        || (!installed && loadState !== "not-found");
+      statusUnknown = false;
+    }
   } catch {
-    // Inactive services return non-zero.
+    // Unavailable, denied, and timed-out probes cannot establish absence.
   }
   process.stdout.write(
-    `${JSON.stringify({ installed: existsSync(unitPath), loaded: state === "active", state })}\n`,
+    `${JSON.stringify({ installed, loaded, state, ...(statusUnknown ? { statusUnknown: true } : {}) })}\n`,
   );
 } else if (command === "restart-count") {
   // The automatic-restart counter systemd tracks for the unit. It is what

@@ -81,7 +81,8 @@ export async function runServiceCommandUnlocked(
   // every cooperative phase on the shared inner deadline.
   const platformBudgetMs = remainingOperationMs();
   if (
-    platformBudgetMs !== undefined
+    readinessCommands.has(command)
+    && platformBudgetMs !== undefined
     && platformBudgetMs < PLATFORM_COMMAND_RESERVE_MS + READINESS_TIMEOUT_MS
   ) {
     throw new Error(

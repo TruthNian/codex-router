@@ -30,6 +30,8 @@ function token(accessToken, refreshToken, expiresAt) {
 
 test("Kimi OAuth refresh coordinates with the official CLI and handles terminal state", async (t) => {
   const home = mkdtempSync(path.join(os.tmpdir(), "kimi-oauth-session-"));
+  assert.equal(path.dirname(home), path.resolve(os.tmpdir()));
+  assert.ok(path.basename(home).startsWith("kimi-oauth-session-"));
   const credentialsDirectory = path.join(home, "credentials");
   const oauthDirectory = path.join(home, "oauth");
   const credentialsPath = path.join(credentialsDirectory, "kimi-code.json");

@@ -89,7 +89,7 @@ test("all service platforms persist a bounded native catalog polling override", 
     for (const [platform, script] of [["darwin", "service-macos.mjs"], ["linux", "service-linux.mjs"], ["win32", "service-windows.mjs"]]) {
       const absent = serviceCommand(script, platform, testRoot, "render", "codex", root, { [name]: undefined });
       assert.ok(!absent.includes(name), platform);
-      for (const [setting, expected] of [["86400000", "86400000"], ["2147483648", "300000"], ["invalid;value", "300000"]]) {
+      for (const [setting, expected] of [["300000", "300000"], ["86400000", "86400000"], ["2147483648", "86400000"], ["invalid;value", "86400000"]]) {
         const output = serviceCommand(script, platform, testRoot, "render", "codex", root, { [name]: setting });
         const expectedLine = platform === "darwin"
           ? `<key>${name}</key>\n    <string>${expected}</string>`

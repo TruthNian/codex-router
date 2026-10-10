@@ -740,7 +740,7 @@ test("the candidate list is still built at most once, fallback or not", () => {
   );
 });
 
-test("a read that fails transiently is asked again; a refusal is not", async () => {
+test("short rate limits and explicit availability are retried; a refusal is not", async () => {
   const engine = localVisionEngine({ local: { model: "moondream" } });
   const ok = () =>
     new Response(JSON.stringify({ choices: [{ message: { content: "## Summary\nA chart." } }] }), {
@@ -756,6 +756,7 @@ test("a read that fails transiently is asked again; a refusal is not", async () 
       gatewayBase: "http://unused/v1",
       headers: {},
       retryDelaysMs: [1, 1],
+      ...(status === 503 ? { deliveryPolicy: "availability" } : {}),
       fetchImpl: async () => {
         calls += 1;
         return calls === 1 ? new Response("", { status }) : ok();
@@ -811,6 +812,7 @@ test("a read that fails transiently is asked again; a refusal is not", async () 
       gatewayBase: "http://unused/v1",
       headers: {},
       retryDelaysMs: [1, 1],
+      deliveryPolicy: "availability",
       fetchImpl: async () => {
         attempts += 1;
         return new Response("", { status: 502 });

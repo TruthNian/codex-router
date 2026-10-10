@@ -9,6 +9,7 @@ import {
   restartRouterServiceIfInstalled,
   routerServiceRestartCommand,
   routerServiceStatus,
+  verifyRouterExecutionPlanAdoption,
 } from "../src/router-restart.mjs";
 
 const INSTALLED_STATUS = {
@@ -208,14 +209,106 @@ test("environment-backed removal reminders cover managed, unknown, and foregroun
   }
 });
 
-test("restart is skipped when no background service is installed", async () => {
+test("restart is skipped only for a known absent service and conclusively refused port", async () => {
   const calls = [];
   const spawn = (command, args) => {
     calls.push(args.at(-1));
-    return NOT_INSTALLED_STATUS;
+    return ABSENT_STATUS;
   };
-  assert.equal(await restartRouterServiceIfInstalled({ spawn }), false);
+  assert.equal(await restartRouterServiceIfInstalled({ spawn,
+    waitForHealth: async () => ({ ok: false, connectionRefused: true }) }), false);
   assert.deepEqual(calls, ["status"]);
+});
+
+test("an unknown background service cannot be mistaken for offline publication", async () => {
+  await assert.rejects(restartRouterServiceIfInstalled({
+    spawn: () => NOT_INSTALLED_STATUS,
+    waitForHealth: async () => assert.fail("unknown service status must fail before health probing"),
+  }), { code: "model_overlay_adoption_failed" });
+});
+
+test("foreground and ambiguous router ownership fail closed instead of skipping reload", async () => {
+  for (const health of [
+    { ok: true, payload: { service: "codex-router" } },
+    { ok: false, degradedPayload: { service: "codex-router", degraded: ["gateway"] } },
+    { ok: false, connectionRefused: false, error: "socket reset" },
+    { ok: false, error: "request timed out" },
+  ]) {
+    const actions = [];
+    await assert.rejects(restartRouterServiceIfInstalled({
+      spawn: (_command, args) => { actions.push(args.at(-1)); return ABSENT_STATUS; },
+      waitForHealth: async () => health,
+    }), { code: "model_overlay_adoption_failed" });
+    assert.deepEqual(actions, ["status"]);
+  }
+  await assert.rejects(restartRouterServiceIfInstalled({
+    spawn: () => ({ status: 0, stdout: JSON.stringify({ installed: false, loaded: true, state: "running" }) }),
+    waitForHealth: async () => assert.fail("an orphaned service must not become an offline assumption"),
+  }), /loaded router job/);
+});
+
+test("restart success requires adoption of the prepared fingerprint when supplied", async () => {
+  const expectedFingerprint = "a".repeat(64);
+  const actions = [];
+  const result = await restartRouterServiceIfInstalled({
+    expectedFingerprint,
+    spawn: (_command, args) => {
+      actions.push(args.at(-1));
+      return args.at(-1) === "status" ? INSTALLED_STATUS : { status: 0, stdout: "" };
+    },
+    waitForHealth: async (options) => {
+      actions.push("adoption");
+      assert.equal(options.timeoutMs, 0);
+      assert.ok(options.requestTimeoutMs > 0 && options.requestTimeoutMs <= 1_000);
+      return { ok: true, payload: { service: "codex-router", executionPlan: { fingerprint: expectedFingerprint } } };
+    },
+  });
+  assert.equal(result, true);
+  assert.deepEqual(actions, ["status", "restart", "adoption"]);
+});
+
+test("healthy stale, incomplete, degraded, and absent post-restart snapshots refuse publication", async () => {
+  for (const health of [
+    { ok: true, payload: { service: "codex-router", executionPlan: { fingerprint: "b".repeat(64) } } },
+    { ok: true, payload: { service: "codex-router" } },
+    { ok: false, degradedPayload: { service: "codex-router", executionPlan: { fingerprint: "a".repeat(64) } } },
+    { ok: false, connectionRefused: true },
+  ]) {
+    await assert.rejects(restartRouterServiceIfInstalled({
+      expectedFingerprint: "a".repeat(64),
+      spawn: (_command, args) => args.at(-1) === "status" ? INSTALLED_STATUS : { status: 0, stdout: "" },
+      waitForHealth: async () => health,
+    }), { code: "model_overlay_adoption_failed" });
+  }
+});
+
+test("adoption allows only confirmed absent offline state, never an unidentified healthy service", async () => {
+  const expectedFingerprint = "a".repeat(64);
+  assert.deepEqual(await verifyRouterExecutionPlanAdoption({ expectedFingerprint,
+    serviceStatus: async () => ({ installed: false, loaded: false }),
+    waitForHealth: async () => ({ ok: false, connectionRefused: true }) }), { adopted: false, offline: true });
+  await assert.rejects(verifyRouterExecutionPlanAdoption({ expectedFingerprint, allowOffline: false,
+    waitForHealth: async () => ({ ok: false, connectionRefused: true }) }), { code: "model_overlay_adoption_failed" });
+  await assert.rejects(verifyRouterExecutionPlanAdoption({ expectedFingerprint,
+    waitForHealth: async () => ({ ok: true, payload: { service: "foreign-service", executionPlan: { fingerprint: expectedFingerprint } } }) }),
+  { code: "model_overlay_adoption_failed" });
+  for (const status of [
+    { installed: true, loaded: false },
+    { installed: false, loaded: true },
+    { installed: false, loaded: false, statusUnknown: true },
+    {},
+  ]) {
+    await assert.rejects(verifyRouterExecutionPlanAdoption({ expectedFingerprint,
+      serviceStatus: async () => status,
+      waitForHealth: async () => ({ ok: false, connectionRefused: true }) }),
+    { code: "model_overlay_adoption_failed" });
+  }
+  let reads = 0;
+  await assert.rejects(verifyRouterExecutionPlanAdoption({ expectedFingerprint,
+    serviceStatus: async () => ({ installed: false, loaded: false }),
+    waitForHealth: async () => ++reads === 1 ? { ok: false, connectionRefused: true } : { ok: false, error: "ambiguous" } }),
+  { code: "model_overlay_adoption_failed" });
+  assert.equal(reads, 2);
 });
 
 test("restart runs the service restart command when installed", async () => {

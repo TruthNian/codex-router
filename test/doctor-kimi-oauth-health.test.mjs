@@ -52,8 +52,8 @@ function removeDirectoryIfPresent(directory) {
   if (existsSync(directory)) rmdirSync(directory);
 }
 
-function doctorKimiCheck({ selected, credential }) {
-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "doctor-kimi-health-"));
+function doctorKimiCheck({ selected, credential, all = false }) {
+  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "doctor-kimi-health-"));
   const stateDir = path.join(testRoot, "state");
   const kimiHome = path.join(testRoot, "kimi");
   const credentialsDir = path.join(kimiHome, "credentials");
@@ -77,12 +77,14 @@ function doctorKimiCheck({ selected, credential }) {
   try {
     const result = spawnSync(
       process.execPath,
-      [path.join(root, "src", "doctor.mjs"), "--json"],
+      [path.join(root, "src", "doctor.mjs"), "--json", ...(all ? ["--all"] : [])],
       {
         cwd: root,
         encoding: "utf8",
           env: {
-            ...process.env,
+            ...Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+              !/^(?:MODEL_ROUTER_|CODEX_ROUTER_|KIMI_|GROK_|DEVIN_|GOOGLE_|GCLOUD_)/.test(name) &&
+              !/(?:API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|CREDENTIALS)/i.test(name))),
             HOME: testRoot,
             USERPROFILE: testRoot,
             // Windows shells spawned by doctor's probes derive their AppData
@@ -94,12 +96,18 @@ function doctorKimiCheck({ selected, credential }) {
             // test owns instead of spraying it across the real temp root's
             // siblings.
             LOCALAPPDATA: path.join(testRoot, "AppData", "Local"),
+            APPDATA: path.join(testRoot, "AppData", "Roaming"),
             CODEX_HOME: path.join(testRoot, "codex"),
           CODEX_BIN: process.execPath,
           KIMI_CODE_HOME: kimiHome,
           MODEL_ROUTER_TARGET: "codex",
           MODEL_ROUTER_STATE_DIR: stateDir,
+          CODEX_ROUTER_STATE_DIR: stateDir,
+          // All auth paths above are fixture-owned before overriding the
+          // runner's discovery guard to exercise synthetic OAuth credentials.
+          CODEX_ROUTER_NO_DISCOVERY: "0",
           MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(testRoot, "launch-agents"),
+          CODEX_ROUTER_SERVICE_PLATFORM: "test-fixture",
           MODEL_ROUTER_PORT: String(routerPort),
           MODEL_ROUTER_SHOW_ALL_MODELS: "0",
           CODEX_ROUTER_SHOW_ALL_MODELS: "0",
@@ -109,7 +117,7 @@ function doctorKimiCheck({ selected, credential }) {
     );
     assert.ok(result.stdout, result.stderr);
     const check = JSON.parse(result.stdout).checks.find(({ name }) => name === "Kimi OAuth");
-    assert.ok(check, "doctor must include the Kimi OAuth check");
+    if (selected || all) assert.ok(check, "doctor must include the scoped Kimi OAuth check");
     return check;
   } finally {
     rmSync(credentialsPath, { force: true });
@@ -216,9 +224,14 @@ test("doctor maps every selected Kimi OAuth health state", () => {
   }
 });
 
-test("doctor warns for every unselected Kimi OAuth health state", () => {
+test("doctor omits unselected Kimi OAuth credentials by default", () => {
+  const check = doctorKimiCheck({ selected: false, credential: "{ not json" });
+  assert.equal(check, undefined);
+});
+
+test("doctor --all warns for every unselected Kimi OAuth health state", () => {
   for (const fixture of fixtures()) {
-    const check = doctorKimiCheck({ selected: false, credential: fixture.credential });
+    const check = doctorKimiCheck({ selected: false, credential: fixture.credential, all: true });
     assert.equal(check.status, "warn", fixture.name);
     assert.match(check.detail, fixture.detail, fixture.name);
   }

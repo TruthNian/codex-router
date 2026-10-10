@@ -51,10 +51,16 @@ test("caller capability restore returns to the exact prior generation", async ()
 
 test("ACL protection failure before commit restores the old live capability", async () => {
   await fixture(async ({ directory, secretPath }) => {
-    let calls = 0;
+    let failed = false;
     assert.throws(() => swapCallerCapability({
       secretPath, operationId, generateSecret: () => newKey,
-      protect: () => { calls += 1; if (calls === 3) throw new Error("acl failed"); },
+      protect: (target) => {
+        if (target === secretPath && !failed) {
+          assert.equal(readFileSync(target, "utf8").trim(), newKey);
+          failed = true;
+          throw new Error("acl failed");
+        }
+      },
     }), /acl failed/);
     assert.equal(readFileSync(secretPath, "utf8").trim(), oldKey);
     assert.deepEqual(readdirSync(directory), ["caller-secret"]);

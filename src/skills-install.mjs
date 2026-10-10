@@ -38,7 +38,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { withAtomicStateLock } from "./atomic-state-lock.mjs";
-import { privateFileIsProtected, protectPrivateFile } from "./file-security.mjs";
+import { privateFileIsProtected, protectPrivateFile, writePrivateFile } from "./file-security.mjs";
 import { CODEX_HOME, SKILL_OWNERSHIP_PATH } from "./paths.mjs";
 
 const SOURCE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -345,16 +345,9 @@ function writeOwnership(target, skills, external = emptySkills()) {
   const stateDir = path.dirname(target);
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   chmodSync(stateDir, 0o700);
-  const temporary = `${target}.tmp.${process.pid}`;
   const state = { version: OWNERSHIP_VERSION, skills };
   if (Object.keys(external).length > 0) state.external = external;
-  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  protectPrivateFile(temporary);
-  renameSync(temporary, target);
-  protectPrivateFile(target);
+  writePrivateFile(target, `${JSON.stringify(state, null, 2)}\n`);
 }
 
 function parseMarker(target) {

@@ -1,0 +1,1 @@
+- Reuse serialized readiness finalization after dependency recovery, retain current required-child and exact Antigravity activation checks, and propagate unconfirmed rollback failures to the owning service.

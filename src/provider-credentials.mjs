@@ -5,15 +5,13 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
 import { discoveryDisabled } from "./discovery-mode.mjs";
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import { normalizeGenericProviderId } from "./generic-provider-identity.mjs";
 import {
   GENERIC_PROVIDER_CREDENTIALS_DIR,
@@ -405,16 +403,7 @@ export function writeProviderCredential(providerOrId, value) {
   const target = primaryCredentialPath(provider);
   mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   chmodSync(path.dirname(target), 0o700);
-  const temporary = `${target}.tmp.${process.pid}`;
-  writeFileSync(temporary, `${key}\n`, { encoding: "utf8", mode: 0o600 });
-  try {
-    protectPrivateFile(temporary);
-    renameSync(temporary, target);
-    protectPrivateFile(target);
-  } catch (error) {
-    if (existsSync(temporary)) unlinkSync(temporary);
-    throw error;
-  }
+  writePrivateFile(target, `${key}\n`);
   resetKeychainCache();
   return target;
 }

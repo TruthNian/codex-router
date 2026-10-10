@@ -32,17 +32,34 @@ async function mockServer(handler) {
 }
 
 function run(env) {
-  const stateDir = mkdtempSync(path.join(os.tmpdir(), "router-resilience-state-"));
+  const stateDir = env.MODEL_ROUTER_STATE_DIR || env.CODEX_ROUTER_STATE_DIR || mkdtempSync(path.join(os.tmpdir(), "router-resilience-state-"));
+  if (!existsSync(path.join(stateDir, "enabled-providers.json"))) {
+    // These fixtures exercise native traffic, DeepSeek and Grok OAuth only.
+    // Readiness must cover those routes' real dependencies, not unrelated
+    // listeners that this fixture neither launches nor uses.
+    writeFileSync(path.join(stateDir, "enabled-providers.json"), `${JSON.stringify({ version: 1, providers: ["deepseek", "grok-oauth"] })}\n`);
+  }
   const child = spawn(process.execPath, [path.join(root, "src", "router.mjs")], {
     cwd: root,
     env: {
       ...process.env,
       MODEL_ROUTER_STATE_DIR: stateDir,
+      CODEX_ROUTER_STATE_DIR: stateDir,
       CODEX_ROUTER_CALLER_KEY: CALLER_KEY,
       CODEX_ROUTER_INTERNAL_KEY: INTERNAL_KEY,
       KIMI_INTERNAL_KEY: INTERNAL_KEY,
-      CODEX_ROUTER_SHOW_ALL_MODELS: "1",
+      CODEX_ROUTER_SHOW_ALL_MODELS: "0",
       CODEX_ROUTER_QUIET: "1",
+      CODEX_ROUTER_GATEWAY_BASE_URL: "http://127.0.0.1:9/unused-gateway/v1",
+      CODEX_ROUTER_API_BASE_URL: env.CODEX_ROUTER_GATEWAY_BASE_URL || "http://127.0.0.1:9/unused-api/v1",
+      CODEX_NATIVE_BASE_URL: "http://127.0.0.1:9/unused-native",
+      CODEX_ROUTER_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_API_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_GROK_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      CODEX_ROUTER_GATEWAY_HEALTH_URL: "http://127.0.0.1:9/unused-health",
+      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: "9",
+      MODEL_ROUTER_DEVIN_CLI_PORT: "9",
+      MODEL_ROUTER_LOCAL_BASE_URL: "http://127.0.0.1:9/v1",
       ...env,
     },
     stdio: ["ignore", "ignore", "pipe"],

@@ -1,4 +1,5 @@
 import { environmentProxyOptedIn } from "./proxy-environment.mjs";
+import { transportDeliveryState } from "./upstream-retry.mjs";
 
 // The router reaches every upstream through Undici's `fetch`, which reports a
 // socket failure as a bare `TypeError: fetch failed` and buries the code that
@@ -16,6 +17,10 @@ import { environmentProxyOptedIn } from "./proxy-environment.mjs";
 const MAX_CAUSE_DEPTH = 8;
 
 export const PROVIDER_TRANSPORT_ERROR_TYPE = "provider_transport_error";
+// This header is minted by the local API forwarder only. Its response relay
+// strips the same name from every origin, so a provider body cannot grant
+// permission to replay a generation request by claiming it was never sent.
+export const PROVIDER_DELIVERY_STATE_HEADER = "x-codex-router-delivery-state";
 
 // `hostname` is set by Node's DNS and TLS errors but not by a refused or
 // unreachable socket, which carries `address` (and `port`) instead -- a
@@ -160,6 +165,7 @@ export function providerTransportError(error) {
   return {
     type: PROVIDER_TRANSPORT_ERROR_TYPE,
     code: failure.code,
+    deliveryState: transportDeliveryState(error),
     message: "The provider connection failed before a response was available.",
   };
 }
@@ -169,4 +175,14 @@ export function providerTransportError(error) {
 // outer object would miss the wrapped form.
 export function hasProviderTransportError(bodyText) {
   return typeof bodyText === "string" && bodyText.includes(PROVIDER_TRANSPORT_ERROR_TYPE);
+}
+
+// A missing header (including one lost through an intermediary) carries no
+// evidence of delivery. Body fields are diagnostic only: an origin can echo
+// this reserved error shape, but it cannot mint the forwarder's private header.
+// Callers supply trustedDeliveryState only for a known local forwarder reply,
+// never for a native backend, local model, or arbitrary upstream response.
+export function providerTransportDeliveryState(bodyText, { trustedDeliveryState } = {}) {
+  if (!hasProviderTransportError(bodyText)) return undefined;
+  return trustedDeliveryState === "not_sent" ? "not_sent" : "possibly_sent";
 }

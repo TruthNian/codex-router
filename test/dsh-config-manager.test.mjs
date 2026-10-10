@@ -523,9 +523,17 @@ test("the default model selection names the router route", () => {
 
 const CALLER_SECRET = "a".repeat(48);
 
+function assertSandbox({ dshHome, stateDir }) {
+  assert.equal(path.dirname(dshHome), path.resolve(os.tmpdir()));
+  assert.ok(path.basename(dshHome).startsWith("dsh-home-"));
+  assert.equal(path.dirname(stateDir), path.resolve(os.tmpdir()));
+  assert.ok(path.basename(stateDir).startsWith("dsh-state-"));
+}
+
 function sandbox() {
   const dshHome = mkdtempSync(path.join(os.tmpdir(), "dsh-home-"));
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "dsh-state-"));
+  assertSandbox({ dshHome, stateDir });
   writeFileSync(path.join(stateDir, "caller-secret"), `${CALLER_SECRET}\n`, { mode: 0o600 });
   writeFileSync(
     path.join(stateDir, "enabled-providers.json"),
@@ -537,6 +545,7 @@ function sandbox() {
 }
 
 function manage(command, { dshHome, stateDir }) {
+  assertSandbox({ dshHome, stateDir });
   const output = execFileSync(
     process.execPath,
     [path.join(root, "src", "dsh-config-manager.mjs"), ...command.split(" ")],
@@ -546,8 +555,17 @@ function manage(command, { dshHome, stateDir }) {
       env: {
         ...process.env,
         DSH_HOME: dshHome,
+        CODEX_HOME: path.join(stateDir, "codex"),
         MODEL_ROUTER_STATE_DIR: stateDir,
+        CODEX_ROUTER_STATE_DIR: stateDir,
         MODEL_ROUTER_ALLOW_FOREIGN_STATE: "1",
+        MODEL_ROUTER_DSH_SETTINGS: path.join(dshHome, "settings.yaml"),
+        MODEL_ROUTER_DSH_CREDENTIALS: path.join(dshHome, ".credentials.yaml"),
+        CODEX_ROUTER_NO_DISCOVERY: "0",
+        KIMI_CODE_HOME: path.join(stateDir, "kimi"),
+        GROK_AUTH_PATH: path.join(stateDir, "grok", "auth.json"),
+        DEVIN_CREDENTIALS_PATH: path.join(stateDir, "devin", "credentials.toml"),
+        GCLOUD_BIN: path.join(stateDir, "missing-gcloud"),
       },
     },
   );

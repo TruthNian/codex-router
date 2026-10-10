@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
+import fs from "node:fs";
 import {
   existsSync,
   mkdirSync,
@@ -11,6 +12,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -20,8 +22,16 @@ const credentialStoreModule = new URL("../src/provider-credential-store.mjs", im
 const providerCredentialsModule = new URL("../src/provider-credentials.mjs", import.meta.url).href;
 
 const root = mkdtempSync(path.join(os.tmpdir(), "codex-router-credential-store-"));
+assert.equal(path.dirname(root), path.resolve(os.tmpdir()));
+assert.ok(path.basename(root).startsWith("codex-router-credential-store-"));
 process.env.CODEX_HOME = path.join(root, "codex");
 process.env.CODEX_ROUTER_STATE_DIR = path.join(root, "state");
+process.env.MODEL_ROUTER_STATE_DIR = process.env.CODEX_ROUTER_STATE_DIR;
+process.env.CODEX_ROUTER_NO_DISCOVERY = "0";
+process.env.KIMI_CODE_HOME = path.join(root, "kimi");
+process.env.GROK_AUTH_PATH = path.join(root, "grok", "auth.json");
+process.env.DEVIN_CREDENTIALS_PATH = path.join(root, "devin", "credentials.toml");
+process.env.GCLOUD_BIN = path.join(root, "missing-gcloud");
 process.env.MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE = path.join(root, "state", "provider-credentials.json");
 process.env.MODEL_ROUTER_PROVIDER_CREDENTIAL_MIGRATIONS = path.join(root, "state", "migrations", "provider-credentials");
 for (const name of ["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]) delete process.env[name];
@@ -55,6 +65,23 @@ test.after(() => rmSync(root, { recursive: true, force: true }));
 
 function ref(providerId = "deepseek") {
   return { type: "provider-file", providerId, target: "codex" };
+}
+
+// Directory junctions exercise Windows' no-follow boundary without requiring
+// the privileged file-symlink capability. POSIX keeps the file-link fixture.
+function unsafeLeafLink(target, link) {
+  for (const candidate of [target, link]) {
+    const relative = path.relative(root, candidate);
+    assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+  }
+  if (process.platform === "win32") {
+    const directory = `${target}.directory`;
+    mkdirSync(directory);
+    if (existsSync(target)) {
+      writeFileSync(path.join(directory, path.basename(target)), readFileSync(target), { mode: 0o600 });
+    }
+    symlinkSync(directory, link, "junction");
+  } else symlinkSync(target, link);
 }
 
 test("generated credential ids stay valid when raw base64url starts with dash or underscore", () => {
@@ -254,7 +281,7 @@ test("migration rejects unknown legacy fields and confined paths", () => {
     /inside the router state directory/,
   );
   const link = path.join(root, "state", "linked.json");
-  symlinkSync(path.join(root, "state", "target.json"), link);
+  unsafeLeafLink(path.join(root, "state", "target.json"), link);
   assert.throws(
     () => addCredentialReference({ providerId: "deepseek", kind: "api_key", secretRef: ref() }, link),
     /symbolic link/,
@@ -265,7 +292,7 @@ test("credential writes and resolution do not traverse symlinked paths", () => {
   const outside = path.join(root, "outside-credential-state");
   const linkedDirectory = path.join(root, "state", "linked-directory");
   mkdirSync(outside, { recursive: true });
-  symlinkSync(outside, linkedDirectory, "dir");
+  symlinkSync(outside, linkedDirectory, process.platform === "win32" ? "junction" : "dir");
   assert.throws(
     () => writeProviderCredentialStore(
       { credentials: [] },
@@ -278,8 +305,11 @@ test("credential writes and resolution do not traverse symlinked paths", () => {
   const external = path.join(root, "outside-resolution-secret.txt");
   writeFileSync(external, "TEST_SYMLINK_RESOLUTION_SECRET\n", { mode: 0o600 });
   unlinkSync(providerPath);
-  symlinkSync(external, providerPath);
-  assert.equal(resolveProviderCredential("deepseek"), undefined);
+  unsafeLeafLink(external, providerPath);
+  try {
+    assert.equal(resolveProviderCredential("deepseek"), undefined);
+    assert.equal(readFileSync(external, "utf8"), "TEST_SYMLINK_RESOLUTION_SECRET\n");
+  } finally { rmSync(providerPath); }
 });
 
 test("failed migration restores the exact original bytes", () => {
@@ -300,11 +330,27 @@ test("failed migration restores the exact original bytes", () => {
   mkdirSync(migrationDirectory, { recursive: true, mode: 0o700 });
   const outside = path.join(root, "latest-target.json");
   writeFileSync(outside, "do not touch\n", { mode: 0o600 });
-  symlinkSync(outside, latestPath);
-  assert.throws(
-    () => migrateProviderCredentialStore(filePath, { migrationDirectory }),
-    /symbolic link/,
-  );
+  const rename = fs.renameSync;
+  let failed = false;
+  fs.renameSync = (temporary, destination) => {
+    if (destination === latestPath && !failed) {
+      failed = true;
+      assert.equal(JSON.parse(readFileSync(filePath, "utf8")).schemaVersion, PROVIDER_CREDENTIAL_SCHEMA_VERSION);
+      throw new Error("injected migration pointer publication failure");
+    }
+    return rename(temporary, destination);
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(
+      () => migrateProviderCredentialStore(filePath, { migrationDirectory }),
+      /injected migration pointer publication failure/,
+    );
+    assert.equal(failed, true, "fail after publishing the migrated store so rollback is exercised");
+  } finally {
+    fs.renameSync = rename;
+    syncBuiltinESMExports();
+  }
   assert.deepEqual(readFileSync(filePath), legacyBytes);
   assert.equal(readFileSync(outside, "utf8"), "do not touch\n");
 });
@@ -332,9 +378,12 @@ test("credential references are router-plane- and provider-bound at resolution t
   const external = path.join(root, "outside-secret.txt");
   writeFileSync(external, "TEST_SYMLINK_SECRET\n", { mode: 0o600 });
   rmSync(providerPath);
-  symlinkSync(external, providerPath);
-  assert.equal(resolveProviderCredentialReference("deepseek", ref()), undefined);
-  assert.deepEqual(credentialPaths(PROVIDERS.get("deepseek")).filter((candidate) => candidate === providerPath), [providerPath]);
+  unsafeLeafLink(external, providerPath);
+  try {
+    assert.equal(resolveProviderCredentialReference("deepseek", ref()), undefined);
+    assert.deepEqual(credentialPaths(PROVIDERS.get("deepseek")).filter((candidate) => candidate === providerPath), [providerPath]);
+    assert.equal(readFileSync(external, "utf8"), "TEST_SYMLINK_SECRET\n");
+  } finally { rmSync(providerPath); }
 });
 
 test("credential references written by every client resolve through the shared router plane", () => {

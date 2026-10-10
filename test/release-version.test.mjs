@@ -68,9 +68,9 @@ test("releases are tag-driven and validate every asset before publishing", () =>
     "utf8",
   );
 
-  // CI remains validation for main and pull requests. Publishing is a separate
-  // tag-triggered workflow, so an ordinary main push cannot create a release.
-  assert.match(ci, /push:\s*\n\s+branches: \[main\]/);
+  // CI validates upstream main, the personal maintenance branch, and PRs.
+  // Publishing is tag-triggered; an ordinary branch push cannot release.
+  assert.match(ci, /push:\s*\n\s+branches: \[main, personal\]/);
   assert.match(ci, /pull_request:\s*\{\}/);
   assert.doesNotMatch(ci, /uses:\s+\.\/\.github\/workflows\/release\.yml/);
   assert.match(release, /push:\s*\n\s+tags:\s*\n\s+- "v\*"/);

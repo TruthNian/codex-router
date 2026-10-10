@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { codexCandidatePaths, findCodexBinary } from "../src/codex-binary.mjs";
 import { handleResponsesWebSocketUpgrade } from "../src/responses-websocket.mjs";
+import { WebSocketFrameParser } from "../src/ws-frames.mjs";
 import { spawnableCommand } from "../src/spawnable-command.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -288,10 +289,23 @@ async function verifySignedOutTurn(binary, { initialProvider = "openai" } = {}) 
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const port = server.address().port;
     server.on("upgrade", (request, socket, head) => {
-      upgrades.push({ headers: request.headers, url: request.url });
+      const upgrade = { headers: request.headers, url: request.url, frames: [], failures: [] };
+      upgrades.push(upgrade);
+      // Observe actual client frames without changing the edge handler. A
+      // handshake and a generate:false prewarm are not provider executions.
+      const observer = new WebSocketFrameParser({ expectMasked: true,
+        onText(text) {
+          const frame = JSON.parse(text);
+          upgrade.frames.push({ type: frame.type, generate: frame.generate, model: frame.model });
+        },
+        onClose({ code }) { upgrade.closeCode = code; },
+        onFail(code) { upgrade.failures.push(code); },
+      });
+      socket.on("data", (chunk) => observer.feed(chunk));
+      if (head.length) observer.feed(head);
       upgradedSockets.add(socket);
       socket.once("close", () => upgradedSockets.delete(socket));
-      handleResponsesWebSocketUpgrade(request, socket, head, {
+      upgrade.accepted = handleResponsesWebSocketUpgrade(request, socket, head, {
         callerKey: CALLER_KEY,
         authenticateUpgrade: (upgradeRequest, requestUrl) =>
           requestUrl.pathname === "/v1/responses" &&
@@ -348,10 +362,25 @@ async function verifySignedOutTurn(binary, { initialProvider = "openai" } = {}) 
 
     const notifications = await runAppServerTurn(binary, env, model, expectedProvider);
     assert.equal(requests.length, 1);
+    assert.equal(requests[0].body.model, model);
     if (upgrades.length > 0) {
-      assert.equal(upgrades.length, 1);
-      assert.equal(upgrades[0].url, "/v1/responses");
-      assert.equal(upgrades[0].headers.authorization, `Bearer ${CALLER_KEY}`);
+      // CLI 0.162 can leave an authenticated connection unused and issue a
+      // generate:false prewarm on another. Both receive 101 successfully:
+      // neither is an authentication/protocol recovery or an executed turn.
+      // Assert every edge's identity and the actual generation count instead
+      // of assuming that the client always opens exactly one socket.
+      for (const upgrade of upgrades) {
+        assert.equal(upgrade.url, "/v1/responses");
+        assert.equal(upgrade.headers.authorization, `Bearer ${CALLER_KEY}`);
+        assert.equal(upgrade.accepted, true);
+        assert.deepEqual(upgrade.failures, []);
+        for (const frame of upgrade.frames) {
+          assert.equal(frame.type, "response.create");
+          assert.equal(frame.model, model);
+        }
+      }
+      const generationFrames = upgrades.flatMap((entry) => entry.frames).filter((frame) => frame.generate !== false);
+      assert.equal(generationFrames.length, 1, "one client generation must produce exactly one provider POST");
       assert.equal(
         requests[0].url,
         `/_codex-router/${CALLER_KEY}/v1/responses`,

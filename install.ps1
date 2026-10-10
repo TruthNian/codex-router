@@ -2,6 +2,7 @@
 param(
   [switch]$CheckoutInstall,
   [switch]$PrepareOnly,
+  [switch]$DependenciesOnly,
   [switch]$ForceDeps,
   [ValidateSet("codex", "dsh", "gemini", "cursor", "claude", "openclaw")]
   [string]$Target = "codex",
@@ -31,6 +32,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($DependenciesOnly -and (-not $CheckoutInstall -or $PrepareOnly -or $MigrateKnown -or $AdoptNativeCatalog)) {
+  throw "-DependenciesOnly requires -CheckoutInstall and cannot prepare generated files, migrate, or adopt a native catalog."
+}
 $env:MODEL_ROUTER_TARGET = $Target
 if ($CursorPublicUrl) {
   if ($Target -ne "cursor") { throw "-CursorPublicUrl applies to -Target cursor only." }
@@ -293,30 +297,32 @@ function Get-InstallerStateField {
 }
 
 try {
-  # Each manager reports enablement under its own name: the Codex manager
-  # publishes a routing mode, DSH reports whether its route reached the
-  # settings document, Gemini whether its catalog is published.
-  $ConfigWasEnabled = switch ($Target) {
-    "dsh" { (Get-InstallerStateField @($ConfigManager, "status") "routeInstalled") -eq $true }
-    "gemini" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
-    "cursor" { (Get-InstallerStateField @($ConfigManager, "status") "appConfigured") -eq $true }
-    "claude" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
-    "openclaw" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
-    default { (Get-InstallerStateField @($ConfigManager, "status") "mode") -eq "router" }
-  }
-  $ServiceWasInstalled = (Get-InstallerStateField @("src\service.mjs", "status") "installed") -eq $true
-  $TrayWasInstalled = (Get-InstallerStateField @("src\tray-service.mjs", "status") "installed") -eq $true
-  if ($Target -eq "codex") {
-    $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
-    New-Item -ItemType Directory -Force -Path $CodexHome | Out-Null
-    $LegacyArguments = @("src\legacy-migration.mjs", "assert-clear")
-    if ($AdoptNativeCatalog) { $LegacyArguments += "--adopt-native-catalog" }
-    & node @LegacyArguments | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Resolve the detected older router before installing." }
-  }
-  if (-not $PrepareOnly) {
-    & node src/provider-selection.mjs ensure-configured | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Configure at least one provider before installing." }
+  if (-not $DependenciesOnly) {
+    # Each manager reports enablement under its own name: the Codex manager
+    # publishes a routing mode, DSH reports whether its route reached the
+    # settings document, Gemini whether its catalog is published.
+    $ConfigWasEnabled = switch ($Target) {
+      "dsh" { (Get-InstallerStateField @($ConfigManager, "status") "routeInstalled") -eq $true }
+      "gemini" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
+      "cursor" { (Get-InstallerStateField @($ConfigManager, "status") "appConfigured") -eq $true }
+      "claude" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
+      "openclaw" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
+      default { (Get-InstallerStateField @($ConfigManager, "status") "mode") -eq "router" }
+    }
+    $ServiceWasInstalled = (Get-InstallerStateField @("src\service.mjs", "status") "installed") -eq $true
+    $TrayWasInstalled = (Get-InstallerStateField @("src\tray-service.mjs", "status") "installed") -eq $true
+    if ($Target -eq "codex") {
+      $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
+      New-Item -ItemType Directory -Force -Path $CodexHome | Out-Null
+      $LegacyArguments = @("src\legacy-migration.mjs", "assert-clear")
+      if ($AdoptNativeCatalog) { $LegacyArguments += "--adopt-native-catalog" }
+      & node @LegacyArguments | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "Resolve the detected older router before installing." }
+    }
+    if (-not $PrepareOnly) {
+      & node src/provider-selection.mjs ensure-configured | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "Configure at least one provider before installing." }
+    }
   }
 
   # Every update re-runs this installer, so the dependency steps are skipped
@@ -343,7 +349,18 @@ try {
   }
 
   $Python = Join-Path $ScriptDirectory ".venv\Scripts\python.exe"
-  if ((Get-InstallStep "python-deps") -eq "skip") {
+  # Explicit repair rebuilds both trees; normal preparation follows requestable
+  # routes, without probing credentials or filtering hidden models.
+  $GatewayRequired = "required"
+  if (-not $ForceDeps) {
+    $GatewayRequired = (& node src/runtime-dependency-requirements.mjs --gateway-required | Select-Object -Last 1)
+    if ($LASTEXITCODE -ne 0 -or $GatewayRequired -notin @("required", "unused")) {
+      throw "Could not determine runtime dependency requirements."
+    }
+  }
+  if ($GatewayRequired -eq "unused") {
+    Write-Host "Selected routes do not need LiteLLM; skipping Python dependency installation and probes."
+  } elseif ((Get-InstallStep "python-deps") -eq "skip") {
     Write-Host "LiteLLM already matches the pinned versions; skipping the Python install."
   } elseif (Get-Command "uv" -ErrorAction SilentlyContinue) {
     $VenvHomeOk = (& node src/install-plan.mjs venv-home-ok 2>$null | Select-Object -Last 1) -eq "ok"
@@ -426,6 +443,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Recording the Python dependency state failed." }
   }
 
+  if ($DependenciesOnly) {
+    Write-Host "Runtime dependencies are prepared; provider selection and application configuration were not changed."
+    return
+  }
+
   # Installing is the sanctioned way for a checkout to take over a state
   # directory: the generated files below are rebuilt here and the new owner is
   # recorded before the service step, so the ownership guard must not block a
@@ -462,6 +484,45 @@ try {
   function Test-NonEmptyFile([string] $Path) {
     return (Test-Path $Path -PathType Leaf) -and ((Get-Item $Path).Length -gt 0)
   }
+  if ($GatewayRequired -eq "required") {
+    & node src/litellm-config.mjs
+    if ($LASTEXITCODE -ne 0) { throw "Gateway configuration generation failed." }
+  }
+  if ($PrepareOnly) {
+    Write-Host "Dependencies and generated files are prepared; application configuration was not changed."
+    # Return from the script instead of terminating the caller's PowerShell
+    # host. The outer finally still has to restore the caller environment, and
+    # an invoked prepare-only install must hand control back so its caller can
+    # observe that restoration.
+    return
+  }
+
+  # Record before the service starts, not after. The manifest is provenance for
+  # the install that just happened -- which checkout owns the state, and the
+  # proxy environment a later repair must restore -- and the service itself
+  # needs the record in place first: start.mjs rewrites the gateway config on
+  # every boot and refuses while the manifest still names another checkout, so
+  # recording after `service.mjs install` -- a step that contains the health
+  # wait -- let an install over a foreign-owned state directory crash-loop for
+  # the whole readiness budget while the ownership transfer never ran.
+  & node src/install-manifest.mjs record | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Install-manifest recording failed." }
+  $ServiceInstalled = $true
+  & node src/service.mjs install
+  if ($LASTEXITCODE -eq 75) {
+    # Installed and running, just not healthy yet. Stop without rolling
+    # anything back: the service keeps starting and the operator re-checks
+    # rather than reinstalling. Skipping wait-health matters -- it would spend
+    # a second full budget and fail the same way on the same cold start.
+    $ReadinessTimedOut = $true
+    Write-Host "The background service is installed and still starting; the router did not answer within the health wait."
+    Write-Host "Check './codex-router.ps1 status' in a few minutes. Do not re-run the installer -- nothing was rolled back."
+    throw "The router is still starting."
+  }
+  if ($LASTEXITCODE -ne 0) { throw "Background-service installation failed." }
+  & node src/wait-health.mjs
+  if ($LASTEXITCODE -ne 0) { throw "The router did not become healthy." }
+
   $NativeCatalogPath = Join-Path $StateRoot "native-models.json"
   if ($Target -eq "codex") {
     if (Test-NonEmptyFile $NativeCatalogPath) {
@@ -476,8 +537,6 @@ try {
     & node src/catalog.mjs
     if ($LASTEXITCODE -ne 0) { throw "Codex model-catalog generation failed." }
   }
-  & node src/litellm-config.mjs
-  if ($LASTEXITCODE -ne 0) { throw "Gateway configuration generation failed." }
   # The router plane is shared, so an install for one client changes the routable
   # set for the other. Republish whichever integration is already installed here
   # rather than leaving it advertising a stale model list.
@@ -505,15 +564,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "OpenClaw republish failed." }
   }
 
-  if ($PrepareOnly) {
-    Write-Host "Dependencies and generated files are prepared; application configuration was not changed."
-    # Return from the script instead of terminating the caller's PowerShell
-    # host. The outer finally still has to restore the caller environment, and
-    # an invoked prepare-only install must hand control back so its caller can
-    # observe that restoration.
-    return
-  }
-
   if ($Target -eq "openclaw") {
     & node src/openclaw-install.mjs install | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "OpenClaw installation failed." }
@@ -525,31 +575,6 @@ try {
   & node @ConfigArguments
   if ($LASTEXITCODE -ne 0) { throw "$Target configuration update failed." }
   $AdoptionPending = $false
-  # Record before the service starts, not after. The manifest is provenance for
-  # the install that just happened -- which checkout owns the state, and the
-  # proxy environment a later repair must restore -- and the service itself
-  # needs the record in place first: start.mjs rewrites the gateway config on
-  # every boot and refuses while the manifest still names another checkout, so
-  # recording after `service.mjs install` -- a step that contains the health
-  # wait -- let an install over a foreign-owned state directory crash-loop for
-  # the whole readiness budget while the ownership transfer never ran.
-  & node src/install-manifest.mjs record | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "Install-manifest recording failed." }
-  $ServiceInstalled = $true
-  & node src/service.mjs install
-  if ($LASTEXITCODE -eq 75) {
-    # Installed and running, just not healthy yet. Stop without rolling
-    # anything back: the service keeps starting and the operator re-checks
-    # rather than reinstalling. Skipping wait-health matters -- it would spend
-    # a second full budget and fail the same way on the same cold start.
-    $ReadinessTimedOut = $true
-    Write-Host "The background service is installed and still starting; the router did not answer within the health wait."
-    Write-Host "Check './codex-router.ps1 status' in a few minutes. Do not re-run the installer -- nothing was rolled back."
-    throw "The router is still starting."
-  }
-  if ($LASTEXITCODE -ne 0) { throw "Background-service installation failed." }
-  & node src/wait-health.mjs
-  if ($LASTEXITCODE -ne 0) { throw "The router did not become healthy." }
 
   # Keep an existing companion in step with the checkout, but never turn a
   # fresh router install into a tray install the operator did not request.

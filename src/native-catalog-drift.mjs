@@ -122,11 +122,16 @@ export async function republishOnNativeDrift({
   refreshTargetPicker,
   nativeDriftDetected = nativeCatalogDriftDetected,
   routedAgentDriftDetected = routedAgentCatalogDriftDetected,
+  forceAccountRefresh = false,
+  accountChanged = false,
 } = {}) {
   // model_catalog_json stops Codex's own account cache writer. Refresh the
   // fixed ChatGPT account endpoint first; on any failure the updater leaves
   // the prior cache untouched and the local drift comparison remains safe.
-  const accountRefresh = await refreshAccountCatalog();
+  const accountRefresh = await refreshAccountCatalog({
+    force: forceAccountRefresh || accountChanged,
+    conditional: !accountChanged,
+  });
   // Every other status is transient or a no-op, but this one is a standing
   // misconfiguration that silently freezes the picker: the router keeps
   // resolving a Codex older than the one that wrote the account cache, so it
@@ -152,10 +157,12 @@ export async function republishOnNativeDrift({
     : "Routed agent drift";
 
   try {
-    // Dynamic import to avoid startup dependency
+    // Read the registry in a fresh child after acquiring the overlay lock, and
+    // verify the running Router has adopted it before changing any client.
+    // An explicit injected publisher remains the fixture/tooling boundary.
     const refresh = refreshTargetPicker || (
-      await import("./target-integration.mjs")
-    ).refreshTargetPickerIfInstalled;
+      await import("./model-overlay-publication.mjs")
+    ).publishAdoptedModelOverlayFresh;
     await refresh();
     console.error(`[codex-router] ${driftLabel} detected and republished automatically.`);
     return true;
@@ -177,26 +184,55 @@ export function watchNativeCatalog({
   log = console.error,
   immediate = false,
   environment = process.env,
+  subscribeEvents,
+  schedule = setTimeout,
+  cancel = clearTimeout,
+  debounceMs = 500,
 } = {}) {
   let running = false;
   let stopped = false;
-  const refresh = async () => {
+  let pendingEvent;
+  let eventTimer;
+  const refresh = async (options = {}) => {
     if (running || stopped) return;
     running = true;
     try {
-      await republish();
+      await republish(options);
     } catch (error) {
       log(`[codex-router] Native catalog refresh failed: ${error.message}`);
     } finally {
       running = false;
+      if (pendingEvent && !stopped) queueEvent();
     }
   };
-  const timer = interval(refresh, nativeCatalogPollIntervalMs(environment));
+  const queueEvent = (event) => {
+    if (stopped) return;
+    if (event) pendingEvent = {
+      forceAccountRefresh: Boolean(pendingEvent?.forceAccountRefresh || event.forceAccountRefresh),
+      accountChanged: Boolean(pendingEvent?.accountChanged || event.accountChanged),
+    };
+    if (running || eventTimer !== undefined || !pendingEvent) return;
+    eventTimer = schedule(() => {
+      eventTimer = undefined;
+      if (running || stopped) return;
+      const options = pendingEvent;
+      pendingEvent = undefined;
+      void refresh(options);
+    }, debounceMs);
+    eventTimer.unref?.();
+  };
+  const timer = interval(() => refresh(), nativeCatalogPollIntervalMs(environment));
   // Background maintenance must not keep a stopped supervisor alive.
   timer.unref?.();
-  if (immediate) void refresh();
+  // Cache metadata carries no account identity. Revalidate unconditionally on
+  // boot so a fresh previous-account cache cannot survive a service restart.
+  if (immediate) void refresh({ forceAccountRefresh: true, accountChanged: true });
+  const stopEvents = subscribeEvents?.(queueEvent);
   return () => {
     stopped = true;
     clear(timer);
+    if (eventTimer !== undefined) cancel(eventTimer);
+    pendingEvent = undefined;
+    stopEvents?.();
   };
 }

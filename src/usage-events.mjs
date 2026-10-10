@@ -12,6 +12,7 @@ import { STATE_DIR } from "./paths.mjs";
 import { canonicalProviderId } from "./provider-selection.mjs";
 import { acceptedInputTokens } from "./context-window-drift.mjs";
 import { serviceTierMetadata, usageDiagnosticMetadata } from "./request-diagnostics.mjs";
+import { knownGenerationOutcome } from "./response-outcome.mjs";
 
 export const USAGE_EVENTS_PATH = path.join(STATE_DIR, "usage-events.jsonl");
 
@@ -64,6 +65,28 @@ function safeRetryCount(value) {
   return count ? count : undefined;
 }
 
+const ATTEMPT_ERROR_CODES = new Set([
+  "EADDRNOTAVAIL", "ECONNABORTED", "ECONNREFUSED", "ECONNRESET", "EAI_AGAIN",
+  "EHOSTUNREACH", "ENETDOWN", "ENETUNREACH", "ENOBUFS", "ENOTFOUND", "EPIPE",
+  "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET",
+]);
+
+function safeUpstreamAttempts(value) {
+  if (!Array.isArray(value)) return undefined;
+  const attempts = value.slice(0, 6).filter((entry) => entry &&
+    Number.isInteger(entry.attempt) && entry.attempt >= 1 && entry.attempt <= 6 &&
+    ["not_sent", "possibly_sent", "response_started"].includes(entry.deliveryState))
+    .map((entry) => ({
+      attempt: entry.attempt,
+      deliveryState: entry.deliveryState,
+      durationMs: safeTokenCount(entry.durationMs) ?? 0,
+      retryScheduled: entry.retryScheduled === true,
+      ...(Number.isInteger(entry.status) && entry.status >= 100 && entry.status <= 599 ? { status: entry.status } : {}),
+      ...(ATTEMPT_ERROR_CODES.has(entry.errorCode) ? { errorCode: entry.errorCode } : {}),
+    }));
+  return attempts.length ? attempts : undefined;
+}
+
 // Every field an event can carry is named in this destructuring, and the writer
 // below only emits the ones it knows about: anything a caller passes that is not
 // listed here is dropped silently, with no error and no trace. Three image-budget
@@ -74,6 +97,13 @@ export function recordUsageEvent({
   model,
   provider,
   status,
+  httpStatus,
+  generationOutcome,
+  upstreamAttempts,
+  deliveryPolicy,
+  ingressMs,
+  preparationMs,
+  upstreamHeadersMs,
   durationMs,
   // Milliseconds from receiving the request until the upstream response
   // headers arrived. Together with durationMs this isolates the streamed
@@ -221,6 +251,13 @@ export function recordUsageEvent({
     model: safeText(model, "unknown"),
     provider: safeText(provider, "unknown"),
     status: Number.isInteger(status) ? status : 0,
+    ...(Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599 ? { httpStatus } : {}),
+    ...(knownGenerationOutcome(generationOutcome) ? { generationOutcome } : {}),
+    ...(safeUpstreamAttempts(upstreamAttempts) ? { upstreamAttempts: safeUpstreamAttempts(upstreamAttempts) } : {}),
+    ...(["at-most-once", "availability"].includes(deliveryPolicy) ? { deliveryPolicy } : {}),
+    ...(safeTokenCount(ingressMs) !== undefined ? { ingressMs: safeTokenCount(ingressMs) } : {}),
+    ...(safeTokenCount(preparationMs) !== undefined ? { preparationMs: safeTokenCount(preparationMs) } : {}),
+    ...(safeTokenCount(upstreamHeadersMs) !== undefined ? { upstreamHeadersMs: safeTokenCount(upstreamHeadersMs) } : {}),
     durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : 0,
     ...(safeTokenCount(responseStartMs) !== undefined
       ? { responseStartMs: safeTokenCount(responseStartMs) }
@@ -557,6 +594,13 @@ export function recentUsageEvents({
           // series per subscription.
           provider: canonicalProviderId(safeText(event.provider, "unknown")),
           status: Number.isInteger(event.status) ? event.status : 0,
+          ...(Number.isInteger(event.httpStatus) && event.httpStatus >= 100 && event.httpStatus <= 599 ? { httpStatus: event.httpStatus } : {}),
+          ...(knownGenerationOutcome(event.generationOutcome) ? { generationOutcome: event.generationOutcome } : {}),
+          ...(safeUpstreamAttempts(event.upstreamAttempts) ? { upstreamAttempts: safeUpstreamAttempts(event.upstreamAttempts) } : {}),
+          ...(["at-most-once", "availability"].includes(event.deliveryPolicy) ? { deliveryPolicy: event.deliveryPolicy } : {}),
+          ...(safeTokenCount(event.ingressMs) !== undefined ? { ingressMs: safeTokenCount(event.ingressMs) } : {}),
+          ...(safeTokenCount(event.preparationMs) !== undefined ? { preparationMs: safeTokenCount(event.preparationMs) } : {}),
+          ...(safeTokenCount(event.upstreamHeadersMs) !== undefined ? { upstreamHeadersMs: safeTokenCount(event.upstreamHeadersMs) } : {}),
           durationMs: Number.isFinite(event.durationMs)
             ? Math.max(0, Math.round(event.durationMs))
             : 0,

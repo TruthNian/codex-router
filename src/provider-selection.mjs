@@ -3,15 +3,13 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { discoveryDisabled } from "./discovery-mode.mjs";
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import { genericProviderConfigured } from "./generic-provider-readiness.mjs";
 import { PROVIDER_SELECTION_PATH, STATE_DIR, TARGET } from "./paths.mjs";
 import {
@@ -217,15 +215,10 @@ export function writeProviderSelection(values) {
   const providers = validateProviderIds(values);
   mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
   chmodSync(STATE_DIR, 0o700);
-  const temporary = `${PROVIDER_SELECTION_PATH}.tmp.${process.pid}`;
-  writeFileSync(
-    temporary,
+  writePrivateFile(
+    PROVIDER_SELECTION_PATH,
     `${JSON.stringify({ version: 1, providers }, null, 2)}\n`,
-    { encoding: "utf8", mode: 0o600 },
   );
-  protectPrivateFile(temporary);
-  renameSync(temporary, PROVIDER_SELECTION_PATH);
-  protectPrivateFile(PROVIDER_SELECTION_PATH);
   return providers;
 }
 
@@ -303,8 +296,8 @@ export function selectedListedModels() {
   ));
 }
 
-export function selectedConfiguredListedModels() {
-  const selected = new Set(readProviderSelection());
+export function selectedConfiguredListedModels({ selectedProviders = readProviderSelection() } = {}) {
+  const selected = new Set(selectedProviders);
   const configured = new Set(configuredProviderIds());
   return LISTED_MODELS.filter(
     (model) => (

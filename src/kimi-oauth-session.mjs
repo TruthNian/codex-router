@@ -1,14 +1,9 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
-  closeSync,
   existsSync,
-  fsyncSync,
   mkdirSync,
-  openSync,
   readFileSync,
-  renameSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -16,7 +11,7 @@ import path from "node:path";
 
 import { acquireFileLock, runWithLockRelease } from "./file-lock.mjs";
 
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import { kimiCodeHome, resolveKimiCodeEnvironment } from "./kimi-region.mjs";
 import { VERSION } from "./version.mjs";
 
@@ -170,26 +165,7 @@ function atomicSaveToken(token) {
   const directory = path.dirname(file);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
-  const temporary = `${file}.tmp.${process.pid}`;
-  const descriptor = openSync(temporary, "w", 0o600);
-  try {
-    writeFileSync(descriptor, `${JSON.stringify(token, null, 2)}\n`, "utf8");
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-  try {
-    protectPrivateFile(temporary);
-    renameSync(temporary, file);
-    protectPrivateFile(file);
-  } catch (error) {
-    try {
-      unlinkSync(temporary);
-    } catch {
-      // Best-effort cleanup only.
-    }
-    throw error;
-  }
+  writePrivateFile(file, `${JSON.stringify(token, null, 2)}\n`, { fsync: true });
 }
 
 function revokedTombstone(token) {

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import os from "node:os";
+import { rmSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SETUP = path.join(root, "src", "setup.mjs");
@@ -17,15 +18,13 @@ const SETUP = path.join(root, "src", "setup.mjs");
 const SETUP_INCOMPLETE_EXIT = 2;
 
 function runSetup(args, extraEnv = {}) {
-  const stateDir = mkdtempSync(path.join(os.tmpdir(), "setup-exit-"));
+  const stateDir = setupFixtureRoot("setup-exit-");
   try {
     return spawnSync(process.execPath, [SETUP, ...args], {
       cwd: root,
       encoding: "utf8",
       env: {
-        ...process.env,
-        MODEL_ROUTER_STATE_DIR: stateDir,
-        CODEX_HOME: stateDir,
+        ...setupFixtureEnvironment(stateDir, stateDir, stateDir),
         ...extraEnv,
       },
     });
@@ -88,15 +87,19 @@ test("Homebrew refuses the source-only desktop companion before setup changes an
 // keep the cases in this file to argument and selection errors, which exit
 // before that point.
 
-// A stored credential would make this run succeed instead of reporting the
-// gap, so the case is skipped rather than asserted against whatever the
-// developer's machine happens to hold. Keychain entries are global and no
-// state-directory override hides them.
-const deepseekConfigured =
-  spawnSync(process.execPath, [path.join(root, "src", "provider-key.mjs"), "deepseek", "status"], {
+// The status check uses the same fully synthetic roots as setup, so global
+// operator credentials cannot decide whether this regression runs.
+const statusRoot = setupFixtureRoot("setup-key-status-");
+let deepseekConfigured;
+try {
+  deepseekConfigured = spawnSync(process.execPath, [path.join(root, "src", "provider-key.mjs"), "deepseek", "status"], {
     cwd: root,
     encoding: "utf8",
+    env: setupFixtureEnvironment(statusRoot, statusRoot, statusRoot),
   }).status === 0;
+} finally {
+  rmSync(statusRoot, { recursive: true, force: true });
+}
 
 test(
   "a scripted run with an unconfigured provider stays strict but keeps the update",

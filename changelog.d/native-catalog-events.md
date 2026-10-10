@@ -1,0 +1,1 @@
+- Refresh the native model catalog after an account or installed Codex runtime changes, coalesce notifications, preserve catalogs on uncertain reads, and use a daily fallback instead of five-minute background polling. Account invalidation and service startup bypass stale cache validators without persisting account identities.

@@ -9,6 +9,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -88,7 +89,16 @@ function fakeSourceRoot() {
   mkdirSync(path.join(fake, "bin"), { recursive: true });
   for (const entry of ["config", "skills", "package.json", "requirements", "node_modules", "src"]) {
     const target = path.join(root, entry);
-    if (existsSync(target)) symlinkSync(target, path.join(fake, entry));
+    if (!existsSync(target)) continue;
+    const destination = path.join(fake, entry);
+    if (process.platform === "win32") {
+      // Directory junctions and ordinary file copies need no symlink privilege.
+      // A fixture must not turn a healthy install into an administrator-only test.
+      if (statSync(target).isDirectory()) symlinkSync(target, destination, "junction");
+      else copyFileSync(target, destination);
+    } else {
+      symlinkSync(target, destination);
+    }
   }
   // A packaged repair may regenerate configuration and services only when the
   // package-owned dependency tree is healthy. Keep this fixture on that path;
@@ -100,7 +110,7 @@ function fakeSourceRoot() {
   if (process.platform === "win32") {
     // The health probe intentionally initializes Python's stdlib, so a copied
     // Node executable is no longer a truthful fixture. Windows CI images ship
-    // Python; link the first launcher that passes the exact production probe.
+    // Python; make a real isolated venv from a launcher that passes the probe.
     const python = ["python.exe", "py.exe"]
       .flatMap((command) => {
         const found = spawnSync("where.exe", [command], { encoding: "utf8" });
@@ -114,7 +124,12 @@ function fakeSourceRoot() {
         ).status === 0
       );
     assert.ok(python, "Windows test host needs a runnable Python launcher");
-    symlinkSync(python, `${venvPython}.exe`, "file");
+    const venv = spawnSync(python, ["-m", "venv", "--without-pip", path.join(fake, ".venv")], {
+      encoding: "utf8",
+      timeout: 30_000,
+      windowsHide: true,
+    });
+    assert.equal(venv.status, 0, `isolated Python venv could not be created: ${venv.stderr}`);
     copyFileSync(process.execPath, `${liteLlm}.exe`);
   } else {
     writeFileSync(venvPython, "#!/bin/sh\nexit 0\n");

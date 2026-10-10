@@ -1,0 +1,1 @@
+- Prepare installs without publishing client routes, and publish them only after the adopted service is healthy; a failed enable operation preserves existing client and service installations.

@@ -1,3 +1,4 @@
+import { rejectGenerationRedirect } from "./generation-redirect.mjs";
 import { normalizeAzureOpenAIResponsesRequest } from "./azure-openai-compat.mjs";
 import http from "node:http";
 import {
@@ -106,7 +107,7 @@ import {
   wsTransportAvailable,
 } from "./responses-ws-client.mjs";
 import { providerPoolRegistry } from "./provider-ws-pool.mjs";
-import { providerTransportError } from "./transport-failure.mjs";
+import { providerTransportError, PROVIDER_DELIVERY_STATE_HEADER } from "./transport-failure.mjs";
 import {
   endpointCapabilityError,
   supportsOpenAIModelEndpoint,
@@ -1657,6 +1658,7 @@ async function relayUpstreamResponse(
   startedAt,
   telemetryUpstream = upstream,
 ) {
+  await rejectGenerationRedirect(upstream);
   const upstreamContentType = upstream.headers.get("content-type") || "";
   if (
     normalized.provider.id === "clinepass" &&
@@ -1758,9 +1760,10 @@ async function relayUpstreamResponse(
     responsesJson ? createResponsesJsonTransform(flatToNative) : undefined,
     zaiCacheUsageTransform(normalized.provider.id, upstreamContentType),
   ].filter(Boolean);
-  const denylist = transform.length
-    ? new Set([...HOP_BY_HOP_HEADERS, "content-type"])
-    : undefined;
+  const denylist = new Set([
+    ...HOP_BY_HOP_HEADERS, PROVIDER_DELIVERY_STATE_HEADER,
+    ...(transform.length ? ["content-type"] : []),
+  ]);
   if (responsesStream) response.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   if (responsesJson) response.setHeader("Content-Type", "application/json; charset=utf-8");
   if (replayJson && !responsesJson) response.setHeader("Content-Type", upstreamContentType);
@@ -1825,10 +1828,12 @@ function recordUpstreamLimits(normalized, upstream) {
   });
 }
 
+const adoptedProviders = new Set(readProviderSelection());
+
 function healthPayload() {
   const providers = {};
   let ok = true;
-  const enabled = new Set(readProviderSelection());
+  const enabled = adoptedProviders;
   const poolAuthoritySnapshot = providerApiKeyAuthoritySnapshot();
   for (const provider of RUNTIME_PROVIDERS.values()) {
     if (provider.kind !== "openai-compatible") continue;
@@ -2147,9 +2152,9 @@ async function handleRequest(request, response) {
           ),
           body: upstreamBody,
           signal: controller.signal,
-          redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "follow",
+          redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "manual",
         });
-        let attemptResponse = await sendAttempt();
+        let attemptResponse = await rejectGenerationRedirect(await sendAttempt());
         // The source credential can still be valid when Copilot changes the
         // account's inference endpoint or short-lived routing token. Preserve
         // the existing same-key force-refresh contract inside each pool
@@ -2165,7 +2170,7 @@ async function handleRequest(request, response) {
             normalized.endpoint,
           );
           attemptTarget = upstreamTarget(attemptSession, normalized, route, requestUrl.search);
-          attemptResponse = await sendAttempt();
+          attemptResponse = await rejectGenerationRedirect(await sendAttempt());
         }
         if (!attemptResponse.ok) {
           const bodyText = (await readResponseBody(attemptResponse, {
@@ -2278,8 +2283,9 @@ async function handleRequest(request, response) {
       ),
       body: upstreamBody,
       signal: controller.signal,
-      redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "follow",
+      redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "manual",
     });
+    await rejectGenerationRedirect(upstream);
     // Embeddings and Decisions can be billed even when the response never
     // reaches the caller. Select one pool credential above and record its
     // outcome, but do not replay the same input through another credential
@@ -2325,7 +2331,9 @@ async function handleRequest(request, response) {
       ),
       body: upstreamBody,
       signal: controller.signal,
+      redirect: "manual",
     });
+    await rejectGenerationRedirect(upstream);
   }
   // Falling back here is legal for the same reason the Copilot replay above
   // is: nothing has been relayed yet. The refusal is read rather than piped
@@ -2388,11 +2396,14 @@ const server = http.createServer((request, response) => {
       `[api-forwarder] request failed: ${formatErrorChain(error, { messages: false })}`,
     );
     if (!response.headersSent) {
+      if (transport) response.setHeader(PROVIDER_DELIVERY_STATE_HEADER, transport.deliveryState);
       writeJson(response, status, {
-        error: transport || {
+        error: transport || (error?.code === "upstream_redirect_refused" ? {
+          type: "provider_redirect_refused", message: error.message,
+        } : {
           type: "provider_api_proxy_error",
           message: "The API-provider forwarder could not complete the request.",
-        },
+        }),
       });
     } else if (!response.writableEnded) {
       endStreamedResponse(response, {
@@ -2413,3 +2424,5 @@ installGracefulShutdown(server, { label: "api-forwarder" });
 // server's own drain; shut them down with the process.
 process.once("SIGTERM", () => genericProviderPools.closeAll());
 process.once("SIGINT", () => genericProviderPools.closeAll());
+// IPC shutdown disconnects only after HTTP turns have drained.
+process.once("disconnect", () => genericProviderPools.closeAll());

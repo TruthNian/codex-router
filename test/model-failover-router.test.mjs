@@ -291,6 +291,12 @@ function run(
     env: {
       ...process.env,
       MODEL_ROUTER_STATE_DIR: stateDir,
+      CODEX_ROUTER_STATE_DIR: stateDir,
+      CODEX_HOME: path.join(stateDir, "codex"),
+      // Every persistent key above is synthetic and this fresh home cannot
+      // reach the operator's credentials. Failover must resolve those fixture
+      // credentials even when the outer test wrapper disables discovery.
+      CODEX_ROUTER_NO_DISCOVERY: "0",
       CODEX_ROUTER_CALLER_KEY: CALLER_KEY,
       CODEX_ROUTER_INTERNAL_KEY: INTERNAL_KEY,
       KIMI_INTERNAL_KEY: INTERNAL_KEY,
@@ -318,11 +324,19 @@ function routerEnv(gatewayPort, routerPort) {
   return {
     CODEX_ROUTER_PORT: String(routerPort),
     CODEX_ROUTER_GATEWAY_BASE_URL: `http://127.0.0.1:${gatewayPort}/v1`,
+    CODEX_ROUTER_API_BASE_URL: `http://127.0.0.1:${gatewayPort}/v1`,
+    CODEX_NATIVE_BASE_URL: `http://127.0.0.1:${gatewayPort}/v1`,
     CODEX_ROUTER_OAUTH_HEALTH_URL: `http://127.0.0.1:${gatewayPort}/health`,
     CODEX_ROUTER_API_HEALTH_URL: `http://127.0.0.1:${gatewayPort}/health`,
     CODEX_ROUTER_GROK_OAUTH_HEALTH_URL: `http://127.0.0.1:${gatewayPort}/health`,
     CODEX_ROUTER_GATEWAY_HEALTH_URL: `http://127.0.0.1:${gatewayPort}/health`,
   };
+}
+
+// These existing gateway fixtures deliberately exercise ambiguous legacy
+// markers whose provenance header is lost. Their replay requires opt-in.
+function transportRouterEnv(gatewayPort, routerPort) {
+  return { ...routerEnv(gatewayPort, routerPort), CODEX_ROUTER_NATIVE_RETRY_POLICY: "availability" };
 }
 
 function usageEvents(stateDir) {
@@ -342,13 +356,16 @@ async function waitForUsageEvents(stateDir, count, child) {
 }
 
 async function waitFor(url, child) {
+  // This single-Router fixture stubs request hops; it does not start every
+  // dependency exposed by SHOW_ALL. Readiness has separate real-stack tests.
+  const probeUrl = url.endsWith("/health") ? `${url}/live` : url;
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`Child exited early (${child.exitCode}): ${child.testErrors()}`);
     }
     try {
-      const response = await fetch(url);
+      const response = await fetch(probeUrl);
       if (response.ok) return;
     } catch {
       // Not bound yet.
@@ -519,7 +536,7 @@ test("a turn whose provider is out of usage is served by the next model", async 
   }
 });
 
-test("a marked provider transport failure moves a subagent to a checked-in v2 route", async () => {
+test("availability moves a marked legacy transport failure to a checked-in v2 subagent route", async () => {
   const seen = [];
   const gw = await gateway(async (request, response) => {
     const body = await bodyJson(request);
@@ -533,7 +550,7 @@ test("a marked provider transport failure moves a subagent to a checked-in v2 ro
     response.end(contentSse("subagent-transport-fallback"));
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run(transportRouterEnv(gw.port, routerPort), {
     chain: [V2_FALLBACK.slug],
     v2Credentials: true,
   });
@@ -568,7 +585,7 @@ test("subagent transport failover preserves search history execution mode", asyn
     response.end(TRANSPORT_BODY);
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run(transportRouterEnv(gw.port, routerPort), {
     chain: [V2_FALLBACK.slug],
     v2Credentials: true,
   });
@@ -596,7 +613,7 @@ test("subagent transport failover preserves search history execution mode", asyn
   }
 });
 
-test("a marked provider transport failure retries the same ordinary route once", async () => {
+test("availability retries a marked legacy transport failure on the same ordinary route once", async () => {
   const seen = [];
   const gw = await gateway(async (request, response) => {
     const body = await bodyJson(request);
@@ -610,7 +627,7 @@ test("a marked provider transport failure retries the same ordinary route once",
     response.end(contentSse("same-route-transport-retry"));
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run(transportRouterEnv(gw.port, routerPort), {
     chain: [V2_FALLBACK.slug],
     v2Credentials: true,
   });
@@ -802,7 +819,7 @@ test("a marked provider transport failure does not move an ordinary turn", async
     response.end(TRANSPORT_BODY);
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run(transportRouterEnv(gw.port, routerPort), {
     chain: [V2_FALLBACK.slug],
     v2Credentials: true,
   });
@@ -830,7 +847,7 @@ test("a subagent header cannot grant fallback authority to an unverified route",
     response.end(TRANSPORT_BODY);
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run(transportRouterEnv(gw.port, routerPort), {
     chain: [V2_FALLBACK.slug],
     v2Credentials: true,
   });
@@ -873,7 +890,7 @@ test("subagent transport failover stops on the first application response", asyn
     response.end(contentSse("must-not-run"));
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run(transportRouterEnv(gw.port, routerPort), {
     chain: [V2_FALLBACK.slug, V2_THIRD.slug],
     v2Credentials: true,
   });

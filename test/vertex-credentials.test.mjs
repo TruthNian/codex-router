@@ -7,14 +7,22 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-vertex-"));
+assert.equal(path.dirname(testRoot), path.resolve(os.tmpdir()));
+assert.ok(path.basename(testRoot).startsWith("codex-router-vertex-"));
 process.env.CODEX_HOME = path.join(testRoot, "codex");
 process.env.CODEX_ROUTER_STATE_DIR = path.join(testRoot, "state");
+process.env.MODEL_ROUTER_STATE_DIR = process.env.CODEX_ROUTER_STATE_DIR;
 process.env.MODEL_ROUTER_VERTEX_STATE = path.join(
   process.env.CODEX_ROUTER_STATE_DIR,
   "vertex-settings.json",
 );
 process.env.GCLOUD_BIN = path.join(testRoot, "missing-gcloud");
+process.env.KIMI_CODE_HOME = path.join(testRoot, "kimi");
+process.env.GROK_AUTH_PATH = path.join(testRoot, "grok", "auth.json");
+process.env.DEVIN_CREDENTIALS_PATH = path.join(testRoot, "devin", "credentials.toml");
+process.env.CODEX_ROUTER_NO_DISCOVERY = "0";
 for (const name of [
+  "MODEL_ROUTER_VERTEX_STATE_PATH",
   "VERTEX_PROJECT_ID",
   "VERTEX_LOCATION",
   "GOOGLE_CLOUD_PROJECT",
@@ -368,6 +376,8 @@ test("Vertex ADC is not read when discovery is disabled", async () => {
     return FIRST_TOKEN;
   };
   writeDiscoveryMode(true);
+  const previousDiscoveryOverride = process.env.CODEX_ROUTER_NO_DISCOVERY;
+  delete process.env.CODEX_ROUTER_NO_DISCOVERY;
   try {
     assert.equal(resolveVertexAccessToken({ runCommand }), undefined);
     assert.equal(resolveProviderCredential("vertex", { runCommand }), undefined);
@@ -376,6 +386,7 @@ test("Vertex ADC is not read when discovery is disabled", async () => {
     assert.equal(called, 0);
   } finally {
     writeDiscoveryMode(false);
+    process.env.CODEX_ROUTER_NO_DISCOVERY = previousDiscoveryOverride;
   }
 });
 

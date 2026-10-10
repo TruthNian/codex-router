@@ -60,16 +60,16 @@ struct ProviderCatalogTests {
       source.contains("const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,80}$/;"),
       "PROVIDER_ID in ipc.mjs changed; update ProviderCatalogInput to match"
     )
-    #expect(source.contains("const CATALOG_MUTATION_TIMEOUT_MS = 1_320_000;"))
+    #expect(source.contains("const CATALOG_MUTATION_TIMEOUT_MS = 45 * 60_000 + 20_000;"))
     #expect(source.contains("{ timeoutMs: 45_000 }"))
   }
 
   @Test("the tray's script timeouts are the Electron budgets")
   func timeoutsMatchElectron() {
     #expect(RouterScriptWatchdog.discoveryTimeout == 45)
-    #expect(RouterScriptWatchdog.catalogMutationTimeout == 1_320)
-    #expect(RouterScriptWatchdog.catalogPublicationOperationTimeout == 1_280)
-    #expect(RouterScriptWatchdog.catalogControlOperationTimeout == 1_300)
+    #expect(RouterScriptWatchdog.catalogMutationTimeout == 45 * 60 + 20)
+    #expect(RouterScriptWatchdog.catalogPublicationOperationTimeout == 45 * 60)
+    #expect(RouterScriptWatchdog.catalogControlOperationTimeout == 45 * 60)
     #expect(RouterScriptWatchdog.processTreeCleanupReserve == 10)
     #expect(RouterScriptWatchdog.antigravityOperationTimeout == 600)
     #expect(RouterScriptWatchdog.antigravityRunnerTimeout == 660)
@@ -77,7 +77,7 @@ struct ProviderCatalogTests {
     #expect(RouterScriptWatchdog.defaultControlTimeout == 900)
     #expect(
       RouterScriptWatchdog.controlTimeout(arguments: ["credential", "deepseek"])
-        == 1_320
+        == RouterScriptWatchdog.catalogMutationTimeout
     )
     #expect(
       RouterScriptWatchdog.controlTimeout(
@@ -90,7 +90,7 @@ struct ProviderCatalogTests {
     #expect(RouterScriptWatchdog.controlTimeout(arguments: ["providers", "--json"]) == 900)
     #expect(
       RouterScriptWatchdog.operationTimeout(arguments: ["credential", "deepseek"])
-        == 1_300
+        == RouterScriptWatchdog.catalogControlOperationTimeout
     )
     #expect(
       RouterScriptWatchdog.operationTimeout(
@@ -103,6 +103,37 @@ struct ProviderCatalogTests {
       ) == 610
     )
     #expect(RouterScriptWatchdog.operationOwnerTimeout(arguments: ["providers", "--json"]) == 850)
+    #expect(
+      RouterScriptWatchdog.operationOwnerTimeout(arguments: ["credential", "deepseek"])
+        == RouterScriptWatchdog.catalogControlOperationTimeout + 10
+    )
+    #expect(
+      RouterScriptWatchdog.operationOwnerTimeout(arguments: ["credential", "deepseek"])
+        < RouterScriptWatchdog.catalogMutationTimeout
+    )
+  }
+
+  @Test("catalog command classification matches control, including key pools and custom providers")
+  func catalogCommandsUseCompleteTransactionBudgets() {
+    for command in [
+      "set-apply", "credential", "key-pool", "auth-mode", "subagents", "picker",
+      "vision-bridge", "local-models", "signed-routing", "generic-providers",
+    ] {
+      #expect(RouterScriptWatchdog.isCatalogMutation(arguments: [command]))
+      #expect(
+        RouterScriptWatchdog.controlTimeout(arguments: [command])
+          == RouterScriptWatchdog.catalogMutationTimeout
+      )
+      #expect(
+        RouterScriptWatchdog.operationTimeout(arguments: [command])
+          == RouterScriptWatchdog.catalogControlOperationTimeout
+      )
+    }
+    for arguments in [[], ["providers", "--json"], ["key-pool-unrelated"], ["generic-providers-unrelated"]] {
+      #expect(!RouterScriptWatchdog.isCatalogMutation(arguments: arguments))
+      #expect(RouterScriptWatchdog.controlTimeout(arguments: arguments) == 900)
+      #expect(RouterScriptWatchdog.operationTimeout(arguments: arguments) == 840)
+    }
   }
 
   @Test("credential boundaries supersede only their in-flight catalog reads")

@@ -8,9 +8,12 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { freePort } from "./port-pool.mjs";
+import { stageProviderControlRuntime } from "./fixtures/provider-control-runtime.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const root = mkdtempSync(path.join(os.tmpdir(), "codex-router-api-key-control-"));
+const fixtureParent = process.env.CODEX_HOME || os.tmpdir();
+mkdirSync(fixtureParent, { recursive: true });
+const root = mkdtempSync(path.join(fixtureParent, "provider-key-control-"));
 const stateDir = path.join(root, "state");
 const credentialStorePath = path.join(stateDir, "provider-credentials.json");
 const poolStatePath = path.join(stateDir, "provider-api-key-pools.json");
@@ -23,8 +26,22 @@ const foregroundRouterPort = await freePort();
 // of those production epochs plus child-publication startup. POSIX does not
 // launch the ACL helper and keeps the tighter regression bound.
 const ACL_HEAVY_MUTATION_TEST_TIMEOUT_MS = process.platform === "win32" ? 120_000 : 30_000;
+process.env.HOME = root;
+process.env.USERPROFILE = root;
+process.env.APPDATA = path.join(root, "appdata");
+process.env.LOCALAPPDATA = path.join(root, "localappdata");
 process.env.CODEX_HOME = path.join(root, "codex");
+process.env.MODEL_ROUTER_STATE_DIR = stateDir;
 process.env.CODEX_ROUTER_STATE_DIR = stateDir;
+assert.ok(path.relative(root, process.env.CODEX_HOME).startsWith("codex"));
+assert.equal(process.env.HOME, root);
+assert.equal(process.env.USERPROFILE, root);
+assert.equal(process.env.MODEL_ROUTER_STATE_DIR, process.env.CODEX_ROUTER_STATE_DIR);
+// Pool readiness needs credential resolution; every discovery root is synthetic.
+process.env.CODEX_ROUTER_NO_DISCOVERY = "0";
+process.env.KIMI_CODE_HOME = path.join(root, "kimi");
+process.env.GROK_HOME = path.join(root, "grok");
+process.env.GROK_AUTH_PATH = path.join(root, "grok", "auth.json");
 process.env.MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE = credentialStorePath;
 process.env.MODEL_ROUTER_PROVIDER_CREDENTIAL_MIGRATIONS = path.join(stateDir, "migrations", "provider-credentials");
 process.env.MODEL_ROUTER_API_KEY_POOL_PATH = poolStatePath;
@@ -213,6 +230,7 @@ function runControl(arguments_, environment = {}) {
     cwd: repoRoot,
     env: {
       ...process.env,
+      ...stageProviderControlRuntime(root),
       MODEL_ROUTER_TARGET: "codex",
       CODEX_HOME: process.env.CODEX_HOME,
       CODEX_ROUTER_STATE_DIR: stateDir,
@@ -300,7 +318,7 @@ test("key-pool status stays read-only while mutations wait for publication owner
   assert.equal(existsSync(poolStatePath), true);
 });
 
-test("an environment-backed mutation waits for service ownership through publication", { timeout: 30_000 }, async () => {
+test("an environment-backed mutation waits for service ownership before staging", { timeout: 30_000 }, async () => {
   rmSync(poolStatePath, { force: true });
   let mutation;
   await withServiceOperationLock(async () => {
@@ -332,6 +350,7 @@ test("remove and delete of environment pool entries name the installed-service c
   writeFileSync(launchAgentPath, "installed-service-fixture\n", { mode: 0o600 });
   const secretValues = ["secret-test-one", "secret-test-two"];
   const childEnvironment = {
+    FIXTURE_PROVIDER_MANAGED_SERVICE: "1",
     OPENCODE_API_KEY: secretValues[0],
     OPENCODE_GO_API_KEY: secretValues[1],
   };
@@ -379,7 +398,7 @@ test("remove and delete of environment pool entries name the installed-service c
     });
     const ordinaryDelete = await runControl(
       ["key-pool", "opencode-go", "delete"],
-      childEnvironment,
+      { ...childEnvironment, FIXTURE_PROVIDER_MANAGED_SERVICE: "0" },
     ).completed;
     assert.equal(ordinaryDelete.status, 0, ordinaryDelete.stderr);
     assert.doesNotMatch(ordinaryDelete.stderr, /environment-backed|rerun the installer/i);
@@ -392,29 +411,121 @@ test("a failed client publication restores both pool metadata files", {
   timeout: ACL_HEAVY_MUTATION_TEST_TIMEOUT_MS,
 }, async () => {
   rmSync(poolStatePath, { force: true });
-  const added = await addEnvironmentCredentialToPool("opencode-go", "OPENCODE_API_KEY", {
-    credentialStorePath,
-    poolStatePath,
+  const credential = addCredentialReference({
+    providerId: "opencode-go",
+    kind: "api_key",
+    secretRef: { type: "provider-file", providerId: "opencode-go", target: "codex" },
+  }, credentialStorePath);
+  await addStoredCredentialToPool("opencode-go", credential.id, {
+    credentialStorePath, poolStatePath,
   });
   const beforePool = readFileSync(poolStatePath);
   const beforeStore = readFileSync(credentialStorePath);
-  const dshMarker = path.join(stateDir, "dsh-models.json");
-  // The marker makes the shared republisher reach the harness integration.
-  // Its caller capability is deliberately absent, so publication fails after
-  // the pool mutation and exercises the transaction's exact-file rollback.
-  mkdirSync(stateDir, { recursive: true });
-  writeFileSync(dshMarker, '{"version":1,"models":[]}\n');
-  try {
-    const result = await runControl([
-      "key-pool",
-      "opencode-go",
-      "pause",
-      added.credential.id,
-    ]).completed;
-    assert.notEqual(result.status, 0);
-    assert.deepEqual(readFileSync(poolStatePath), beforePool);
-    assert.deepEqual(readFileSync(credentialStorePath), beforeStore);
-  } finally {
-    rmSync(dshMarker, { force: true });
-  }
+  const result = await runControl([
+    "key-pool", "opencode-go", "pause", credential.id,
+  ], { FIXTURE_PROVIDER_FAIL_PHASE: "publish" }).completed;
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Synthetic publish failure/);
+  assert.deepEqual(readFileSync(poolStatePath), beforePool);
+  assert.deepEqual(readFileSync(credentialStorePath), beforeStore);
+  const events = readFileSync(path.join(root, "runtime-events.jsonl"), "utf8")
+    .trim().split("\n").map(JSON.parse);
+  assert.equal(events.filter((entry) => entry.phase === "publish").length >= 2, true,
+    "failed candidate publication and successful rollback publication must both run");
 });
+
+
+test("all environment pool changes stage metadata without publishing clients or restarting", {
+  timeout: ACL_HEAVY_MUTATION_TEST_TIMEOUT_MS,
+}, async () => {
+  rmSync(poolStatePath, { force: true });
+  const log = path.join(root, "runtime-events.jsonl");
+  const beforeEvents = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").length : 0;
+  const added = await runControl(["key-pool", "opencode-go", "add-env", "OPENCODE_API_KEY"], {
+    OPENCODE_API_KEY: "TEST_STAGED_ENVIRONMENT_KEY",
+    FIXTURE_PROVIDER_MANAGED_SERVICE: "1",
+  }).completed;
+  assert.equal(added.status, 0, added.stderr);
+  assert.match(added.stderr, /staged.*rerun the installer/is);
+  const id = JSON.parse(added.stdout).credential.id;
+  for (const [action, value] of [["pause", id], ["resume", id], ["policy", "round-robin"], ["remove", id]]) {
+    const result = await runControl(["key-pool", "opencode-go", action, value], {
+      FIXTURE_PROVIDER_MANAGED_SERVICE: "1",
+    }).completed;
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /rerun the installer/i);
+    assert.doesNotMatch(result.stdout + result.stderr, /TEST_STAGED_ENVIRONMENT_KEY/);
+  }
+  const events = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse).slice(beforeEvents);
+  assert.equal(events.some(({ phase }) => ["dependencies", "prepare", "publish", "service-restart"].includes(phase)), false);
+  const controls = events.filter(({ phase }) => phase === "control");
+  assert.equal(controls.length, 5);
+  assert.ok(controls.every(({ time, deadline }) => deadline - time > 35 * 60_000),
+    "the control owner must retain the transaction's complete preparation and rollback budget");
+});
+
+test("a staged environment addition rolls back a partial credential reference when the pool is invalid", {
+  timeout: ACL_HEAVY_MUTATION_TEST_TIMEOUT_MS,
+}, async () => {
+  writeFileSync(poolStatePath, "INVALID_POOL_DOCUMENT_WITH_EXACT_BYTES\n");
+  rmSync(credentialStorePath, { force: true });
+  const beforePool = readFileSync(poolStatePath);
+  const log = path.join(root, "runtime-events.jsonl");
+  const beforeEvents = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").length : 0;
+  const result = await runControl(["key-pool", "opencode-go", "add-env", "OPENCODE_API_KEY"], {
+    OPENCODE_API_KEY: "TEST_INVALID_POOL_PARTIAL_KEY",
+  }).completed;
+  assert.notEqual(result.status, 0);
+  assert.deepEqual(readFileSync(poolStatePath), beforePool);
+  assert.equal(existsSync(credentialStorePath), false);
+  const events = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse).slice(beforeEvents);
+  assert.equal(events.some(({ phase }) => phase === "publish"), false);
+  assert.doesNotMatch(result.stdout + result.stderr, /TEST_INVALID_POOL_PARTIAL_KEY/);
+});
+
+
+for (const healthy of [true, false]) {
+  test(`ordinary pool change ${healthy ? "publishes after healthy adoption without restart" : "rejects degraded adoption and restores metadata"}`, {
+    timeout: ACL_HEAVY_MUTATION_TEST_TIMEOUT_MS,
+  }, async () => {
+    rmSync(poolStatePath, { force: true });
+    const credential = addCredentialReference({
+      providerId: "opencode-go", kind: "api_key",
+      secretRef: { type: "provider-file", providerId: "opencode-go", target: "codex" },
+    }, credentialStorePath);
+    await addStoredCredentialToPool("opencode-go", credential.id, { credentialStorePath, poolStatePath });
+    const beforePool = readFileSync(poolStatePath);
+    const beforeStore = readFileSync(credentialStorePath);
+    const log = path.join(root, "runtime-events.jsonl");
+    const beforeEvents = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").length : 0;
+    const server = createServer((request, response) => {
+      response.writeHead(healthy ? 200 : 503, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        ok: healthy, service: "codex-router",
+        degraded: healthy ? [] : ["provider_api_key_pool_unavailable"],
+        executionPlan: { fingerprint: "a".repeat(64) },
+      }));
+    });
+    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(foregroundRouterPort, "127.0.0.1", resolve); });
+    try {
+      const result = await runControl(["key-pool", "opencode-go", "pause", credential.id], {
+        MODEL_ROUTER_PORT: String(foregroundRouterPort), CODEX_ROUTER_PORT: String(foregroundRouterPort),
+      }).completed;
+      const events = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse).slice(beforeEvents);
+      assert.equal(events.some(({ phase }) => phase === "service-restart"), false);
+      if (healthy) {
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(storedCredentialPoolStatus("opencode-go", { poolStatePath }).credentials[0].paused, true);
+        assert.equal(events.filter(({ phase }) => phase === "publish").length, 1);
+      } else {
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /healthy router|adoption/i);
+        assert.deepEqual(readFileSync(poolStatePath), beforePool);
+        assert.deepEqual(readFileSync(credentialStorePath), beforeStore);
+        assert.equal(events.some(({ phase }) => phase === "publish"), false);
+      }
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+}

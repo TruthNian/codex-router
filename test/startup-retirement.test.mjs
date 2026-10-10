@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 import { attemptAntigravityProbePromotionAfterReadiness } from "../src/antigravity-probe-activation.mjs";
 import { clearStartupTimeouts, startupTimeoutMs } from "../src/startup-timeout.mjs";
+import { stopServiceChildren } from "../src/service-shutdown.mjs";
 
 // Importing start.mjs launches the whole service. Execute its actual post-health
 // boundary with isolated process/child/publisher dependencies instead, retaining
@@ -15,7 +17,13 @@ const begin = source.indexOf("  const frontend = FRONTEND;");
 const end = source.indexOf("  const cursorEdge =", begin);
 assert.ok(begin >= 0 && end > begin, "startup readiness boundary must be present");
 const boundary = source.slice(begin, end);
-assert.ok(boundary.includes('import("./native-catalog-drift.mjs")'));
+assert.ok(boundary.includes("if (ready) void startNativeCatalogWatch()"));
+const publisherBegin = source.indexOf("async function startNativeCatalogWatch() {");
+const publisherEnd = source.indexOf("\n}\n", publisherBegin) + 3;
+assert.ok(publisherBegin >= 0 && publisherEnd > publisherBegin);
+const publisher = source.slice(publisherBegin, publisherEnd);
+assert.ok(publisher.includes('import("./native-catalog-drift.mjs")'));
+assert.ok(publisher.includes('import("./native-catalog-events.mjs")'));
 const shutdownBegin = source.indexOf("function stopChildren() {");
 const shutdownEnd = source.indexOf("const FRONTEND =", shutdownBegin);
 assert.ok(shutdownBegin >= 0 && shutdownEnd > shutdownBegin);
@@ -25,14 +33,21 @@ const completeStartup = new AsyncFunction("context", `
   const { FRONTEND, SOURCE_ROOT, run, process, waitForHealth, loopback, PORTS,
     STARTUP_CHILD_HEALTH_TIMEOUT_MS, clearStartupTimeouts,
     attemptAntigravityProbePromotionAfterReadiness, antigravityStartup,
-    children, console, path, loadPublisher } = context;
+    children, console, path, loadPublisher, loadEvents, stopServiceChildren } = context;
   let shuttingDown = false;
   let stopNativeCatalogWatch = () => {};
-  const SIGKILL_AFTER_MS = 1;
-  const setTimeout = () => ({ unref() {} });
+  let frontendChild, shutdownPromise;
+  const shutdownController = new AbortController();
+  let nativeCatalogWatchStarted = false;
+  const requiredServices = new Set();
+  const executionPlan = { needsGateway: false };
+  const gatewayStartupError = undefined;
+  const SHUTDOWN_DRAIN_MS = 1, SHUTDOWN_FLUSH_MS = 1;
+  ${publisher.replace('import("./native-catalog-drift.mjs")', "loadPublisher()")
+    .replace('import("./native-catalog-events.mjs")', "loadEvents()")}
   ${shutdown}
   context.stopSupervisor = stopChildren;
-  ${boundary.replace('import("./native-catalog-drift.mjs")', "loadPublisher()")}
+  ${boundary}
 `);
 
 const PRIVATE_TIMEOUT = "CODEX_ROUTER_WINDOWS_PRIVATE_SYNC_TIMEOUT_MS";
@@ -43,15 +58,17 @@ function scenario({ pending = true, promotion = true, failure, shutdownDuringLoa
   const env = { [PRIVATE_TIMEOUT]: "900000", KEEP_SETTING: "unchanged" };
   const events = [];
   const errors = [];
-  const child = { exitCode: null, signalCode: null };
-  child.kill = (signal) => { child.signalCode = signal; };
+  const child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null });
+  child.kill = (signal) => { child.signalCode = signal; child.emit("exit", null, signal); return true; };
   const context = {
     FRONTEND: { script: "router.mjs", service: "codex-router", label: "Codex router" },
     SOURCE_ROOT: "/unused-startup-fixture",
     run: () => child,
     process: { env, execPath: process.execPath },
-    waitForHealth: async () => { events.push("frontend healthy"); },
-    loopback: () => "http://127.0.0.1/unused-health",
+    waitForHealth: async (_label, url) => {
+      events.push(url.endsWith("/health/live") ? "frontend live" : "frontend healthy");
+    },
+    loopback: (_port, suffix = "") => `http://127.0.0.1${suffix}`,
     PORTS: { router: 1 },
     STARTUP_CHILD_HEALTH_TIMEOUT_MS: 30_000,
     clearStartupTimeouts: (environment) => {
@@ -80,8 +97,10 @@ function scenario({ pending = true, promotion = true, failure, shutdownDuringLoa
       pendingSessionGeneration: SESSION_GENERATION,
     } : {},
     children: [child],
+    stopServiceChildren,
     console: { error: (message) => { errors.push(message); } },
     path,
+    loadEvents: async () => ({ subscribeNativeCatalogEvents: () => () => {} }),
     loadPublisher: async () => {
       events.push("publisher loaded");
       if (shutdownDuringLoad) context.stopSupervisor();
@@ -120,7 +139,7 @@ test("pending activation retains its startup ACL allowance until persistence fin
   await fixture.complete();
   await settlePublishers();
   assert.deepEqual(fixture.events, [
-    "frontend healthy", "activation started", "activation persisted",
+    "frontend live", "frontend healthy", "activation started", "activation persisted",
     "startup retired", "publisher loaded", "watcher started", "catalog published",
   ]);
   assert.deepEqual(fixture.errors, []);
@@ -132,7 +151,7 @@ test("superseded activation still retires startup settings before background pub
   await fixture.complete();
   await settlePublishers();
   assert.deepEqual(fixture.events, [
-    "frontend healthy", "activation started", "activation superseded",
+    "frontend live", "frontend healthy", "activation started", "activation superseded",
     "startup retired", "publisher loaded", "watcher started", "catalog published",
   ]);
   assert.equal(fixture.errors.length, 1);
@@ -144,7 +163,7 @@ test("a fatal activation failure cannot start background publishers", async () =
   const fixture = scenario({ failure });
   await assert.rejects(fixture.complete(), (error) => error === failure);
   await settlePublishers();
-  assert.deepEqual(fixture.events, ["frontend healthy", "activation started"]);
+  assert.deepEqual(fixture.events, ["frontend live", "frontend healthy", "activation started"]);
   assert.deepEqual(fixture.errors, []);
 });
 
@@ -153,7 +172,7 @@ test("startup without pending activation retires settings before publication", a
   await fixture.complete();
   await settlePublishers();
   assert.deepEqual(fixture.events, [
-    "frontend healthy", "startup retired", "publisher loaded", "watcher started", "catalog published",
+    "frontend live", "frontend healthy", "startup retired", "publisher loaded", "watcher started", "catalog published",
   ]);
   assert.deepEqual(fixture.errors, []);
 });
@@ -173,7 +192,7 @@ test("shutdown while the publisher loads cannot start background maintenance", a
   await fixture.complete();
   await settlePublishers();
   assert.deepEqual(fixture.events, [
-    "frontend healthy", "startup retired", "publisher loaded",
+    "frontend live", "frontend healthy", "startup retired", "publisher loaded",
   ]);
   assert.deepEqual(fixture.errors, []);
 });

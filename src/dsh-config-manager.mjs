@@ -11,7 +11,7 @@
 // every other byte as somebody else's work. Anything it cannot read plainly is
 // refused with the file untouched.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,7 +25,7 @@ import {
   PORTS,
   LEGACY_PORTS,
 } from "./paths.mjs";
-import { protectPrivateFile } from "./file-security.mjs";
+import { writePrivateFile } from "./file-security.mjs";
 import { refreshDshCallerCapabilityDocuments } from "./caller-key-client-refresh.mjs";
 import {
   DSH_CREDENTIAL_REF,
@@ -66,18 +66,7 @@ function readDocument(target) {
 // authentication capability, and the credentials document carries the key it
 // references.
 function writeDocument(target, contents) {
-  mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-  const temporary = `${target}.tmp.${process.pid}`;
-  writeFileSync(temporary, contents, { encoding: "utf8", mode: 0o600 });
-  try {
-    protectPrivateFile(temporary);
-    renameSync(temporary, target);
-    protectPrivateFile(target);
-  } catch (error) {
-    if (existsSync(temporary)) unlinkSync(temporary);
-    throw error;
-  }
-  return target;
+  return writePrivateFile(target, contents);
 }
 
 function joinLines(lines) {

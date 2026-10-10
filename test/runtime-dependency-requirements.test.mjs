@@ -346,12 +346,17 @@ test("POSIX dependencies-only exits before state writers and preserves gateway h
 });
 
 function posixShell() {
-  if (spawnSync("sh", ["-c", "exit 0"], { stdio: "ignore" }).status === 0) return "sh";
-  if (process.platform !== "win32") return null;
-  const git = spawnSync("git", ["--exec-path"], { encoding: "utf8" });
-  if (git.status !== 0) return null;
-  const bundled = path.resolve(git.stdout.trim(), "../../..", "bin", "sh.exe");
-  return existsSync(bundled) ? bundled : null;
+  // Windows resolves the executable before the shell can interpret the fixture's
+  // POSIX PATH. Retain an absolute Git shell across that PATH replacement.
+  if (process.platform === "win32") {
+    const git = spawnSync("git", ["--exec-path"], { encoding: "utf8" });
+    if (git.status === 0) {
+      const bundled = path.resolve(git.stdout.trim(), "../../..", "bin", "sh.exe");
+      if (existsSync(bundled)) return bundled;
+    }
+    return null;
+  }
+  return spawnSync("sh", ["-c", "exit 0"], { stdio: "ignore" }).status === 0 ? "sh" : null;
 }
 
 const shell = posixShell();

@@ -1,6 +1,7 @@
+import "./fixtures/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -25,7 +26,7 @@ async function fixture(t) {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const port = await freePort();
   const environment = {
-    ...process.env,
+    ...setupFixtureEnvironment(directory, state, codex),
     HOME: directory, USERPROFILE: directory,
     APPDATA: path.join(directory, "appdata"),
     LOCALAPPDATA: path.join(directory, "localappdata"),
@@ -38,9 +39,28 @@ async function fixture(t) {
     GROK_HOME: path.join(directory, "grok"),
     GROK_AUTH_PATH: path.join(directory, "grok", "auth.json"),
     CODEX_ROUTER_NO_DISCOVERY: "1",
+    CODEX_ROUTER_CALLER_KEY: "fixture-caller-capability-with-sufficient-length",
+    CODEX_ROUTER_INTERNAL_KEY: "fixture-internal-capability-with-sufficient-length",
+    KIMI_INTERNAL_KEY: "fixture-internal-capability-with-sufficient-length",
     KIMI_API_KEY: "", MOONSHOT_API_KEY: "", XAI_API_KEY: "", GROK_API_KEY: "",
-    ...stageProviderControlRuntime(directory),
+    ...stageProviderControlRuntime(directory, { mode: "boundary" }),
   };
+  // Keep real dependency requirement calculation, fresh gateway preparation
+  // and target publication. Only managed-service presence is fixture-specific.
+  const driver = path.join(directory, "runtime", "driver.mjs");
+  const boundaryDriver = path.join(directory, "runtime", "boundary-driver.mjs");
+  writeFileSync(boundaryDriver, readFileSync(driver));
+  writeFileSync(driver, `
+    import path from "node:path";
+    import {pathToFileURL} from "node:url";
+    import {appendFileSync} from "node:fs";
+    const [script,...args]=process.argv.slice(2);
+    if(path.basename(script||"")==="service.mjs"&&args[0]==="status"){
+      appendFileSync(${JSON.stringify(path.join(directory, "runtime-events.jsonl"))},JSON.stringify({phase:"service-status"})+"\\n");
+      const installed=process.env.FIXTURE_PROVIDER_MANAGED_SERVICE==="1";
+      process.stdout.write(JSON.stringify({installed,loaded:installed,state:installed?"running":"stopped"}));
+    }else await import(pathToFileURL(${JSON.stringify(boundaryDriver)}).href);
+  `);
   for (const name of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CODEX_HOME", "MODEL_ROUTER_STATE_DIR", "CODEX_ROUTER_STATE_DIR", "KIMI_CODE_HOME", "GROK_HOME", "GROK_AUTH_PATH"]) {
     assert.equal(path.isAbsolute(environment[name]), true);
     assert.equal(path.relative(directory, environment[name]).startsWith(".."), false);
@@ -79,9 +99,13 @@ const assertSnapshot = (files, before) => assert.deepEqual(snapshot(files), befo
 
 async function healthyRouter(t, f, { adopted = true } = {}) {
   const server = createServer((request, response) => {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ ok: true, service: "codex-router", degraded: [],
-      ...(adopted ? { executionPlan: { fingerprint: "a".repeat(64) } } : {}),
+    const active = path.join(f.directory, "active-fingerprint");
+    const fingerprint = existsSync(active) ? readFileSync(active, "utf8") : undefined;
+    appendFileSync(path.join(f.directory, "runtime-events.jsonl"), JSON.stringify({ phase: "health-adoption", fingerprint }) + "\n");
+    const ready = !adopted || Boolean(fingerprint);
+    response.writeHead(ready ? 200 : 503, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: ready, service: "codex-router", degraded: ready ? [] : ["fixture service has not adopted routes"],
+      ...(adopted && fingerprint ? { executionPlan: { fingerprint } } : {}),
     }));
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(f.port, "127.0.0.1", resolve); });
@@ -125,11 +149,33 @@ test("ordinary CLI set prepares dependencies and adopts the managed service befo
   assert.equal(phases.includes("dependencies"), true);
   assert.equal(phases.includes("prepare"), true);
   assert.equal(phases.includes("service-restart"), true);
+  assert.equal(phases.includes("health-adoption"), true);
   assert.equal(phases.includes("publish"), true);
   assert.equal(phases.indexOf("dependencies") < phases.indexOf("prepare"), true);
   assert.equal(phases.indexOf("prepare") < phases.indexOf("service-restart"), true);
   assert.equal(phases.indexOf("service-restart") < phases.indexOf("publish"), true);
+  assert.equal(phases.indexOf("health-adoption") < phases.indexOf("publish"), true);
   assert.doesNotMatch(result.stdout + result.stderr, /TEST_ADOPTED_API_KEY/);
+});
+
+test("ordinary CLI set rejects a different service fingerprint and publishes only its restored state", { timeout: testTimeout }, async (t) => {
+  const f = await fixture(t);
+  seedState(f, "custom");
+  const key = path.join(f.state, "xai-api-key.secret");
+  writeFileSync(key, "TEST_FINGERPRINT_ORIGINAL_KEY\r\n");
+  const files = [key, f.selection, f.cache];
+  const before = snapshot(files);
+  await healthyRouter(t, f);
+  const result = await f.key(["grok-api", "set", "--stdin"], {
+    FIXTURE_PROVIDER_MANAGED_SERVICE: "1", FIXTURE_PROVIDER_REJECT_ADOPTION: "1",
+  }, "TEST_FINGERPRINT_REPLACEMENT_KEY\n");
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /running router has not adopted/);
+  assertSnapshot(files, before);
+  const events = f.events();
+  assert.equal(events.some(({ phase, fingerprint }) => phase === "health-adoption" && fingerprint === "0".repeat(64)), true);
+  assert.equal(events.filter(({ phase }) => phase === "publish").length, 1, "only the restored credential/selection may reach target publication");
+  assert.doesNotMatch(result.stdout + result.stderr, /TEST_FINGERPRINT_(?:ORIGINAL|REPLACEMENT)_KEY/);
 });
 
 test("ordinary CLI set failure restores exact key, selection and account cache", { timeout: testTimeout }, async (t) => {

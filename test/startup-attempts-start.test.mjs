@@ -72,6 +72,83 @@ function run(entry,env,timeout=CHILD_TIMEOUT_MS) {
   return {status:result.status,output:`${result.stdout||''}${result.stderr||''}`};
 }
 
+// This unlisted registry fixture is still an explicitly selected Chat route:
+// listing controls the picker, not its actual gateway execution dependency.
+// Ask the real registry/plan boundary instead of inferring that from the name.
+function gatewayPlan(env) {
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', `
+    import { MODELS, RUNTIME_PROVIDERS, providerForModel } from './src/model-registry.mjs';
+    import { createExecutionPlan } from './src/route-execution-plan.mjs';
+    import { readProviderSelection } from './src/provider-selection.mjs';
+    const selected = new Set(readProviderSelection());
+    console.log(JSON.stringify(createExecutionPlan({ models: MODELS, providerForModel,
+      routeEnabled: model => RUNTIME_PROVIDERS.get(model.provider)?.generic === true || selected.has(model.provider) })));
+  `], { env, cwd: root, encoding: 'utf8', timeout: CHILD_TIMEOUT_MS });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+
+async function runDegradedSupervisor(fixture, { entry = 'start.mjs', env = fixture.env,
+  gatewayError = /dependency unavailable: LiteLLM gateway exited before becoming healthy/ } = {}) {
+  const ports = await Promise.all(Array.from({ length: 7 }, () => freePort()));
+  assert.equal(new Set(ports).size, ports.length);
+  const [router, gateway, oauth, api, grok, antigravity, devin] = ports;
+  writeFileSync(path.join(fixture.stateDir, 'internal-secret'), 'foreground-synthetic-internal-key\n', { mode: 0o600 });
+  writeFileSync(path.join(fixture.stateDir, 'caller-secret'), 'foreground-synthetic-caller-key-with-sufficient-length\n', { mode: 0o600 });
+  const child = spawn(process.execPath, [path.join(root, 'src', entry)], {
+    cwd: root,
+    env: {
+      ...env,
+      MODEL_ROUTER_PORT: String(router), MODEL_ROUTER_GATEWAY_PORT: String(gateway),
+      MODEL_ROUTER_OAUTH_PORT: String(oauth), MODEL_ROUTER_API_PORT: String(api), MODEL_ROUTER_GROK_OAUTH_PORT: String(grok),
+      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: String(antigravity), MODEL_ROUTER_DEVIN_CLI_PORT: String(devin),
+      CODEX_NATIVE_BASE_URL: 'http://127.0.0.1:9/unused-native', MODEL_ROUTER_NATIVE_TRANSPORT: 'http',
+      CODEX_ROUTER_GATEWAY_RESTARTS: '0', CODEX_ROUTER_STARTUP_HEALTH_TIMEOUT_MS: '2000',
+      MODEL_ROUTER_SHUTDOWN_DRAIN_MS: '100', MODEL_ROUTER_SHUTDOWN_FLUSH_MS: '100', NODE_USE_ENV_PROXY: '0',
+    },
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true,
+  });
+  let output = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', chunk => { output += chunk; });
+  const exited = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, signal) => resolve({ code, signal }));
+  });
+  let timer;
+  try {
+    const deadline = Date.now() + CHILD_TIMEOUT_MS;
+    while (!/serving independent routes/.test(output) && Date.now() < deadline) {
+      assert.equal(child.exitCode, null, output);
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.match(output, /serving independent routes/);
+    assert.match(output, gatewayError);
+    assert.equal((await fetch(`http://127.0.0.1:${router}/health/live`)).status, 200);
+    const healthResponse = await fetch(`http://127.0.0.1:${router}/health`);
+    assert.equal(healthResponse.status, 503);
+    const health = await healthResponse.json();
+    assert.equal(health.executionPlan.needsGateway, true);
+    assert.deepEqual(health.executionPlan.services, ['api', 'gateway']);
+    assert.ok(health.degraded.includes('gateway'), JSON.stringify(health));
+    assert.doesNotMatch(output, /backing off|foreground-synthetic-(?:internal|caller)-key/);
+    return output;
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.send({ type: 'model-router:shutdown' });
+    try {
+      const result = await Promise.race([exited, new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`supervisor IPC shutdown did not finish: ${output}`)), 15_000);
+      })]);
+      assert.equal(result.signal, null, output);
+      assert.equal(result.code, 0, output);
+    } finally {
+      clearTimeout(timer);
+      if (child.exitCode === null && child.connected) child.disconnect();
+    }
+  }
+}
+
 test('isolated startup children keep Windows runtime variables without inheriting credentials', () => {
   const environment = startupChildRuntimeEnvironment({
     PATH: 'fixture-bin', sYsTeMrOoT: 'C:\\Windows', ComSpec: 'fixture-cmd.exe',
@@ -122,20 +199,35 @@ test('a missing service capability fails fast without creating cooldown when the
   assert.equal(existsSync(fixture.record),false);
 });
 
-test('bundled venv setup diagnostics do not seed cooldown before credential preflight',{skip:process.platform==='win32'},t=>{
+test('the startup fixture explicitly selects a Chat route and its actual gateway dependency', t => {
+  const fixture = state(t);
+  const plan = gatewayPlan(fixture.env);
+  assert.equal(plan.needsGateway, true);
+  assert.deepEqual(plan.services, ['api', 'gateway']);
+});
+
+test('bundled venv setup diagnostics remain visible on degraded startup without seeding cooldown',{skip:process.platform==='win32'},async t=>{
   const fixture=state(t);
   const source=path.join(fixture.directory,'source');
   const bin=path.join(source,'.venv','bin');mkdirSync(bin,{recursive:true});
   symlinkSync(path.join(root,'config'),path.join(source,'config'),'dir');
+  symlinkSync(path.join(root,'src'),path.join(source,'src'),'dir');
   writeFileSync(path.join(bin,'litellm'),'placeholder\n',{mode:0o755});
   writeFileSync(path.join(bin,'python'),"#!/bin/sh\nprintf 'ModuleNotFoundError: encodings\\n' >&2\nexit 1\n",{mode:0o755});
   const env={...fixture.env,CODEX_ROUTER_SOURCE_ROOT:source};delete env.MODEL_ROUTER_LITELLM_BIN;
+  assert.equal(gatewayPlan(env).needsGateway, true);
+  // Credentials are a fatal preflight. A deferred gateway startup diagnostic
+  // does not replace that error, and this early exit must not seed cooldown.
   const result=run('start.mjs',env);
   assert.equal(result.status,1,result.output);
-  assert.match(result.output,/virtual environment is broken/);
-  assert.match(result.output,/exited with code 1/);
   assert.match(result.output,/Internal service key is missing/);
   assert.equal(existsSync(fixture.record),false);
+  // With complete synthetic capabilities, execute the real service boundary
+  // and observe the selected gateway's concrete degraded diagnostic and health.
+  const output = await runDegradedSupervisor(fixture, { env, gatewayError: /gateway unavailable: The LiteLLM virtual environment is broken/ });
+  assert.match(output, /exited with code 1/);
+  assert.doesNotMatch(output, /Internal service key is missing/);
+  assert.equal(existsSync(fixture.record), false);
 });
 
 // The fresh main already exposes bounded startup timeout overrides. This
@@ -189,52 +281,9 @@ test('a missing internal credential is fatal and never seeds cooldown',t=>{
 
 test('the real foreground supervisor reaches its children without changing an active managed cooldown', { timeout: 120_000 }, async t => {
   const fixture = state(t);
-  const ports = await Promise.all(Array.from({ length: 5 }, () => freePort()));
-  const [router, gateway, oauth, api, grok] = ports;
   seed(fixture.record);
   const original = readFileSync(fixture.record, 'utf8');
-  writeFileSync(path.join(fixture.stateDir, 'internal-secret'), 'foreground-synthetic-internal-key\n', { mode: 0o600 });
-  writeFileSync(path.join(fixture.stateDir, 'caller-secret'), 'foreground-synthetic-caller-key-with-sufficient-length\n', { mode: 0o600 });
-  const child = spawn(process.execPath, [path.join(root, 'src', 'foreground-start.mjs')], {
-    cwd: root,
-    env: {
-      ...fixture.env, MODEL_ROUTER_LITELLM_BIN: process.execPath,
-      MODEL_ROUTER_PORT: String(router), MODEL_ROUTER_GATEWAY_PORT: String(gateway),
-      MODEL_ROUTER_OAUTH_PORT: String(oauth), MODEL_ROUTER_API_PORT: String(api), MODEL_ROUTER_GROK_OAUTH_PORT: String(grok),
-    },
-    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-  });
-  let output = '';
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', chunk => { output += chunk; });
-  const exited = new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code, signal) => resolve({ code, signal }));
-  });
-  let timer;
-  try {
-    const deadline = Date.now() + 30_000;
-    while (!/serving independent routes/.test(output) && Date.now() < deadline) {
-      assert.equal(child.exitCode, null, output);
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    assert.match(output, /serving independent routes/);
-    assert.match(output, /dependency unavailable: LiteLLM gateway exited before becoming healthy/);
-    assert.equal((await fetch(`http://127.0.0.1:${router}/health/live`)).status, 200);
-    assert.equal((await fetch(`http://127.0.0.1:${router}/health`)).status, 503);
-    assert.doesNotMatch(output, /backing off|foreground-synthetic-(?:internal|caller)-key/);
-    assert.equal(readFileSync(fixture.record, 'utf8'), original);
-  } finally {
-    if (child.exitCode === null && child.signalCode === null) child.send({type: 'model-router:shutdown'});
-    try {
-      const result = await Promise.race([exited, new Promise((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(`foreground IPC shutdown did not finish: ${output}`)), 15_000);
-      })]);
-      assert.equal(result.signal, null, output);
-      assert.equal(result.code, 0, output);
-    } finally {
-      clearTimeout(timer);
-      if (child.exitCode === null && child.connected) child.disconnect();
-    }
-  }
+  await runDegradedSupervisor(fixture, { entry: 'foreground-start.mjs',
+    env: { ...fixture.env, MODEL_ROUTER_LITELLM_BIN: process.execPath } });
+  assert.equal(readFileSync(fixture.record, 'utf8'), original);
 });

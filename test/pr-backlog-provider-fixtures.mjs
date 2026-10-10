@@ -1,3 +1,4 @@
+import "./fixtures/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -6,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { freePort } from "./port-pool.mjs";
+import { setupFixtureEnvironment } from "./fixtures/setup-environment.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const internalKey = "fixture-internal-service-key-with-sufficient-length";
@@ -17,9 +19,8 @@ function fixture(t) {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const state = path.join(directory, "state");
   mkdirSync(state, { mode: 0o700 });
-  const allowed = /^(PATH|SystemRoot|WINDIR|ComSpec|PATHEXT|TEMP|TMP|PSModulePath|SystemDrive|ProgramData|ProgramFiles|ProgramFiles\(x86\)|ProgramW6432)$/i;
   const env = {
-    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => allowed.test(name))),
+    ...setupFixtureEnvironment(directory, state),
     HOME: directory, USERPROFILE: directory, TMPDIR: os.tmpdir(),
     CODEX_HOME: path.join(directory, "codex"), KIMI_CODE_HOME: path.join(directory, "kimi"),
     MODEL_ROUTER_TARGET: "codex", MODEL_ROUTER_STATE_DIR: state,
@@ -34,6 +35,29 @@ function evaluate(code, env, args = []) {
   return execFileSync(process.execPath, ["--input-type=module", "-e", code, ...args], {
     cwd: root, env, encoding: "utf8", timeout: 30_000,
   });
+}
+
+function selectGatewayFixture(f) {
+  const registry = path.join(f.directory, "gateway-registry.json");
+  writeFileSync(registry, JSON.stringify({ version: 1,
+    providers: [{ id: "custom", displayName: "Fixture gateway", kind: "openai-compatible",
+      ownedBy: "fixture", perModelEndpoint: true, authMode: "per-model" }],
+    models: [{ slug: "custom/gateway-fixture", gatewayModel: "gateway-fixture", upstreamModel: "gateway-fixture",
+      provider: "custom", listed: false, endpoint: { protocol: "openai", keyless: true, baseUrl: "http://127.0.0.1:9/v1" } }],
+  }));
+  writeFileSync(path.join(f.state, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["custom"] }));
+  const environment = { ...f.env, MODEL_ROUTER_REGISTRY: registry };
+  const plan = JSON.parse(evaluate(`
+    import { MODELS, RUNTIME_PROVIDERS, providerForModel } from './src/model-registry.mjs';
+    import { readProviderSelection } from './src/provider-selection.mjs';
+    import { createExecutionPlan } from './src/route-execution-plan.mjs';
+    const selected = new Set(readProviderSelection());
+    console.log(JSON.stringify(createExecutionPlan({ models: MODELS, providerForModel,
+      routeEnabled: model => RUNTIME_PROVIDERS.get(model.provider)?.generic === true || selected.has(model.provider) })));
+  `, environment));
+  assert.equal(plan.needsGateway, true, "the fixture must actually request Python/gateway execution");
+  assert.deepEqual(plan.services, ["api", "gateway"]);
+  return environment;
 }
 
 function launch(script, env) {
@@ -185,10 +209,15 @@ export async function runProviderScenarios(t) {
     } finally { await forwarder.stop(); }
   });
 
-  await t.test("startup proceeds past two real venv probe timeouts and keeps conclusive failures fatal", { skip: process.platform === "win32" }, async (t) => {
+  await t.test("the venv startup fixture selects an actual gateway dependency", (t) => {
+    selectGatewayFixture(fixture(t));
+  });
+
+  await t.test("selected gateway startup proceeds past bounded venv timeouts and keeps conclusive failures degraded", { skip: process.platform === "win32" }, async (t) => {
     for (const outcome of ["timeout-ready", "timeout-unready", "failed", "missing"]) {
       await t.test(outcome, async (t) => {
         const f = fixture(t);
+        const gatewayEnvironment = selectGatewayFixture(f);
         const source = path.join(f.directory, "source");
         const bin = path.join(source, ".venv", "bin");
         mkdirSync(bin, { recursive: true });
@@ -200,12 +229,13 @@ export async function runProviderScenarios(t) {
           : `#!/bin/sh\nprintf 'probe\\n' >> '${probes}'\ntrap 'exit 0' TERM\nwhile :; do :; done\n`, { mode: 0o755 });
         writeFileSync(path.join(bin, "litellm"), `#!${process.execPath}\nconst http=require('node:http'),fs=require('node:fs');fs.writeFileSync(${JSON.stringify(marker)},'started');http.createServer((req,res)=>{${outcome === "timeout-unready" ? "return;" : ""}res.writeHead(200,{'content-type':'application/json'});res.end('{"status":"healthy"}');}).listen(Number(process.argv[process.argv.indexOf('--port')+1]),'127.0.0.1');\n`, { mode: 0o755 });
         for (const [name, key] of [["internal-secret", internalKey], ["caller-secret", "fixture-caller-key-with-sufficient-length"]]) writeFileSync(path.join(f.state, name), key, { mode: 0o600 });
-        const ports = await Promise.all(Array.from({ length: 5 }, () => freePort()));
+        const ports = await Promise.all(Array.from({ length: 7 }, () => freePort()));
         // Keep the symlinked main entry recognizable to forwarders with an isMain guard.
-        const env = { ...f.env, CODEX_ROUTER_SOURCE_ROOT: source, NODE_OPTIONS: "--preserve-symlinks-main",
-          MODEL_ROUTER_PORT: String(ports[0]), MODEL_ROUTER_GATEWAY_PORT: String(ports[1]), MODEL_ROUTER_OAUTH_PORT: String(ports[2]), MODEL_ROUTER_API_PORT: String(ports[3]), MODEL_ROUTER_GROK_OAUTH_PORT: String(ports[4]),
+        const env = { ...gatewayEnvironment, CODEX_ROUTER_SOURCE_ROOT: source, NODE_OPTIONS: `${f.env.NODE_OPTIONS} --preserve-symlinks-main`,
+          MODEL_ROUTER_PORT: String(ports[0]), MODEL_ROUTER_GATEWAY_PORT: String(ports[1]), MODEL_ROUTER_OAUTH_PORT: String(ports[2]), MODEL_ROUTER_API_PORT: String(ports[3]), MODEL_ROUTER_GROK_OAUTH_PORT: String(ports[4]), MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: String(ports[5]), MODEL_ROUTER_DEVIN_CLI_PORT: String(ports[6]),
           CODEX_ROUTER_VENV_PROBE_TIMEOUT_MS: "1000", CODEX_ROUTER_VENV_PROBE_RETRY_TIMEOUT_MS: "1000",
           CODEX_ROUTER_GATEWAY_HEALTH_TIMEOUT_MS: "1500", CODEX_ROUTER_STARTUP_HEALTH_TIMEOUT_MS: "20000",
+          CODEX_ROUTER_GATEWAY_RESTARTS: "0", MODEL_ROUTER_SHUTDOWN_DRAIN_MS: "100", MODEL_ROUTER_SHUTDOWN_FLUSH_MS: "100",
         };
         const startup = launch("start.mjs", env);
         try {
@@ -214,21 +244,25 @@ export async function runProviderScenarios(t) {
             assert.equal(existsSync(marker), true);
             assert.equal(existsSync(path.join(f.state, "startup-attempts.json")), false);
           } else {
-            let timer;
-            let result;
-            try { result = await Promise.race([startup.exited, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(startup.output())), 30_000); })]); }
-            finally { clearTimeout(timer); }
-            assert.equal(result.code, 1, startup.output());
+            // A selected dependency failure blocks full readiness/publication;
+            // it must leave the independent frontend alive and diagnosable.
+            await until(() => startup.output().includes("serving independent routes"), startup);
+            assert.equal(startup.child.exitCode, null, startup.output());
+            assert.equal((await fetch(`http://127.0.0.1:${ports[0]}/health/live`, { signal: AbortSignal.timeout(10_000) })).status, 200);
+            const response = await fetch(`http://127.0.0.1:${ports[0]}/health`, { signal: AbortSignal.timeout(10_000) });
+            assert.equal(response.status, 503);
+            const health = await response.json();
+            assert.equal(health.executionPlan.needsGateway, true);
+            assert.ok(health.degraded.includes("gateway"), JSON.stringify(health));
+            assert.doesNotMatch(startup.output(), /ready \(authenticated loopback endpoint\)/);
+            assert.equal(existsSync(path.join(f.state, "startup-attempts.json")), false, "a live degraded frontend must not create a crash-loop cooldown");
             if (outcome === "timeout-unready") {
               assert.equal(existsSync(marker), true);
-              const record = JSON.parse(readFileSync(path.join(f.state, "startup-attempts.json"), "utf8"));
-              assert.equal(record.lastReason, "health-timeout");
-              assert.equal(record.consecutiveFailures, 1);
+              assert.match(startup.output(), /dependency unavailable: LiteLLM gateway/);
             } else {
               assert.match(startup.output(), /virtual environment is broken/);
               assert.match(startup.output(), outcome === "missing" ? /ENOENT/ : /exited with code 1/);
               assert.equal(existsSync(marker), false);
-              assert.equal(existsSync(path.join(f.state, "startup-attempts.json")), false);
             }
           }
           if (outcome.startsWith("timeout")) {

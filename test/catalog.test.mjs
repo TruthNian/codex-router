@@ -1,7 +1,10 @@
+import "./fixtures/isolated-runtime-environment.mjs";
+import { isolatedRuntimeHome, isolatedRuntimeRoot, isolatedRuntimeStateDir } from "./fixtures/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -68,6 +71,44 @@ const grok = {
   compHash: "grok-oauth-grok-4-5-v1",
   multiAgentVersion: "v2",
 };
+
+test("runtime fixture isolates frozen paths and preserves child state overrides without host Keychain access", () => {
+  assert.equal(CODEX_HOME, isolatedRuntimeHome);
+  assert.equal(STATE_DIR, isolatedRuntimeStateDir);
+  assert.equal(process.env.MODEL_ROUTER_STATE_DIR, undefined);
+  const childState = path.join(isolatedRuntimeRoot, "child-state");
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import childProcess, { execFileSync } from 'node:child_process';
+    import { CODEX_HOME, STATE_DIR } from ${JSON.stringify(new URL("../src/paths.mjs", import.meta.url).href)};
+    if (childProcess[Symbol.for('codex-router.test.isolated-keychain')] !== true) {
+      throw new Error('The child must block host Keychain calls before this oracle runs.');
+    }
+    const keychainStatus = (args) => {
+      try { execFileSync('/usr/bin/security', args); return 'unexpected host access'; }
+      catch (error) { return error.status; }
+    };
+    console.log(JSON.stringify({ home: CODEX_HOME, state: STATE_DIR,
+      missing: keychainStatus(['find-generic-password', '-s', 'synthetic-fixture']),
+      denied: keychainStatus(['add-generic-password', '-s', 'synthetic-fixture']) }));
+  `], {
+    env: { ...process.env, CODEX_ROUTER_STATE_DIR: childState },
+    encoding: "utf8", windowsHide: true,
+  });
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), {
+    home: isolatedRuntimeHome, state: childState, missing: 44, denied: 1,
+  });
+  const owner = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import { isolatedRuntimeRoot } from ${JSON.stringify(new URL("./fixtures/isolated-runtime-environment.mjs", import.meta.url).href)};
+    console.log(isolatedRuntimeRoot);
+  `], { env: { ...process.env }, encoding: "utf8", windowsHide: true });
+  assert.equal(owner.status, 0, owner.stderr);
+  const ownedRoot = owner.stdout.trim();
+  assert.equal(path.dirname(ownedRoot), path.resolve(os.tmpdir()));
+  assert.ok(path.basename(ownedRoot).startsWith("codex-router-isolated-runtime-"));
+  assert.equal(existsSync(ownedRoot), false, "the fixture owner cleans its own root on exit");
+  assert.equal(existsSync(isolatedRuntimeRoot), true, "a child must preserve the parent's root");
+});
 
 test("live account catalog probes stay off while the router owns the catalog", () => {
   assert.equal(
@@ -764,15 +805,15 @@ function withCredentialEnvironment(kimiHome, run) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "catalog-login-free-"));
   assert.equal(path.dirname(dir), path.resolve(os.tmpdir()));
   assert.ok(path.basename(dir).startsWith("catalog-login-free-"));
-  // These pure catalog imports freeze paths before this fixture runs. Discovery
-  // is safe only when the outer runner supplied an isolated home and state.
+  // Imports freeze paths before this per-test fixture runs; the first runtime
+  // fixture import must already have supplied isolated home and state roots.
   const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
   for (const target of [CODEX_HOME, STATE_DIR]) {
     const isolated = [os.tmpdir(), workspace].some((base) => {
       const relative = path.relative(path.resolve(base), path.resolve(target));
       return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
     });
-    assert.equal(isolated, true, "credential fixtures require an isolated outer runner");
+    assert.equal(isolated, true, "credential fixtures require an isolated runtime environment");
   }
   const overrides = {
     CODEX_ROUTER_NO_DISCOVERY: "0",

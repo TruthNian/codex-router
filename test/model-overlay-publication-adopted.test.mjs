@@ -1,3 +1,5 @@
+import "./fixtures/isolated-runtime-environment.mjs";
+import { isolatedRuntimeStateDir } from "./fixtures/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import http from "node:http";
@@ -54,7 +56,7 @@ test("registry drift after verification still fails before any target write", as
 });
 
 test("the fresh adopted stage owns the model lock and has one finite publication epoch", async (t) => {
-  const state = mkdtempSync(path.join(process.env.MODEL_ROUTER_STATE_DIR, "adopted-lock-"));
+  const state = mkdtempSync(path.join(isolatedRuntimeStateDir, "adopted-lock-"));
   t.after(() => rmSync(state, { recursive: true, force: true }));
   let release;
   let entered;
@@ -101,7 +103,7 @@ test("the read-only adopted guard validates identity without a target publisher"
 });
 
 test("the fresh read-only guard defaults to no lock reentry and performs no publication", async (t) => {
-  const state = mkdtempSync(path.join(process.env.MODEL_ROUTER_STATE_DIR, "adopted-verify-"));
+  const state = mkdtempSync(path.join(isolatedRuntimeStateDir, "adopted-verify-"));
   t.after(() => rmSync(state, { recursive: true, force: true }));
   await withModelOverlayLock(() => verifyAdoptedModelOverlayFresh({
     executable: "/synthetic/node", environment: { MODEL_ROUTER_STATE_DIR: state },
@@ -115,7 +117,7 @@ test("the fresh read-only guard defaults to no lock reentry and performs no publ
 });
 
 test("a caller holding the model lock can explicitly avoid reentry", async (t) => {
-  const state = mkdtempSync(path.join(process.env.MODEL_ROUTER_STATE_DIR, "adopted-held-"));
+  const state = mkdtempSync(path.join(isolatedRuntimeStateDir, "adopted-held-"));
   t.after(() => rmSync(state, { recursive: true, force: true }));
   let runs = 0;
   await withModelOverlayLock(() => publishAdoptedModelOverlayFresh({
@@ -126,7 +128,7 @@ test("a caller holding the model lock can explicitly avoid reentry", async (t) =
 });
 
 test("real fresh refreshes preserve catalogs for unadopted selection then publish adopted routes", async (t) => {
-  const directory = mkdtempSync(path.join(process.env.MODEL_ROUTER_STATE_DIR, "adopted-real-"));
+  const directory = mkdtempSync(path.join(isolatedRuntimeStateDir, "adopted-real-"));
   const home = path.join(directory, "codex");
   const state = path.join(directory, "state");
   const dsh = path.join(directory, "dsh");

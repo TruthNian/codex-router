@@ -1,9 +1,12 @@
+import "./fixtures/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+
+import { setupFixtureEnvironment } from "./fixtures/setup-environment.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -128,7 +131,7 @@ env.update({
 })
 pid, master = os.forkpty()
 if pid == 0:
-    os.execve(node, [node, provider_key, "deepseek", "set"], env)
+    os.execve(node, [node, provider_key, "deepseek", "set", "--stage"], env)
 
 output = bytearray()
 prompt = b"DeepSeek API key: "
@@ -197,7 +200,7 @@ raise SystemExit(os.waitstatus_to_exitcode(status))
         {
           encoding: "utf8",
           env: {
-            ...process.env,
+            ...setupFixtureEnvironment(testRoot, stateDir, testRoot),
             DEEPSEEK_API_KEY: "",
           },
           timeout: 20_000,
@@ -206,6 +209,7 @@ raise SystemExit(os.waitstatus_to_exitcode(status))
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /Received \d+ characters\./);
       assert.match(result.stdout, /DeepSeek API key saved to protected local storage/);
+      assert.match(result.stdout, /Changes staged/);
       assert.doesNotMatch(result.stdout, new RegExp(secret));
       const cached = JSON.parse(readFileSync(cachePath, "utf8")).providers;
       assert.equal(cached.deepseek, undefined);

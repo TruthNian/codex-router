@@ -1,3 +1,4 @@
+import "./fixtures/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync as rawWriteFileSync } from "node:fs";
@@ -39,14 +40,14 @@ import {
 } from "../src/chatgpt-login-lease.mjs";
 import { CODEX_HOME, STATE_DIR } from "../src/paths.mjs";
 
-// Static imports above freeze paths. Refuse discovery until the test runner
-// has supplied a synthetic home/state inside temporary or workspace storage.
+// The first fixture import supplies synthetic paths before src imports freeze
+// them. Keep the boundary check before enabling credential discovery.
 const fixtureWorkspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 for (const target of [CODEX_HOME, STATE_DIR]) {
   assert.ok([os.tmpdir(), fixtureWorkspace].some((base) => {
     const relative = path.relative(path.resolve(base), path.resolve(target));
     return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
-  }), "profile fixtures require an isolated outer runner");
+  }), "profile fixtures require an isolated runtime environment");
 }
 process.env.CODEX_ROUTER_NO_DISCOVERY = "0";
 process.env.KIMI_CODE_HOME = path.join(STATE_DIR, "kimi");

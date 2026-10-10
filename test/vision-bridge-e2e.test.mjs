@@ -372,9 +372,10 @@ test("one image is bought once per question asked, never once per turn", async (
     // 2. Latency. A question the reader has already been asked costs nothing:
     // that is what the resend above measures, and it is the shape Codex
     // produces on every turn while a model works. A *new* question pays for the
-    // read, on purpose -- it is the only way to answer it. The bound is a
-    // difference rather than an absolute, because carrying an image also costs
-    // a fixed amount that has nothing to do with the engine.
+    // read, on purpose -- it is the only way to answer it. Record latency as a
+    // measurement; scheduling under parallel load can exceed the reader delay.
+    // The independent cost oracle is whether another upstream read occurred.
+    const readsBeforeRepeat = upstreams.state.visionRequests.length;
     const repeated = await turn(
       router.port,
       textTurn({ question: "Question 5 about this screenshot?", history: history.slice(0, -1) }),
@@ -387,11 +388,8 @@ test("one image is bought once per question asked, never once per turn", async (
         `fixed cost of carrying an image on a cache hit ${(repeated.ms - floor).toFixed(0)}ms`,
     );
     assert.equal(repeated.status, 200);
-    assert.ok(
-      asked - repeated.ms >= VISION_DELAY_MS * 0.5,
-      `a repeated question (${repeated.ms.toFixed(0)}ms) did not visibly skip the ` +
-        `${VISION_DELAY_MS}ms read that a new one (${asked.toFixed(0)}ms) pays`,
-    );
+    assert.equal(upstreams.state.visionRequests.length, readsBeforeRepeat,
+      "a repeated question must not buy another upstream read");
 
     // 3. What the routed model was handed, on every turn -- not just the first.
     for (const [index, sent] of upstreams.state.gatewayRequests.slice(3).entries()) {

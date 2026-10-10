@@ -1,3 +1,4 @@
+import "./fixtures/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import http from "node:http";
@@ -7,6 +8,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { openPort } from "./port-pool.mjs";
+import { setupFixtureEnvironment } from "./fixtures/setup-environment.mjs";
+import { stageProviderControlRuntime } from "./fixtures/provider-control-runtime.mjs";
 import { commandCodeCredentialVerifier, ROUTE_RECHECK_MS } from "../src/commandcode-plan.mjs";
 import { upsertProviderApiKey } from "../src/provider-api-key-pool.mjs";
 
@@ -91,6 +94,15 @@ async function waitForFile(target, child, errors) {
   throw new Error(`forwarder did not persist ${path.basename(target)}: ${errors()}`);
 }
 
+function assertEnvironmentPoolStaging(stateDir) {
+  const phases = readFileSync(path.join(stateDir, "runtime-events.jsonl"), "utf8")
+    .trim().split("\n").map((line) => JSON.parse(line).phase);
+  assert.equal(phases.includes("service-status"), true);
+  for (const phase of ["dependencies", "prepare", "publish", "service-restart"]) {
+    assert.equal(phases.includes(phase), false, `environment pool registration must stage without ${phase}`);
+  }
+}
+
 test("a plan-refused Command Code account is served through the CLI route", async () => {
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "commandcode-forwarder-state-"));
   const cliHome = mkdtempSync(path.join(os.tmpdir(), "commandcode-forwarder-home-"));
@@ -102,7 +114,7 @@ test("a plan-refused Command Code account is served through the CLI route", asyn
   const child = spawn(process.execPath, [path.join(root, "src", "api-forwarder.mjs")], {
     cwd: root,
     env: {
-      ...process.env,
+      ...setupFixtureEnvironment(stateDir, stateDir),
       MODEL_ROUTER_TARGET: "codex",
       MODEL_ROUTER_INTERNAL_KEY: internalKey,
       MODEL_ROUTER_API_PORT: String(forwarderPort),
@@ -196,7 +208,7 @@ test("a 403 that is not the plan refusal is relayed, not routed around", async (
   const child = spawn(process.execPath, [path.join(root, "src", "api-forwarder.mjs")], {
     cwd: root,
     env: {
-      ...process.env,
+      ...setupFixtureEnvironment(stateDir, stateDir),
       MODEL_ROUTER_TARGET: "codex",
       MODEL_ROUTER_INTERNAL_KEY: internalKey,
       MODEL_ROUTER_API_PORT: String(forwarderPort),
@@ -258,18 +270,22 @@ test("pooled Command Code failover uses the winning key for its plan route", asy
     ], {
       cwd: root,
       env: {
-        ...process.env,
+        ...setupFixtureEnvironment(stateDir, stateDir),
+        ...stageProviderControlRuntime(stateDir),
         MODEL_ROUTER_TARGET: "codex",
         MODEL_ROUTER_STATE_DIR: stateDir,
         MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
         MODEL_ROUTER_API_KEY_POOL_PATH: poolStatePath,
         CODEX_ROUTER_PORT: String(routerPort),
+        MODEL_ROUTER_PORT: String(routerPort),
         CODEX_ROUTER_SERVICE_PLATFORM: "darwin",
         MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(stateDir, "launch-agents"),
       },
-      stdio: "ignore",
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
     });
   }
+  assertEnvironmentPoolStaging(stateDir);
   const upstreamPort = await openPort();
   const forwarderPort = await openPort();
   const calls = [];
@@ -306,7 +322,7 @@ test("pooled Command Code failover uses the winning key for its plan route", asy
   const child = spawn(process.execPath, [path.join(root, "src", "api-forwarder.mjs")], {
     cwd: root,
     env: {
-      ...process.env,
+      ...setupFixtureEnvironment(stateDir, stateDir),
       MODEL_ROUTER_TARGET: "codex",
       MODEL_ROUTER_INTERNAL_KEY: internalKey,
       MODEL_ROUTER_API_PORT: String(forwarderPort),
@@ -385,18 +401,22 @@ test("an intermediate pooled plan limit stays per-key until the winning response
     ], {
       cwd: root,
       env: {
-        ...process.env,
+        ...setupFixtureEnvironment(stateDir, stateDir),
+        ...stageProviderControlRuntime(stateDir),
         MODEL_ROUTER_TARGET: "codex",
         MODEL_ROUTER_STATE_DIR: stateDir,
         MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
         MODEL_ROUTER_API_KEY_POOL_PATH: poolStatePath,
         CODEX_ROUTER_PORT: String(routerPort),
+        MODEL_ROUTER_PORT: String(routerPort),
         CODEX_ROUTER_SERVICE_PLATFORM: "darwin",
         MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(stateDir, "launch-agents"),
       },
-      stdio: "ignore",
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
     });
   }
+  assertEnvironmentPoolStaging(stateDir);
   const references = JSON.parse(readFileSync(credentialStorePath, "utf8")).credentials;
   const firstId = references.find((entry) => entry.secretRef.name === "COMMAND_CODE_API_KEY").id;
   const secondId = references.find((entry) => entry.secretRef.name === "COMMANDCODE_API_KEY").id;
@@ -463,7 +483,7 @@ test("an intermediate pooled plan limit stays per-key until the winning response
   const child = spawn(process.execPath, [path.join(root, "src", "api-forwarder.mjs")], {
     cwd: root,
     env: {
-      ...process.env,
+      ...setupFixtureEnvironment(stateDir, stateDir),
       MODEL_ROUTER_TARGET: "codex",
       MODEL_ROUTER_INTERNAL_KEY: internalKey,
       MODEL_ROUTER_API_PORT: String(forwarderPort),
@@ -546,18 +566,22 @@ test("pooled Command Code recheck success is cached against the exact winning ke
     ], {
       cwd: root,
       env: {
-        ...process.env,
+        ...setupFixtureEnvironment(stateDir, stateDir),
+        ...stageProviderControlRuntime(stateDir),
         MODEL_ROUTER_TARGET: "codex",
         MODEL_ROUTER_STATE_DIR: stateDir,
         MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
         MODEL_ROUTER_API_KEY_POOL_PATH: poolStatePath,
         CODEX_ROUTER_PORT: String(routerPort),
+        MODEL_ROUTER_PORT: String(routerPort),
         CODEX_ROUTER_SERVICE_PLATFORM: "darwin",
         MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(stateDir, "launch-agents"),
       },
-      stdio: "ignore",
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
     });
   }
+  assertEnvironmentPoolStaging(stateDir);
   const references = JSON.parse(readFileSync(credentialStorePath, "utf8")).credentials;
   const firstId = references.find((entry) => entry.secretRef.name === "COMMAND_CODE_API_KEY").id;
   const secondId = references.find((entry) => entry.secretRef.name === "COMMANDCODE_API_KEY").id;
@@ -603,7 +627,7 @@ test("pooled Command Code recheck success is cached against the exact winning ke
   const child = spawn(process.execPath, [path.join(root, "src", "api-forwarder.mjs")], {
     cwd: root,
     env: {
-      ...process.env,
+      ...setupFixtureEnvironment(stateDir, stateDir),
       MODEL_ROUTER_TARGET: "codex",
       MODEL_ROUTER_INTERNAL_KEY: internalKey,
       MODEL_ROUTER_API_PORT: String(forwarderPort),
@@ -692,7 +716,7 @@ test("the Command Code Flash route clamps Codex's efforts onto the model's ladde
   const child = spawn(process.execPath, [path.join(root, "src", "api-forwarder.mjs")], {
     cwd: root,
     env: {
-      ...process.env,
+      ...setupFixtureEnvironment(stateDir, stateDir),
       MODEL_ROUTER_TARGET: "codex",
       MODEL_ROUTER_INTERNAL_KEY: internalKey,
       MODEL_ROUTER_API_PORT: String(forwarderPort),

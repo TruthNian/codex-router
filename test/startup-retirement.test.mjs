@@ -17,7 +17,8 @@ const begin = source.indexOf("  const frontend = FRONTEND;");
 const end = source.indexOf("  const cursorEdge =", begin);
 assert.ok(begin >= 0 && end > begin, "startup readiness boundary must be present");
 const boundary = source.slice(begin, end);
-assert.ok(boundary.includes("if (ready) void startNativeCatalogWatch()"));
+assert.ok(boundary.includes("const finalizeHealthyGeneration ="));
+assert.ok(boundary.includes("await startNativeCatalogWatch()"));
 const publisherBegin = source.indexOf("async function startNativeCatalogWatch() {");
 const publisherEnd = source.indexOf("\n}\n", publisherBegin) + 3;
 assert.ok(publisherBegin >= 0 && publisherEnd > publisherBegin);
@@ -33,8 +34,11 @@ const completeStartup = new AsyncFunction("context", `
   const { FRONTEND, SOURCE_ROOT, run, process, waitForHealth, loopback, PORTS,
     STARTUP_CHILD_HEALTH_TIMEOUT_MS, clearStartupTimeouts,
     attemptAntigravityProbePromotionAfterReadiness, antigravityStartup,
-    children, console, path, loadPublisher, loadEvents, stopServiceChildren } = context;
+    children, console, path, loadPublisher, loadEvents, stopServiceChildren,
+    clearStartupAttempts } = context;
   let shuttingDown = false;
+  let startupReady = false;
+  const automaticStartup = true;
   let stopNativeCatalogWatch = () => {};
   let frontendChild, shutdownPromise;
   const shutdownController = new AbortController();
@@ -48,13 +52,15 @@ const completeStartup = new AsyncFunction("context", `
   ${shutdown}
   context.stopSupervisor = stopChildren;
   ${boundary}
+  return { ready, startupReady };
 `);
 
 const PRIVATE_TIMEOUT = "CODEX_ROUTER_WINDOWS_PRIVATE_SYNC_TIMEOUT_MS";
 const GENERATION = "55555555-5555-4555-8555-555555555555";
 const SESSION_GENERATION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
-function scenario({ pending = true, promotion = true, failure, shutdownDuringLoad = false } = {}) {
+function scenario({ pending = true, promotion = true, failure, healthFailure,
+  shutdownDuringHealth = false, shutdownDuringLoad = false } = {}) {
   const env = { [PRIVATE_TIMEOUT]: "900000", KEEP_SETTING: "unchanged" };
   const events = [];
   const errors = [];
@@ -67,13 +73,23 @@ function scenario({ pending = true, promotion = true, failure, shutdownDuringLoa
     process: { env, execPath: process.execPath },
     waitForHealth: async (_label, url) => {
       events.push(url.endsWith("/health/live") ? "frontend live" : "frontend healthy");
+      if (url.endsWith("/health")) {
+        if (shutdownDuringHealth) context.stopSupervisor();
+        if (healthFailure) throw healthFailure;
+      }
     },
     loopback: (_port, suffix = "") => `http://127.0.0.1${suffix}`,
     PORTS: { router: 1 },
     STARTUP_CHILD_HEALTH_TIMEOUT_MS: 30_000,
     clearStartupTimeouts: (environment) => {
-      events.push("startup retired");
+      // Both the successful finalizer and unconditional initial cleanup invoke
+      // the real idempotent helper. Record the actual transition only once.
+      if (Object.hasOwn(environment, PRIVATE_TIMEOUT)) events.push("startup retired");
       return clearStartupTimeouts(environment);
+    },
+    clearStartupAttempts: () => {
+      assert.deepEqual(env, { KEEP_SETTING: "unchanged" });
+      events.push("cooldown cleared");
     },
     attemptAntigravityProbePromotionAfterReadiness: (options) =>
       attemptAntigravityProbePromotionAfterReadiness({
@@ -140,7 +156,7 @@ test("pending activation retains its startup ACL allowance until persistence fin
   await settlePublishers();
   assert.deepEqual(fixture.events, [
     "frontend live", "frontend healthy", "activation started", "activation persisted",
-    "startup retired", "publisher loaded", "watcher started", "catalog published",
+    "startup retired", "cooldown cleared", "publisher loaded", "watcher started", "catalog published",
   ]);
   assert.deepEqual(fixture.errors, []);
   assert.deepEqual(fixture.env, { KEEP_SETTING: "unchanged" });
@@ -152,7 +168,7 @@ test("superseded activation still retires startup settings before background pub
   await settlePublishers();
   assert.deepEqual(fixture.events, [
     "frontend live", "frontend healthy", "activation started", "activation superseded",
-    "startup retired", "publisher loaded", "watcher started", "catalog published",
+    "startup retired", "cooldown cleared", "publisher loaded", "watcher started", "catalog published",
   ]);
   assert.equal(fixture.errors.length, 1);
   assert.match(fixture.errors[0], /route remains disabled/);
@@ -172,7 +188,7 @@ test("startup without pending activation retires settings before publication", a
   await fixture.complete();
   await settlePublishers();
   assert.deepEqual(fixture.events, [
-    "frontend live", "frontend healthy", "startup retired", "publisher loaded", "watcher started", "catalog published",
+    "frontend live", "frontend healthy", "startup retired", "cooldown cleared", "publisher loaded", "watcher started", "catalog published",
   ]);
   assert.deepEqual(fixture.errors, []);
 });
@@ -192,7 +208,26 @@ test("shutdown while the publisher loads cannot start background maintenance", a
   await fixture.complete();
   await settlePublishers();
   assert.deepEqual(fixture.events, [
-    "frontend live", "frontend healthy", "startup retired", "publisher loaded",
+    "frontend live", "frontend healthy", "startup retired", "cooldown cleared", "publisher loaded",
   ]);
+  assert.deepEqual(fixture.errors, []);
+});
+
+test("degraded initial readiness retires startup settings without activating or publishing", async () => {
+  const fixture = scenario({ healthFailure: new Error("selected dependency unavailable") });
+  assert.deepEqual(await fixture.complete(), { ready: false, startupReady: false });
+  await settlePublishers();
+  assert.deepEqual(fixture.events, ["frontend live", "frontend healthy", "startup retired"]);
+  assert.deepEqual(fixture.env, { KEEP_SETTING: "unchanged" });
+  assert.equal(fixture.errors.length, 1);
+  assert.match(fixture.errors[0], /dependency readiness unavailable: selected dependency unavailable/);
+});
+
+test("shutdown during aggregate readiness retires settings without activation or publication", async () => {
+  const fixture = scenario({ shutdownDuringHealth: true });
+  assert.deepEqual(await fixture.complete(), { ready: false, startupReady: false });
+  await settlePublishers();
+  assert.deepEqual(fixture.events, ["frontend live", "frontend healthy", "startup retired"]);
+  assert.deepEqual(fixture.env, { KEEP_SETTING: "unchanged" });
   assert.deepEqual(fixture.errors, []);
 });

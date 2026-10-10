@@ -28,6 +28,15 @@ test("real native Router records HTTP delivery and terminal generation outcomes 
     }
     for await (const _chunk of request) { /* Consume the complete synthetic POST. */ }
     posts += 1;
+    if (terminal.startsWith("json-")) {
+      const status = terminal.slice(5);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: `r_${posts}`, object: "response",
+        ...(status === "missing" ? {} : { status }),
+        output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "Synthetic partial output" }] }],
+        usage: { input_tokens: 50, output_tokens: 10 } }));
+      return;
+    }
     response.writeHead(200, { "content-type": "text/event-stream" });
     const initial = { id: `r_${posts}`, object: "response", status: "in_progress", output: [] };
     const item = { id: `msg_${posts}`, type: "message", role: "assistant", status: "completed",
@@ -79,11 +88,11 @@ test("real native Router records HTTP delivery and terminal generation outcomes 
   try {
     await waitUntil(async () => { try { return (await fetch(`${base}/models`)).ok; } catch { return false; } });
     let count = 0;
-    for (const [kind, outcome] of [["completed", "completed"], ["failed", "failed"], ["incomplete", "incomplete"], ["embedded-failure", "failed"], ["eof", "indeterminate"]]) {
+    for (const [kind, outcome] of [["completed", "completed"], ["failed", "failed"], ["incomplete", "incomplete"], ["embedded-failure", "failed"], ["eof", "indeterminate"], ["json-completed", "completed"], ["json-failed", "failed"], ["json-missing", "indeterminate"]]) {
       terminal = kind;
       const response = await fetch(`${base}/responses`, {
         method: "POST", headers: { "content-type": "application/json", authorization: "Bearer synthetic-native-session" },
-        body: JSON.stringify({ model: "gpt-6.1-sol", stream: true, input: "Synthetic local regression only", tools: [] }),
+        body: JSON.stringify({ model: "gpt-6.1-sol", stream: !kind.startsWith("json-"), input: "Synthetic local regression only", tools: [] }),
         signal: AbortSignal.timeout(10_000),
       });
       const body = await response.text();

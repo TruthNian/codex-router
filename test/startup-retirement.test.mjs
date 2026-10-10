@@ -12,7 +12,7 @@ import { stopServiceChildren } from "../src/service-shutdown.mjs";
 // boundary with isolated process/child/publisher dependencies instead, retaining
 // the real activation controller and timeout cleanup. No provider request or
 // credential is needed to reproduce losing the remaining bootstrap allowance.
-const source = readFileSync(new URL("../src/start.mjs", import.meta.url), "utf8");
+const source = readFileSync(new URL("../src/start.mjs", import.meta.url), "utf8").replace(/\r\n?/g, "\n");
 const begin = source.indexOf("  const frontend = FRONTEND;");
 const end = source.indexOf("  const cursorEdge =", begin);
 assert.ok(begin >= 0 && end > begin, "startup readiness boundary must be present");

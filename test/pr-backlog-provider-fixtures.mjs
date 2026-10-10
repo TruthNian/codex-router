@@ -258,7 +258,7 @@ export async function runProviderScenarios(t) {
             assert.equal(existsSync(path.join(f.state, "startup-attempts.json")), false, "a live degraded frontend must not create a crash-loop cooldown");
             if (outcome === "timeout-unready") {
               assert.equal(existsSync(marker), true);
-              assert.match(startup.output(), /dependency unavailable: LiteLLM gateway/);
+              assert.match(startup.output(), /dependency unavailable: Timed out waiting for LiteLLM gateway to become healthy/);
             } else {
               assert.match(startup.output(), /virtual environment is broken/);
               assert.match(startup.output(), outcome === "missing" ? /ENOENT/ : /exited with code 1/);

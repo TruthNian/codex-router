@@ -116,9 +116,28 @@ const CONNECT_CODES = new Set([
   "ECONNRESET", "ECONNABORTED", "EHOSTUNREACH", "ENETDOWN", "ENETUNREACH", "ENOBUFS", "ETIMEDOUT",
 ]);
 
+// Node's TLS onConnectEnd emits this exact ECONNRESET before secureConnect and
+// removes that listener once TLS is established. It has host/port but no
+// syscall, so the ordinary connect-syscall test below misses it. HTTP request
+// bytes cannot have crossed this failed TLS handshake. A generic ECONNRESET or
+// a message merely containing "TLS" does not establish that delivery boundary.
+const PRE_TLS_RESET_MESSAGE =
+  "Client network socket disconnected before secure TLS connection was established";
+
+function preTlsResetCause(error) {
+  return error?.code === "ECONNRESET" && error.message === PRE_TLS_RESET_MESSAGE;
+}
+
+export function isPreTlsConnectionReset(error) {
+  for (let cause = error, depth = 0; cause && depth < MAX_CAUSE_DEPTH; cause = cause.cause, depth += 1) {
+    if (preTlsResetCause(cause)) return true;
+  }
+  return false;
+}
+
 export function transportDeliveryState(error) {
   for (let cause = error, depth = 0; cause && depth < MAX_CAUSE_DEPTH; cause = cause.cause, depth += 1) {
-    if (UNSENT_CODES.has(cause.code) ||
+    if (UNSENT_CODES.has(cause.code) || preTlsResetCause(cause) ||
         (["connect", "bind", "getaddrinfo"].includes(cause.syscall) && CONNECT_CODES.has(cause.code))) {
       return "not_sent";
     }

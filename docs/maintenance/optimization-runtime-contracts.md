@@ -106,7 +106,10 @@ old credentials after a publication warning.
 [upstream-retry.mjs](../../src/upstream-retry.mjs) defaults to `at-most-once`
 **transport replay**. A generation POST may repeat only with positive
 `not_sent` evidence and before caller output, within attempt/time limits that
-are rechecked after backoff and response cancellation. A connection reset,
+are rechecked after backoff and response cancellation. Node's exact pre-TLS
+`ECONNRESET` establishes `not_sent`: it occurs before the secure connection can
+carry HTTP request bytes, even though Node omits `syscall` on that error. Its
+`host` field is retained in diagnostics. A generic connection reset,
 headers timeout, or 5xx can follow origin execution. Explicit
 `CODEX_ROUTER_NATIVE_RETRY_POLICY=availability` accepts ambiguous delivery;
 GET/HEAD/OPTIONS use the safe-method retry allowance.

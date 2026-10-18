@@ -141,6 +141,7 @@ export function subscribeNativeCatalogEvents(listener, {
     if (stopped || discoveryOff()) return;
     if (checking) { checkAgain = true; return; }
     checking = true;
+    const initialCheck = !initialized;
     try {
       if (!initialized) {
         try { binary = readBinaryIdentity(); } catch { /* Unknown is not replacement. */ }
@@ -169,6 +170,10 @@ export function subscribeNativeCatalogEvents(listener, {
     } finally {
       checking = false;
       if (checkAgain && !stopped) { checkAgain = false; queueCheck(); }
+      // macOS starts FSEventStream on a separate thread after fs.watch returns.
+      // Reconcile that one registration gap without another catalog request
+      // for unchanged identities or a recurring filesystem/model poll.
+      else if (initialCheck && !stopped) queueCheck();
     }
   }
 

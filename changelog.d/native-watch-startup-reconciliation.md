@@ -1,0 +1,1 @@
+- Recheck native account and binary identities once after filesystem-watch registration so a change during macOS event-stream initialization is not lost. Unchanged identities do not refresh the model catalog, subsequent checks remain event-driven, and real-watch tests wait for an observed OS event before testing replacement.

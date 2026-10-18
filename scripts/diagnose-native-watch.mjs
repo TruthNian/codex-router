@@ -55,7 +55,8 @@ if (!childMode) {
       trace.push({ at: Date.now() - started, replace: true });
       renameSync(`${authPath}.replacement`, authPath);
       const event = await Promise.race([observed, new Promise((resolve) => { timer = setTimeout(() => resolve(undefined), 2000); })]);
-      results.push({ mode, round, observed: event?.accountChanged === true, milliseconds: Date.now() - started, trace });
+      results.push({ mode, round, observed: event?.accountChanged === true,
+        nativeCallbacks: trace.filter((entry) => entry.kind).length, milliseconds: Date.now() - started, trace });
     } finally {
       clearTimeout(timer); stop();
       assert.equal(path.dirname(allocated), path.resolve(os.tmpdir()));
@@ -63,4 +64,4 @@ if (!childMode) {
       rmSync(allocated, { recursive: true, force: true });
     }
 }
-console.log(JSON.stringify({ platform: process.platform, results }, null, 2));
+console.log(JSON.stringify({ platform: process.platform, node: process.version, libuv: process.versions.uv, results }, null, 2));

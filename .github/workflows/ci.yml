@@ -10,14 +10,14 @@ name: CI
         description: Checks to run
         type: choice
         default: all
-        options: [all, macos-unified, macos-events]
+        options: [all, runtime, macos-unified, macos-events]
 
 permissions:
   contents: read
 
 jobs:
   test:
-    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == ''
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == 'runtime' || inputs.scope == ''
     # A hung test must fail the job instead of holding a runner for GitHub's
     # six-hour default.
     timeout-minutes: 60
@@ -81,7 +81,7 @@ jobs:
   # locked package, which is too much traffic to spend on unrelated pull
   # requests.
   homebrew-formula:
-    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == ''
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == 'runtime' || inputs.scope == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -143,7 +143,7 @@ jobs:
         run: packaging/homebrew/check-core-readiness.sh --install
 
   control-center:
-    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == ''
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == 'runtime' || inputs.scope == ''
     name: Electron control center (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -345,6 +345,8 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify startup reconciliation and actual atomic file replacement
+        run: node --import ./test/fixtures/isolated-runtime-environment.mjs --test test/native-catalog-events.test.mjs test/native-catalog-watch.test.mjs
       - name: Probe atomic replacement with raw and canonical watch paths
         run: node --import ./test/fixtures/isolated-runtime-environment.mjs scripts/diagnose-native-watch.mjs
 

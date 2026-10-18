@@ -1,0 +1,1 @@
+- Allow manual runtime CI to run all three platform test suites and desktop checks without repeating the separate, unchanged Homebrew source-install checks. Full manual CI keeps the installer checks, and native-watch diagnostics distinguish delivered OS events from startup reconciliation.

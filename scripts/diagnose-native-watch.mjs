@@ -1,12 +1,28 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, watch, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { subscribeNativeCatalogEvents } from "../src/native-catalog-events.mjs";
 
 const results = [];
-for (const mode of ["raw-immediate", "canonical-immediate", "raw-settled"]) {
+const childMode = process.argv[2];
+if (!childMode) {
   for (let round = 1; round <= 5; round += 1) {
+    for (const mode of ["raw-immediate", "canonical-immediate", "raw-settled"]) {
+      const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), mode, String(round)], {
+        encoding: "utf8", windowsHide: true, timeout: 10_000,
+      });
+      assert.ifError(child.error);
+      assert.equal(child.status, 0, child.stderr);
+      results.push(...JSON.parse(child.stdout).results);
+    }
+  }
+} else {
+    const mode = childMode;
+    assert(["raw-immediate", "canonical-immediate", "raw-settled"].includes(mode));
+    const round = Number(process.argv[3]);
     const allocated = mkdtempSync(path.join(os.tmpdir(), "native-watch-diagnostic-"));
     const root = mode === "canonical-immediate" ? realpathSync(allocated) : allocated;
     const authPath = path.join(root, "auth.json");
@@ -46,6 +62,5 @@ for (const mode of ["raw-immediate", "canonical-immediate", "raw-settled"]) {
       assert(path.basename(allocated).startsWith("native-watch-diagnostic-"));
       rmSync(allocated, { recursive: true, force: true });
     }
-  }
 }
 console.log(JSON.stringify({ platform: process.platform, results }, null, 2));

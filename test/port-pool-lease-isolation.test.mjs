@@ -14,8 +14,9 @@ const [root, entry] = process.argv.slice(1);
 process.argv[1] = path.join(root, "test", entry);
 const { freePort } = await import(pathToFileURL(path.join(root, "test", "port-pool.mjs")));
 const ports = [];
-for (let index = 0; index < 75; index += 1) ports.push(await freePort());
-assert.equal(new Set(ports).size, 75);
+const needed = entry === "routing.test.mjs" ? 200 : 75;
+for (let index = 0; index < needed; index += 1) ports.push(await freePort());
+assert.equal(new Set(ports).size, needed);
 // Use the production kernel bind helper with a concurrently owned fixture
 // listener. An old 10000-19999 allocation denies this valid token lease.
 const { startAntigravityOwnerServerForTests } = await import(pathToFileURL(path.join(root, "src", "antigravity-oauth-session.mjs")));

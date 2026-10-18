@@ -1,3 +1,4 @@
+// port-pool block-size: 256
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import http from "node:http";

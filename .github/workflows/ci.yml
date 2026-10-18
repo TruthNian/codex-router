@@ -10,14 +10,14 @@ name: CI
         description: Checks to run
         type: choice
         default: all
-        options: [all, macos-unified]
+        options: [all, macos-unified, macos-events]
 
 permissions:
   contents: read
 
 jobs:
   test:
-    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'macos-unified'
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == ''
     # A hung test must fail the job instead of holding a runner for GitHub's
     # six-hour default.
     timeout-minutes: 60
@@ -81,7 +81,7 @@ jobs:
   # locked package, which is too much traffic to spend on unrelated pull
   # requests.
   homebrew-formula:
-    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'macos-unified'
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -129,7 +129,7 @@ jobs:
   # Python dependency tree is large. Run this on the candidate stable commit
   # before opening the homebrew/core pull request.
   homebrew-install:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope != 'macos-unified'
+    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'all' || inputs.scope == '')
     strategy:
       fail-fast: false
       matrix:
@@ -143,7 +143,7 @@ jobs:
         run: packaging/homebrew/check-core-readiness.sh --install
 
   control-center:
-    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'macos-unified'
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == ''
     name: Electron control center (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -333,7 +333,23 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  macos-native-watch:
+    name: macOS native watch diagnostics
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'macos-events'
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Probe atomic replacement with raw and canonical watch paths
+        run: node --import ./test/fixtures/isolated-runtime-environment.mjs scripts/diagnose-native-watch.mjs
+
   macos-unified-app:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'macos-events'
     name: Unified native macOS app
     runs-on: macos-latest
     env:

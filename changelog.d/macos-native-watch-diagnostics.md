@@ -1,0 +1,1 @@
+- Add an isolated manual macOS filesystem-watch diagnostic that compares canonical and aliased temporary paths and records real event delivery around atomic account-file replacement.

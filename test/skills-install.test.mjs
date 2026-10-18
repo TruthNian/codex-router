@@ -58,7 +58,7 @@ function marker(home, name) {
   );
 }
 
-async function waitForPath(target, timeoutMs = 2_000) {
+async function waitForPath(target, timeoutMs = process.platform === "win32" ? 30_000 : 2_000) {
   const deadline = Date.now() + timeoutMs;
   while (!existsSync(target)) {
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${target}`);
@@ -137,40 +137,85 @@ test("concurrent skill installs serialize ownership from recovery through public
   const home = tempCodexHome();
   const fakeSource = mkdtempSync(path.join(os.tmpdir(), "codex-skills-source-"));
   const ready = path.join(home, "first-install-staged");
+  const release = path.join(home, "release-first-install");
+  const blocked = path.join(home, "second-install-blocked");
+  const secondStaged = path.join(home, "second-install-staged");
+  const workers = [];
+  function startWorker(code, environment) {
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", code], {
+      env: environment, stdio: ["ignore", "ignore", "pipe"], windowsHide: true,
+    });
+    const closed = once(child, "close");
+    closed.catch(() => {});
+    const worker = { child, closed, errors: "" };
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { worker.errors = (worker.errors + chunk).slice(-8192); });
+    workers.push(worker);
+    return worker;
+  }
+  async function finishWorker(worker, milliseconds = 30_000) {
+    let timer;
+    try {
+      return await Promise.race([worker.closed, new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`Skill fixture did not exit: ${worker.errors}`)), milliseconds);
+      })]);
+    } finally { clearTimeout(timer); }
+  }
   try {
     for (const name of ["a-skill", "b-skill"]) {
       mkdirSync(path.join(fakeSource, name), { recursive: true });
       writeFileSync(path.join(fakeSource, name, "SKILL.md"), `# ${name}\n`);
     }
     const environment = { ...process.env, CODEX_ROUTER_SKILLS_DIR: fakeSource };
-    const first = spawn(
-      process.execPath,
-      [
-        "--input-type=module",
-        "--eval",
-        `import { writeFileSync } from "node:fs";\n` +
+    const first = startWorker(
+        `import { existsSync, writeFileSync } from "node:fs";\n` +
           `import { installSkills } from ${JSON.stringify(SKILLS_MODULE_URL)};\n` +
-          `let held = false; installSkills(${JSON.stringify(home)}, { quiet: true, onStaged() { if (held) return; held = true; writeFileSync(${JSON.stringify(ready)}, "ready\\n"); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500); } });\n`,
-      ],
-      { encoding: "utf8", env: environment, stdio: ["ignore", "pipe", "pipe"] },
+          `let held = false; installSkills(${JSON.stringify(home)}, { quiet: true, onStaged() {
+            if (held) return; held = true; writeFileSync(${JSON.stringify(ready)}, "ready\\n");
+            const deadline = Date.now() + 30_000;
+            while (!existsSync(${JSON.stringify(release)})) {
+              if (Date.now() >= deadline) throw new Error("Parent did not release staged skill fixture");
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+            }
+          } });\n`,
+      environment,
     );
     await waitForPath(ready);
-    const second = spawn(
-      process.execPath,
-      [
-        "--input-type=module",
-        "--eval",
-        `import { installSkills } from ${JSON.stringify(SKILLS_MODULE_URL)}; installSkills(${JSON.stringify(home)}, { quiet: true });\n`,
-      ],
-      { encoding: "utf8", env: environment, stdio: ["ignore", "pipe", "pipe"] },
+    const second = startWorker(
+      `import fs from "node:fs"; import path from "node:path";
+       import { syncBuiltinESMExports } from "node:module";
+       import { installSkills } from ${JSON.stringify(SKILLS_MODULE_URL)};
+       const original = fs.mkdirSync; const lock = ${JSON.stringify(`${skillOwnershipPath(home)}.lock`)};
+       fs.mkdirSync = function(target, ...args) {
+         try { return original.call(this, target, ...args); }
+         catch (error) {
+           if (error.code === "EEXIST" && path.resolve(String(target)) === lock) fs.writeFileSync(${JSON.stringify(blocked)}, "blocked\\n");
+           throw error;
+         }
+       };
+       syncBuiltinESMExports();
+       installSkills(${JSON.stringify(home)}, { quiet: true, onStaged() { fs.writeFileSync(${JSON.stringify(secondStaged)}, "staged\\n"); } });`,
+      environment,
     );
-    const [firstClose, secondClose] = await Promise.all([once(first, "close"), once(second, "close")]);
-    assert.equal(firstClose[0], 0);
-    assert.equal(secondClose[0], 0);
+    await waitForPath(blocked);
+    assert.equal(existsSync(secondStaged), false, "the second installer cannot stage through the first installer's lock");
+    assert.equal(first.child.exitCode, null);
+    writeFileSync(release, "release\n");
+    const [firstClose, secondClose] = await Promise.all([finishWorker(first), finishWorker(second)]);
+    assert.equal(firstClose[0], 0, first.errors);
+    assert.equal(secondClose[0], 0, second.errors);
     assert.deepEqual(managedSkillNames(home), ["a-skill", "b-skill"]);
     assert.deepEqual(Object.keys(ownership(home).skills).sort(), ["a-skill", "b-skill"]);
     assert.ok(!existsSync(`${skillOwnershipPath(home)}.lock`));
   } finally {
+    for (const worker of workers) {
+      if (worker.child.exitCode === null && worker.child.signalCode === null) {
+        if (process.platform === "win32") {
+          spawnSync(path.join(process.env.SystemRoot, "System32", "taskkill.exe"), ["/PID", String(worker.child.pid), "/T", "/F"], { windowsHide: true, timeout: 5_000, stdio: "ignore" });
+        } else worker.child.kill("SIGKILL");
+      }
+      await finishWorker(worker, 5_000).catch(() => {});
+    }
     rmSync(home, { recursive: true, force: true });
     rmSync(fakeSource, { recursive: true, force: true });
   }

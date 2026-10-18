@@ -1985,13 +1985,21 @@ not prove that the origin never executed a generation request.
    bytes, and replaying it appends a second response to a stream the client is
    reading. `test/native-retry.test.mjs` asserts the caller received the partial
    stream exactly once.
-2. The default `at-most-once` delivery policy repeats generation POSTs only
-   with positive `not_sent` transport evidence, such as DNS failure, refused
-   connection, or connect timeout. A reset, headers timeout, or 5xx can follow
-   an executed request. The transient-status set (502/503/504/520-524) remains
-   eligible for safe methods or explicit
-   `CODEX_ROUTER_NATIVE_RETRY_POLICY=availability`, which accepts that
-   uncertainty. 429, other 4xx, and 500 stay excluded from this retry helper.
+2. A generation POST additionally needs positive pre-send evidence. Node's
+   exact pre-TLS `ECONNRESET` is unsent evidence, even without `syscall`, because
+   HTTP bytes cannot cross an unestablished TLS connection. Its `host` field
+   must survive diagnostics. `test/pre-tls-retry.test.mjs` exercises real direct
+   and HTTP CONNECT handshakes, request execution counts, and replay gates.
+   A generic reset,
+   missing response headers, 502/503/504, or Cloudflare 520-524 does not prove
+   the origin never executed the request. The default `at-most-once` policy
+   refuses ambiguous automatic replay; safe methods retain bounded transient
+   retries. `CODEX_ROUTER_NATIVE_RETRY_POLICY=availability` explicitly permits
+   uncertain delivery before client output. Neither policy retries 429, other
+   4xx, or origin 500. Reject native generation redirects before following one
+   can misclassify a later connect failure as unsent. Recheck delivery, abort
+   and total-budget gates after backoff and body cancellation. See
+   `docs/native-generation-retries.md` and `test/retry-delivery-boundary.test.mjs`.
 3. Keep the bound small. Codex retries roughly five times on its own and the
    two loops multiply, so the router's share (2 retries, 250ms then 750ms) has
    to keep the product a fast failure. A retry is also only *started* while the

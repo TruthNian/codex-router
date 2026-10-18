@@ -1,0 +1,1 @@
+- Integrate the October 18 upstream fixes for UTF-8 response decoding, client cancellation, retry billing and Grok workspace instructions while retaining the deployed execution-plan adoption, event-driven catalog refresh, private-write ownership, delivery boundaries and graceful service shutdown.

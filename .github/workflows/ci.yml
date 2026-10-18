@@ -500,6 +500,10 @@ jobs:
             fi
           }
 
+          smoke_runs=1
+          [ "${{ inputs.scope }}" != macos-unified ] || smoke_runs=5
+          for smoke_attempt in $(seq 1 "$smoke_runs"); do
+          printf 'Native lifecycle attempt %s/%s\n' "$smoke_attempt" "$smoke_runs"
           "$outer" --supervised >"$log" 2>&1 &
           pid=$!
           cleanup() {
@@ -557,6 +561,8 @@ jobs:
             exit "$status"
           fi
           trap - EXIT
+          /usr/bin/grep '\[macos-launch\]' "$log" || true
+          done
       - name: Package the one visible application
         run: ditto -c -k --keepParent "$RUNNER_TEMP/Codex Router.app" "$RUNNER_TEMP/model-router-macos.zip"
       - uses: actions/upload-artifact@v7

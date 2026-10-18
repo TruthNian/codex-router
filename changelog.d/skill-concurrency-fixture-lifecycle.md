@@ -1,0 +1,1 @@
+- Make the concurrent skill-install test wait for observed lock contention instead of a fixed staging sleep, capture child exits immediately, and retire every owned worker on setup failure so a timing failure cannot strand the test suite.

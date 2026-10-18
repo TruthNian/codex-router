@@ -4,13 +4,20 @@ name: CI
   push:
     branches: [main, personal]
   pull_request: {}
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Checks to run
+        type: choice
+        default: all
+        options: [all, macos-unified]
 
 permissions:
   contents: read
 
 jobs:
   test:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'macos-unified'
     # A hung test must fail the job instead of holding a runner for GitHub's
     # six-hour default.
     timeout-minutes: 60
@@ -74,6 +81,7 @@ jobs:
   # locked package, which is too much traffic to spend on unrelated pull
   # requests.
   homebrew-formula:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'macos-unified'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -121,7 +129,7 @@ jobs:
   # Python dependency tree is large. Run this on the candidate stable commit
   # before opening the homebrew/core pull request.
   homebrew-install:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.scope != 'macos-unified'
     strategy:
       fail-fast: false
       matrix:
@@ -135,6 +143,7 @@ jobs:
         run: packaging/homebrew/check-core-readiness.sh --install
 
   control-center:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'macos-unified'
     name: Electron control center (${{ matrix.platform }})
     strategy:
       fail-fast: false
@@ -394,6 +403,7 @@ jobs:
         env:
           CODEX_ROUTER_SOURCE_ROOT: ${{ github.workspace }}
           MODEL_ROUTER_SKIP_SERVICE_MANAGER: "1"
+          CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS: "1"
         shell: bash
         run: |
           set -euo pipefail
@@ -495,6 +505,13 @@ jobs:
           cleanup() {
             cleanup_status=$?
             trap - EXIT
+            if [ "$cleanup_status" -ne 0 ]; then
+              printf '\nNative macOS launch diagnostics:\n' >&2
+              cat "$log" >&2 || true
+              /bin/ps -axo pid,ppid,stat,comm | /usr/bin/grep -E 'ModelRouterTray|Control Center|Codex Router' >&2 || true
+              /usr/bin/log show --last 3m --style compact --info \
+                --predicate 'process == "ModelRouterTray" OR process == "Codex Router"' 2>/dev/null | tail -n 80 >&2 || true
+            fi
             terminate_bundle io.github.codex-router.control-center >/dev/null 2>&1 || true
             terminate_bundle io.github.codex-router.tray >/dev/null 2>&1 || true
             if kill -0 "$pid" 2>/dev/null; then

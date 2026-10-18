@@ -719,6 +719,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var widgetSnapshotPublishing: AnyCancellable?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
+      NSLog("[macos-launch] native host did finish launching")
+    }
     NSApp.setActivationPolicy(.accessory)
     trayMenuController = TrayMenuController(store: store)
     islandController = IslandWindowController(store: store)
@@ -764,6 +767,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   // handling it the second open is silently swallowed and the app reads as
   // broken.
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+    if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
+      NSLog("[macos-launch] native host received reopen")
+    }
     store.revealForUserLaunch()
     ControlCenterLauncher.open()
     return true
@@ -874,6 +880,9 @@ enum ControlCenterLauncher {
   }
 
   static func open(navigation: ControlCenterNavigationRequest? = nil) {
+    if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
+      NSLog("[macos-launch] embedded Control Center launch requested")
+    }
     guard let application = bundledApplicationURL else {
       RouterStore.shared.reportControlCenterLaunchFailure(
         routerLocalized("The embedded Control Center is missing. Rebuild Codex Router.")
@@ -925,7 +934,12 @@ enum ControlCenterLauncher {
     configuration.activates = true
     configuration.environment = embeddedEnvironment(processEnvironment: ProcessInfo.processInfo.environment)
     let completion: @Sendable (NSRunningApplication?, (any Error)?) -> Void = { _, error in
-      guard let error else { return }
+      guard let error else {
+        if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
+          NSLog("[macos-launch] LaunchServices completed embedded launch")
+        }
+        return
+      }
       let message = error.localizedDescription
       Task { @MainActor in
         RouterStore.shared.reportControlCenterLaunchFailure(
@@ -1505,6 +1519,9 @@ final class RouterStore: ObservableObject {
   }
 
   func reportControlCenterLaunchFailure(_ detail: String) {
+    if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
+      NSLog("[macos-launch] embedded launch failed: %@", detail)
+    }
     message = detail
     attentionPulse &+= 1
   }

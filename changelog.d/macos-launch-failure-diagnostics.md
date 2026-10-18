@@ -1,0 +1,1 @@
+- Add opt-in native macOS launch diagnostics and a targeted manual lifecycle CI scope, retaining launch and termination checks while exposing the stage and LaunchServices failure when an embedded Control Center never opens.

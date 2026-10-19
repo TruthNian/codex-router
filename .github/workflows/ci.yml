@@ -30,6 +30,8 @@ jobs:
           codesign --verify --deep --strict "$RUNNER_TEMP/Codex Router.app"
           mkdir -p "$RUNNER_TEMP/collision-evidence"
           swift scripts/probe-macos-query-collision.swift "$RUNNER_TEMP/Codex Router.app" "$RUNNER_TEMP/collision-evidence"
+          swift scripts/probe-macos-unforced-collision.swift "$RUNNER_TEMP/Codex Router.app" "$RUNNER_TEMP/collision-evidence"
+          node scripts/probe-real-lifecycle-query.mjs "$RUNNER_TEMP/Codex Router.app" "$RUNNER_TEMP/collision-evidence"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

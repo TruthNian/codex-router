@@ -1,18 +1,19 @@
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
-import { syncBuiltinESMExports } from 'node:module';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
 const entry = path.basename(process.argv[1] || '');
-const target = entry === 'request-diagnostics-router.test.mjs';
+const target = /^request-diagnostics-router(?:-stress-\d+)?\.test\.mjs$/.test(entry);
 const router = entry === 'router.mjs' && process.env.ROUTER_STARTUP_TRACED === '1';
 const directory = process.env.ROUTER_STARTUP_TRACE_DIR;
 if (directory && (target || router)) {
   fs.mkdirSync(directory, { recursive: true });
-  const fd = fs.openSync(path.join(directory, `${target ? 'parent' : 'router'}-${process.pid}.jsonl`), 'a');
+  const identity = `${process.pid}-${Math.round(performance.timeOrigin)}`;
+  const fd = fs.openSync(path.join(directory, `${target ? 'parent' : 'router'}-${identity}.jsonl`), 'a');
   const write = fs.writeSync;
   const cpu = process.cpuUsage();
   function record(event, detail = {}) {
@@ -24,11 +25,38 @@ if (directory && (target || router)) {
     childProcess.spawn = function (file, args, options) {
       if (file !== process.execPath || !args?.some(arg => path.basename(arg) === 'router.mjs')) return spawn.call(this, file, args, options);
       record('spawn.begin');
-      const child = spawn.call(this, file, ['--cpu-prof', `--cpu-prof-dir=${directory}`, ...args], { ...options, env: { ...options.env, ROUTER_STARTUP_TRACED: '1' } });
+      const child = spawn.call(this, file, args, { ...options, env: { ...options.env, ROUTER_STARTUP_TRACED: '1' } });
       record('spawn.return', { childPid: child.pid });
       child.once('spawn', () => record('spawn.event', { childPid: child.pid }));
       child.once('exit', (code, signal) => record('child.exit', { childPid: child.pid, code, signal }));
       child.stderr?.once('data', () => record('child.first-stderr', { childPid: child.pid }));
+      // Preserve the original five-second failure, but briefly quarantine a
+      // still-initializing failed fixture so its eventual startup profile is
+      // available. This changes diagnostic cleanup only, never test success.
+      const kill = child.kill.bind(child);
+      let listening = false;
+      let pendingKill;
+      let quarantine;
+      let stderr = '';
+      child.stderr?.on('data', chunk => {
+        stderr = `${stderr}${chunk}`.slice(-1000);
+        if (stderr.includes('[codex-router] listening')) {
+          listening = true;
+          if (pendingKill) { clearTimeout(quarantine); kill(pendingKill); }
+        }
+      });
+      child.kill = function (signal = 'SIGTERM') {
+        if (!listening && process.env.ROUTER_STARTUP_QUARANTINE === '1') {
+          if (!pendingKill) {
+            pendingKill = signal;
+            record('startup-failed-before-listening', { childPid: child.pid });
+            quarantine = setTimeout(() => kill(signal), 15_000);
+          }
+          return true;
+        }
+        return kill(signal);
+      };
+      child.once('close', () => clearTimeout(quarantine));
       return child;
     };
     const fetch = globalThis.fetch;
@@ -45,6 +73,15 @@ if (directory && (target || router)) {
       }
     };
   } else {
+    let profiler;
+    if (process.env.ROUTER_STARTUP_PROFILE === '1') {
+      const Session = createRequire(import.meta.url)('node:inspector').Session;
+      profiler = new Session();
+      profiler.connect();
+      profiler.post('Profiler.enable');
+      profiler.post('Profiler.start');
+      record('profile.started');
+    }
     for (const name of ['execFileSync', 'spawnSync', 'spawn']) {
       const original = childProcess[name];
       childProcess[name] = function (file, ...args) {
@@ -79,6 +116,15 @@ if (directory && (target || router)) {
     const listen = net.Server.prototype.listen;
     net.Server.prototype.listen = function (...args) {
       record('listen.called', { filesystem: Object.fromEntries(filesystem) });
+      if (profiler) {
+        const session = profiler;
+        profiler = undefined;
+        const slow = performance.now() > 2000;
+        session.post('Profiler.stop', (error, result) => {
+          if (!error && slow) fs.writeFileSync(path.join(directory, `startup-${identity}.cpuprofile`), JSON.stringify(result.profile));
+          session.disconnect();
+        });
+      }
       this.once('listening', () => record('listen.ready'));
       return listen.apply(this, args);
     };

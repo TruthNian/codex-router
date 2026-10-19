@@ -1,4 +1,4 @@
-name: Diagnose Windows router startup
+name: Sample Windows router startup tail latency
 on:
   workflow_dispatch: {}
 permissions:
@@ -6,7 +6,7 @@ permissions:
 jobs:
   original-suite:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -26,7 +26,7 @@ jobs:
           cache-dependency-path: source/package-lock.json
       - run: npm ci
         working-directory: source
-      - name: Run unchanged Windows suite with target-only phase measurements
+      - name: Sample original diagnostic cases across 600 fixture starts
         shell: pwsh
         working-directory: source
         run: |
@@ -36,11 +36,19 @@ jobs:
           $preloadPath = (Resolve-Path '../harness/scripts/diagnostics/router-startup-preload.mjs').Path
           $preloadUrl = ([System.Uri]::new($preloadPath)).AbsoluteUri
           $env:NODE_OPTIONS = "--import=$preloadUrl"
-          node --test --test-timeout=600000 --test-concurrency=2 test/*.test.mjs 2>&1 | Tee-Object -FilePath (Join-Path $traceDirectory 'test.log')
+          $env:ROUTER_STARTUP_PROFILE = '1'
+          $env:ROUTER_STARTUP_QUARANTINE = '1'
+          node -e 'console.log(JSON.stringify({node:process.version, cpus:require("node:os").cpus().length, cpuModel:require("node:os").cpus()[0].model, memory:require("node:os").totalmem()}))' | Set-Content -LiteralPath (Join-Path $traceDirectory 'host.json')
+          foreach ($iteration in 0..99) {
+            $copyPath = Join-Path (Get-Location) ("test/request-diagnostics-router-stress-{0:D3}.test.mjs" -f $iteration)
+            if (Test-Path -LiteralPath $copyPath) { throw 'Stress fixture path already exists.' }
+            Copy-Item -LiteralPath 'test/request-diagnostics-router.test.mjs' -Destination $copyPath
+          }
+          node --test --test-timeout=600000 --test-concurrency=2 test/request-diagnostics-router-stress-*.test.mjs 2>&1 | Tee-Object -FilePath (Join-Path $traceDirectory 'test.log')
           exit $LASTEXITCODE
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: windows-router-startup-trace
+          name: windows-router-startup-tail-trace
           path: ${{ runner.temp }}/router-startup-trace
           retention-days: 7

@@ -719,6 +719,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var widgetSnapshotPublishing: AnyCancellable?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    NativeLaunchProbe.event("host.didFinishLaunching")
     NSApp.setActivationPolicy(.accessory)
     trayMenuController = TrayMenuController(store: store)
     islandController = IslandWindowController(store: store)
@@ -764,6 +765,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   // handling it the second open is silently swallowed and the app reads as
   // broken.
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+    NativeLaunchProbe.event("host.reopen")
     store.revealForUserLaunch()
     ControlCenterLauncher.open()
     return true
@@ -921,10 +923,12 @@ enum ControlCenterLauncher {
     _ application: URL,
     navigation: ControlCenterNavigationRequest?
   ) {
+    NativeLaunchProbe.event("embedded.request")
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = true
     configuration.environment = embeddedEnvironment(processEnvironment: ProcessInfo.processInfo.environment)
-    let completion: @Sendable (NSRunningApplication?, (any Error)?) -> Void = { _, error in
+    let completion: @Sendable (NSRunningApplication?, (any Error)?) -> Void = { running, error in
+      NativeLaunchProbe.event("embedded.completion", childPID: running?.processIdentifier, error: error)
       guard let error else { return }
       let message = error.localizedDescription
       Task { @MainActor in
@@ -965,7 +969,7 @@ enum ControlCenterLauncher {
     for key in [
       "CODEX_ROUTER_SOURCE_ROOT", "MODEL_ROUTER_SOURCE_ROOT",
       "MODEL_ROUTER_STATE_DIR", "CODEX_ROUTER_STATE_DIR", "KIMI_CODEX_STATE_DIR",
-      "CODEX_HOME",
+      "CODEX_HOME", "MODEL_ROUTER_DIAG_TRACE",
     ] {
       if let value = processEnvironment[key], !value.isEmpty {
         environment[key] = value
@@ -1505,6 +1509,7 @@ final class RouterStore: ObservableObject {
   }
 
   func reportControlCenterLaunchFailure(_ detail: String) {
+    NativeLaunchProbe.event("embedded.failure")
     message = detail
     attentionPulse &+= 1
   }
@@ -10693,4 +10698,24 @@ private struct VisualEffectBlur: NSViewRepresentable {
   }
 
   func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+enum NativeLaunchProbe {
+  static func event(_ phase: String, childPID: Int32? = nil, error: (any Error)? = nil) {
+    guard let path = ProcessInfo.processInfo.environment["MODEL_ROUTER_DIAG_TRACE"] else { return }
+    var value: [String: Any] = ["phase": phase, "pid": ProcessInfo.processInfo.processIdentifier, "time": Date().timeIntervalSince1970]
+    if let childPID { value["childPID"] = childPID }
+    if let error {
+      let error = error as NSError
+      value["domain"] = error.domain
+      value["code"] = error.code
+    }
+    guard var data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return }
+    data.append(10)
+    if !FileManager.default.fileExists(atPath: path) { FileManager.default.createFile(atPath: path, contents: nil) }
+    guard let file = FileHandle(forWritingAtPath: path) else { return }
+    defer { try? file.close() }
+    _ = try? file.seekToEnd()
+    try? file.write(contentsOf: data)
+  }
 }

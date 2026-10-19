@@ -9,7 +9,7 @@ import {
   Tray,
 } from "electron";
 import path from "node:path";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, appendFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { registerIpcHandlers } from "./ipc.mjs";
 import {
@@ -25,6 +25,12 @@ import {
 import { controlCenterDestination, controlCenterNavigationURL } from "./navigation.mjs";
 
 import { interfaceLanguageFromLocale, interfaceMenuTemplates, isInterfaceLanguage } from "./interface-menu.mjs";
+
+function launchProbe(phase) {
+  if (!process.env.MODEL_ROUTER_DIAG_TRACE) return;
+  appendFileSync(process.env.MODEL_ROUTER_DIAG_TRACE, JSON.stringify({ phase, pid: process.pid, time: Date.now() / 1000, query: process.argv.includes("--query-lifecycle") }) + "\n");
+}
+launchProbe("electron.entry");
 
 let interfaceLanguage = "en";
 
@@ -336,6 +342,11 @@ function trustedRendererSender(event) {
 }
 
 if (lifecycleQueryInvocation) {
+  launchProbe("query.read");
+  if (process.env.MODEL_ROUTER_DIAG_QUERY_HOLD_MS) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.MODEL_ROUTER_DIAG_QUERY_HOLD_MS));
+  }
+  launchProbe("query.exit");
   // Query contract: one compact JSON object on stdout and status 0, including
   // for absent/stale state. This is directly consumable by jq or
   // ConvertFrom-Json without making "not running" a shell error.
@@ -348,6 +359,7 @@ if (lifecycleQueryInvocation) {
 }
 
 const primaryInstance = !lifecycleQueryInvocation && app.requestSingleInstanceLock();
+launchProbe(primaryInstance ? "electron.primary" : "electron.secondary");
 // These are helper invocations, not application sessions. app.quit() before
 // ready can remain alive in packaged Electron when there is no primary GUI to
 // receive the update request, which blocks the transactional bundle swap.
@@ -363,6 +375,7 @@ if (primaryInstance && !quitForUpdateInvocation) {
   // lock. The ready bit is raised only after the full Electron boundary is set.
   publishLifecycleState();
   app.whenReady().then(() => {
+    launchProbe("electron.ready");
     interfaceLanguage = interfaceLanguageFromLocale(app.getLocale());
     updateInterfaceMenus();
     if (process.platform !== "darwin") {

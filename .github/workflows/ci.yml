@@ -3,83 +3,37 @@ name: CI
   workflow_dispatch: {}
 permissions:
   contents: read
+  actions: read
 jobs:
-  macos-unified-app:
-    name: Unified native macOS app
+  macos-query-collision:
     runs-on: macos-latest
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: apps/control-center/package-lock.json
-      # The tray build runs electron-builder too, so it has the same dependency
-      # on those download hosts staying up.
-      - name: Restore electron-builder downloads
-        id: electron-downloads
-        uses: actions/cache/restore@v6
+      - uses: actions/download-artifact@v8
         with:
-          path: |
-            ~/Library/Caches/electron
-            ~/Library/Caches/electron-builder
-          key: electron-builder-${{ runner.os }}-${{ hashFiles('apps/control-center/package-lock.json') }}
-          restore-keys: electron-builder-${{ runner.os }}-
-      - name: Build native tray with embedded Control Center
-        env:
-          MODEL_ROUTER_TRAY_UNIVERSAL: "1"
-        run: scripts/build-macos-tray-app.sh "$RUNNER_TEMP/Codex Router.app"
-      - name: Save electron-builder downloads
-        if: ${{ !cancelled() && steps.electron-downloads.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ~/Library/Caches/electron
-            ~/Library/Caches/electron-builder
-          key: electron-builder-${{ runner.os }}-${{ hashFiles('apps/control-center/package-lock.json') }}
-      - name: Verify universal binaries, version, and complete bundle seal
-        shell: bash
-        run: |
-          set -euo pipefail
-          app="$RUNNER_TEMP/Codex Router.app"
-          expected_control_version=$(node -p 'require("./apps/control-center/package.json").version')
-          expected_short_version=${expected_control_version%%-*}
-          actual_short_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
-          actual_control_version=$(/usr/libexec/PlistBuddy -c 'Print :ModelRouterControlVersion' "$app/Contents/Info.plist")
-          actual_build_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")
-          test "$actual_short_version" = "$expected_short_version"
-          test "$actual_control_version" = "$expected_control_version"
-          test "$actual_build_version" = "$GITHUB_RUN_NUMBER"
-          lipo "$app/Contents/MacOS/ModelRouterTray" -verify_arch x86_64 arm64
-          widget="$app/Contents/PlugIns/RouterUsageWidget.appex"
-          lipo "$widget/Contents/MacOS/RouterUsageWidget" -verify_arch x86_64 arm64
-          lipo "$app/Contents/Resources/Control Center.app/Contents/MacOS/Codex Router" -verify_arch x86_64 arm64
-          codesign --verify --deep --strict "$app"
-          codesign -d --entitlements :- "$widget" > "$RUNNER_TEMP/widget-entitlements.plist" 2>/dev/null
-          test "$(/usr/libexec/PlistBuddy -c 'Print :ModelRouterWidgetStorageMode' "$app/Contents/Info.plist")" = local
-          test "$(/usr/libexec/PlistBuddy -c 'Print :ModelRouterWidgetStorageMode' "$widget/Contents/Info.plist")" = local
-          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.temporary-exception.files.home-relative-path.read-only:0' "$RUNNER_TEMP/widget-entitlements.plist")" = "/Library/Application Support/Codex Router Widget/"
-          ! /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups' "$RUNNER_TEMP/widget-entitlements.plist" >/dev/null 2>&1
-          host_entitlements=$(codesign -d --entitlements :- "$app" 2>/dev/null || true)
-          ! grep -q 'com.apple.security.application-groups' <<<"$host_entitlements"
-          production_entitlements=apps/macos/RouterUsageWidget/RouterUsageWidget/RouterUsageWidget.entitlements
-          local_entitlements=apps/macos/RouterUsageWidget/RouterUsageWidget/RouterUsageWidget.local.entitlements
-          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$production_entitlements")" = group.io.github.codex-router
-          ! /usr/libexec/PlistBuddy -c 'Print :com.apple.security.temporary-exception.files.home-relative-path.read-only' "$production_entitlements" >/dev/null 2>&1
-          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.temporary-exception.files.home-relative-path.read-only:0' "$local_entitlements")" = "/Library/Application Support/Codex Router Widget/"
-          ! /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups' "$local_entitlements" >/dev/null 2>&1
-      - name: Observe native launch and query interleavings
+          github-token: ${{ github.token }}
+          run-id: 39111346806
+          artifact-ids: 12130847516
+          merge-multiple: true
+          path: ${{ runner.temp }}/original-package
+      - name: Reproduce the collision with the unmodified archived app
         env:
           CODEX_ROUTER_SOURCE_ROOT: ${{ github.workspace }}
           MODEL_ROUTER_SKIP_SERVICE_MANAGER: "1"
-        run: node scripts/diagnose-macos-launch.mjs
-      - name: Retain bounded launch evidence
+        run: |
+          set -euo pipefail
+          ditto -x -k "$RUNNER_TEMP/original-package/model-router-macos.zip" "$RUNNER_TEMP"
+          codesign --verify --deep --strict "$RUNNER_TEMP/Codex Router.app"
+          mkdir -p "$RUNNER_TEMP/collision-evidence"
+          swift scripts/probe-macos-query-collision.swift "$RUNNER_TEMP/Codex Router.app" "$RUNNER_TEMP/collision-evidence"
+      - uses: actions/upload-artifact@v7
         if: always()
-        uses: actions/upload-artifact@v7
         with:
-          name: macos-native-launch-evidence
-          path: ${{ runner.temp }}/macos-native-launch-evidence/
-          retention-days: 14
+          name: unmodified-package-collision
+          path: ${{ runner.temp }}/collision-evidence/
           if-no-files-found: warn
+          retention-days: 14

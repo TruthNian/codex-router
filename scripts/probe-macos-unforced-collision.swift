@@ -24,6 +24,7 @@ func clean() {
 }
 let app = URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("Contents/Resources/Control Center.app")
 let root = URL(fileURLWithPath: CommandLine.arguments[2])
+let mode = CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : "immediate"
 var rows: [[String: Any]] = []
 defer { clean() }
 for trial in 0..<8 {
@@ -41,6 +42,18 @@ for trial in 0..<8 {
   query.standardOutput = FileHandle.nullDevice
   query.standardError = FileHandle.nullDevice
   try query.run()
+  var registration: [String: Any] = [:]
+  if mode == "registered-first" {
+    let registrationDeadline = Date().addingTimeInterval(2)
+    while Date() < registrationDeadline {
+      if let running = NSRunningApplication(processIdentifier: query.processIdentifier),
+         running.bundleIdentifier == "io.github.codex-router.control-center", !running.isTerminated {
+        registration = ["pid": running.processIdentifier, "finishedLaunching": running.isFinishedLaunching]
+        break
+      }
+      usleep(1000)
+    }
+  }
   let configuration = NSWorkspace.OpenConfiguration()
   configuration.activates = true
   configuration.environment = [
@@ -61,10 +74,12 @@ for trial in 0..<8 {
   var row = box.get() ?? ["timeout": true]
   row["trial"] = trial
   row["queryPID"] = query.processIdentifier
+  row["mode"] = mode
+  row["registration"] = registration
   if query.isRunning && Date() >= deadline { query.terminate() }
   query.waitUntilExit()
   row["queryExit"] = query.terminationStatus
   rows.append(row)
   print(String(data: try JSONSerialization.data(withJSONObject: row, options: [.sortedKeys]), encoding: .utf8)!)
 }
-try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("unforced.json"))
+try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("\(mode).json"))

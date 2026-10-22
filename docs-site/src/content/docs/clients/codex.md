@@ -70,7 +70,14 @@ retrieve omitted evidence. Offsets and limits count UTF-16 characters without
 splitting a surrogate pair. `control tool-result-aging read HANDLE` exposes the
 same reader. It never runs the original tool again.
 
-A request must expose a known local shell tool. Otherwise results stay intact,
+A request must expose a known local shell tool **and prove it can read the
+private store**. Until a successful read, the complete original stays in context
+with a small readback footer. A successful reader returns a signed, 30-minute
+proof; Router accepts it only from tool-result history in the same conversation
+and system/developer instruction context. Changing permissions invalidates the
+proof. A workspace sandbox may deny private-store access: Router then keeps
+full output and does not weaken the sandbox or request automatic escalation.
+Otherwise results stay intact,
 as they do on storage, ACL, lock, capacity, or integrity failures. Store limits
 are 512 results / 512 MiB, with an 8 MiB maximum per received result. A bounded
 per-request archival budget may leave additional results intact for that turn.

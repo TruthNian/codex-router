@@ -282,7 +282,7 @@ import {
 import { readHiddenModels } from "./model-picker-state.mjs";
 import { readVisionBridgeSettings } from "./vision-bridge-state.mjs";
 import { installedNativeVisionEngines } from "./vision-engines.mjs";
-import { ageToolResultsWithRecovery } from "./tool-result-recovery.mjs";
+import { ageToolResultsWithRecovery, toolResultRecoveryScope, toolResultReadbackTools } from "./tool-result-recovery.mjs";
 import { MAX_IMAGE_HISTORY_BYTES, readResponsesRequest } from "./responses-request-body.mjs";
 import {
   IMAGE_REJECTION_MAX_RETRIES,
@@ -3234,8 +3234,8 @@ async function summarize(request, payload, route, signal, { allowFailover = true
   // that stops a 413 does not depend on the route.
   const reduce = async (imageLimits) => {
     const reduced = await prepareProviderInput(normalized, route, {
-      recoveryTools: payload.tools,
-      recoveryScope: threadIdFromHeaders(request.headers),
+      recoveryTools: toolResultReadbackTools(payload),
+      recoveryScope: toolResultRecoveryScope(threadIdFromHeaders(request.headers), payload),
       agingEnabled,
       // A tool-less summarizer cannot follow archive receipts. The shared
       // reduction gate therefore keeps its exact text, even with aging on.
@@ -4171,8 +4171,8 @@ async function prepareRoutedRequest({
   imageLimits,
 }) {
   const prepared = await prepareProviderInput(normalizedInput, route, {
-    recoveryTools: payload.tools,
-    recoveryScope: threadIdFromHeaders(request.headers),
+    recoveryTools: toolResultReadbackTools(payload),
+    recoveryScope: toolResultRecoveryScope(threadIdFromHeaders(request.headers), payload),
     agingEnabled,
     imageLimits,
   });
@@ -4981,8 +4981,8 @@ async function handleResponses(request, response, requestUrl) {
         // true content rather than a receipt.
         if (!compactV1 && !compactV2) {
           const aged = await ageToolResultsWithRecovery(native.input, {
-            tools: payload.tools,
-            scope: threadIdFromHeaders(request.headers),
+            tools: toolResultReadbackTools(payload),
+            scope: toolResultRecoveryScope(threadIdFromHeaders(request.headers), payload),
             enabled: nativeToolResultAgingEnabled(),
           });
           native.input = aged.input;

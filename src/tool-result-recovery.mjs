@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync,
   openSync, readFileSync, renameSync, unlinkSync, utimesSync, writeFileSync,
@@ -17,6 +17,8 @@ import { SOURCE_ROOT } from "./paths.mjs";
 
 const MAX_RESULT_BYTES = 8 * 1024 * 1024;
 const HANDLE = /^[A-Za-z0-9_-]{43}$/u;
+const PROOF_TTL_MS = 30 * 60_000;
+const PENDING = "[Router archive readback pending]";
 const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
 function failure(code) {
@@ -52,6 +54,49 @@ function readRegular(file, maxBytes) {
 function identity(key, record) {
   return createHmac("sha256", key)
     .update(JSON.stringify([record.scope, record.callId, record.sha256])).digest("base64url");
+}
+
+function signProof(key, body) {
+  return createHmac("sha256", key).update(`readback:${body}`).digest("base64url");
+}
+
+function readbackProof(key, scope, now) {
+  const body = Buffer.from(JSON.stringify({ scope, expiresAt: now + PROOF_TTL_MS })).toString("base64url");
+  return `${body}.${signProof(key, body)}`;
+}
+
+// A shell declaration does not establish filesystem access: a Codex restricted
+// token may be unable to read owner-private files. Accept only a signed proof
+// returned by a successful reader call in this conversation/permission context.
+export function hasVerifiedToolResultReadback(input, scope, { directory, now = Date.now() } = {}) {
+  try {
+    const key = readRegular(path.join(storeRoot(directory), ".retention-key"), 128).text;
+    for (const item of input) {
+      if (!["function_call_output", "custom_tool_call_output"].includes(item?.type)) continue;
+      const text = typeof item.output === "string" ? item.output
+        : Array.isArray(item.output) ? item.output.map(part => part?.text || "").join("") : "";
+      for (const match of (text || "").matchAll(/"readbackProof"\s*:\s*"([A-Za-z0-9_-]{1,512})\.([A-Za-z0-9_-]{43})"/gu)) {
+        const expected = Buffer.from(signProof(key, match[1]));
+        const signature = Buffer.from(match[2]);
+        if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) continue;
+        const proof = JSON.parse(Buffer.from(match[1], "base64url").toString("utf8"));
+        if (proof.scope === sha256(String(scope)) && Number.isSafeInteger(proof.expiresAt) &&
+            proof.expiresAt > now && proof.expiresAt <= now + PROOF_TTL_MS) return true;
+      }
+    }
+  } catch { /* Missing/inaccessible proof is no permission to omit text. */ }
+  return false;
+}
+
+export function toolResultRecoveryScope(threadId, payload) {
+  const policy = (Array.isArray(payload.input) ? payload.input : [])
+    .filter(item => ["developer", "system"].includes(item?.role));
+  return JSON.stringify([String(threadId || ""), sha256(JSON.stringify([payload.instructions, policy, payload.tool_choice]))]);
+}
+
+export function toolResultReadbackTools(payload) {
+  return payload.tool_choice === undefined || ["auto", "required"].includes(payload.tool_choice)
+    ? payload.tools : [];
 }
 
 // Harden an EMPTY file first: no output bytes ever inhabit an inherited Windows
@@ -157,7 +202,8 @@ export function readRetainedToolResult(handle, {
   if (find !== undefined) {
     if (typeof find !== "string" || !find || find.length > 2000) throw failure("invalid_search");
     const found = record.text.indexOf(find, offset);
-    if (found < 0) return { handle, sha256: record.sha256, found: false };
+    if (found < 0) return { handle, sha256: record.sha256,
+      readbackProof: readbackProof(key, record.scope, now), found: false };
     offset = Math.max(offset, found - 128);
     if (/[\uDC00-\uDFFF]/u.test(record.text[offset] || "")) offset -= 1;
   }
@@ -166,7 +212,8 @@ export function readRetainedToolResult(handle, {
   if (end < record.text.length && /[\uD800-\uDBFF]/u.test(record.text[end - 1])) end -= 1;
   if (end === offset && end < record.text.length) end += 2;
   return {
-    handle, sha256: record.sha256, bytes: Buffer.byteLength(record.text),
+    handle, sha256: record.sha256, readbackProof: readbackProof(key, record.scope, now),
+    bytes: Buffer.byteLength(record.text),
     offset, nextOffset: end, eof: end === record.text.length,
     text: record.text.slice(offset, end),
   };
@@ -223,11 +270,30 @@ export async function ageToolResultsWithRecovery(input, { tools, scope = "", ret
     if (Date.now() - started > 1000 || bytes > MAX_RESULT_BYTES) break;
     try {
       const snapshot = await retain(text, { scope, callId: info.callId });
-      if (snapshot) committed.set(key, recoveryInstruction(snapshot));
+      if (snapshot) committed.set(key, { snapshot, instruction: recoveryInstruction(snapshot), text, info });
     } catch {
       // Includes full disk, denied ACL, unsafe paths, corrupt existing entries
       // and lock contention. Never turn optional savings into a failed turn.
     }
   }
-  return ageToolResults(input, { ...options, retain: (text, info) => committed.get(keyFor(text, info)) });
+  const verified = new Map();
+  for (const { snapshot } of committed.values()) {
+    if (!verified.has(snapshot.directory)) verified.set(snapshot.directory,
+      hasVerifiedToolResultReadback(input, scope, { directory: snapshot.directory }));
+  }
+  const result = ageToolResults(input, { ...options, retain: (text, info) => {
+    const saved = committed.get(keyFor(text, info));
+    return saved && verified.get(saved.snapshot.directory) ? saved.instruction : undefined;
+  } });
+  const pending = new Map();
+  for (const { snapshot, instruction, text, info } of committed.values()) {
+    if (verified.get(snapshot.directory) || text.includes(PENDING)) continue;
+    const footer = `\n\n${PENDING} Full output is preserved until local readback succeeds. ` +
+      `Before relying on omission, run this read-only command once:\n${instruction}`;
+    const item = input[info.index];
+    pending.set(info.index, { ...item, output: typeof item.output === "string"
+      ? item.output + footer : [...item.output, { type: "input_text", text: footer }] });
+  }
+  if (pending.size) result.input = result.input.map((item, index) => pending.get(index) || item);
+  return result;
 }

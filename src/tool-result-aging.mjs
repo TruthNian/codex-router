@@ -280,7 +280,7 @@ export function ageToolResults(
     if ((!canAge && !eligibleShape) || typeof retain !== "function") continue;
     let recovery;
     try {
-      recovery = retain(value, { callId: item.call_id, tool: names.get(item.call_id) });
+      recovery = retain(value, { callId: item.call_id, tool: names.get(item.call_id), index });
     } catch {
       continue;
     }

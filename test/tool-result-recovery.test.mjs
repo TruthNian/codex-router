@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { privateFileIsProtected } from "../src/file-security.mjs";
 import { acquireFileLock } from "../src/file-lock.mjs";
-import { ageToolResultsWithRecovery, readRetainedToolResult, retainToolResult, hasLocalReadbackTool } from "../src/tool-result-recovery.mjs";
+import { ageToolResultsWithRecovery, readRetainedToolResult, retainToolResult, hasLocalReadbackTool, hasVerifiedToolResultReadback, toolResultRecoveryScope, toolResultReadbackTools } from "../src/tool-result-recovery.mjs";
 import { expireRetainedToolResults } from "../src/tool-result-retention.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -62,9 +62,15 @@ test("a real committed snapshot survives restart and reads exact Unicode/CRLF by
 test("aging and dense shaping publish only durable readback receipts, never rerun instructions", async t => {
   const options = await fixture(t);
   const input = history();
-  const result = await ageToolResultsWithRecovery(input, {
-    tools, frontier: 0, retain: (text, info) => retainToolResult(text, { ...options, ...info }),
-  });
+  const retain = (text, info) => retainToolResult(text, { ...options, ...info });
+  const before = await ageToolResultsWithRecovery(input, {tools, frontier: 0, retain});
+  assert.ok(before.input[1].output.startsWith(full), "an unproven client retains every original byte");
+  assert.match(before.input[1].output, /readback pending/u);
+  assert.equal(before.stats.toolResultsAged, 0);
+  const [savedFile] = readdirSync(options.directory).filter(n => n.endsWith(".result"));
+  const proof = readRetainedToolResult(savedFile.slice(0, -7), options);
+  input.push({type: "function_call_output", call_id: "reader", output: JSON.stringify(proof)});
+  const result = await ageToolResultsWithRecovery(input, {tools, frontier: 0, retain});
   assert.equal(result.stats.toolResultsAged, 1);
   assert.equal(input[1].output, full, "pristine input is not mutated");
   assert.equal(result.input[0], input[0]);
@@ -74,7 +80,9 @@ test("aging and dense shaping publish only durable readback receipts, never reru
   assert.doesNotMatch(receipt, /Repeat the preceding|mutating-original-command/u);
   const [name] = readdirSync(options.directory).filter(n => n.endsWith(".result"));
   assert.equal(readRetainedToolResult(name.slice(0, -7), options).text, full.slice(0, 2000));
-  const shaped = await ageToolResultsWithRecovery(history("repeated long line\n".repeat(1200)), {
+  const shapeInput = history("repeated long line\n".repeat(1200));
+  shapeInput.push({type: "function_call_output", call_id: "reader", output: JSON.stringify(proof)});
+  const shaped = await ageToolResultsWithRecovery(shapeInput, {
     tools, denseShaping: true, retain: (text, info) => retainToolResult(text, { ...options, ...info }),
   });
   assert.equal(shaped.stats.toolResultsShaped, 1);
@@ -89,6 +97,9 @@ test("without a local execution tool no output is rewritten or written to disk",
     assert.equal(result.input, input);
   }
   assert.equal(hasLocalReadbackTool(tools), true);
+  assert.equal(toolResultReadbackTools({tools}), tools);
+  assert.deepEqual(toolResultReadbackTools({tools, tool_choice: "none"}), []);
+  assert.deepEqual(toolResultReadbackTools({tools, tool_choice: {type: "function", name: "other"}}), []);
   assert.equal(hasLocalReadbackTool([{type: "function", name: "functions__exec_command"}]), true);
   assert.equal(hasLocalReadbackTool([{type: "function", name: "exec", description: "await tools.exec_command(...)"}]), true);
   assert.equal(hasLocalReadbackTool([{type: "function", name: "exec", description: "Remote database query"}]), false);
@@ -185,4 +196,21 @@ test("unpublished content is never present while the private-file helper is pend
   } });
   assert.equal(inspected, true);
   assert.equal(existsSync(`${options.directory}.lock`), false);
+});
+
+
+test("readback attestations reject forged, expired and cross-context proofs", async t => {
+  const options = await fixture(t);
+  const saved = await retainToolResult(full, options);
+  const page = readRetainedToolResult(saved.handle, options);
+  const input = [{type: "function_call_output", output: JSON.stringify(page)}];
+  assert.equal(hasVerifiedToolResultReadback(input, options.scope, options), true);
+  assert.equal(hasVerifiedToolResultReadback(input, "another thread", options), false);
+  assert.equal(hasVerifiedToolResultReadback(input, options.scope, {...options, now: Date.now() + 31*60000}), false);
+  page.readbackProof = page.readbackProof.slice(0, -2) + "AA";
+  assert.equal(hasVerifiedToolResultReadback([{type: "function_call_output", output: JSON.stringify(page)}], options.scope, options), false);
+  const payload = {instructions: "rules", input: [{role: "developer", content: "workspace-write"}]};
+  const a = toolResultRecoveryScope("thread", payload);
+  assert.notEqual(a, toolResultRecoveryScope("thread", {...payload, input: [{role: "developer", content: "danger-full-access"}]}));
+  assert.equal(a, toolResultRecoveryScope("thread", {...payload, input: [...payload.input, {role: "user", content: "next turn"}]}));
 });

@@ -3,9 +3,13 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
-  ageToolResults,
+  ageToolResults as applyAging,
   shapeToolResult,
 } from "../src/tool-result-aging.mjs";
+
+function ageToolResults(input, options) {
+  return applyAging(input, { retain: () => "Read the exact archived result using the local shell.", ...options });
+}
 
 function call(id, name = "exec_command") {
   return { type: "function_call", call_id: id, name, arguments: "{}" };
@@ -32,7 +36,7 @@ test("ages a large consumed result while preserving its call pairing and recover
   assert.equal(result.stats.toolResultsAged, 1);
   assert.ok(result.stats.toolResultBytesSaved > 40_000);
   assert.equal(result.input[1].call_id, "old");
-  assert.match(result.input[1].output, /Repeat the preceding exec_command call/);
+  assert.match(result.input[1].output, /Read the exact archived result/);
   assert.match(result.input[1].output, /HEAD/);
   assert.match(result.input[1].output, /TAIL/);
   assert.match(
@@ -135,7 +139,7 @@ test("dense compaction shapes a noisy newest result with a recoverable RTK recei
   assert.match(compacted.input[1].output, /RTK-style compaction/u);
   assert.match(compacted.input[1].output, /same line repeated 999 more times/u);
   assert.match(compacted.input[1].output, /ERROR final link failed/u);
-  assert.match(compacted.input[1].output, /Repeat the preceding exec_command call/u);
+  assert.match(compacted.input[1].output, /Read the exact archived result/u);
   assert.match(
     compacted.input[1].output,
     new RegExp(createHash("sha256").update(value).digest("hex")),
@@ -189,7 +193,9 @@ test("does not split surrogate pairs at either preview boundary", () => {
   ];
   const result = ageToolResults(input, { frontier: 0 });
   assert.doesNotMatch(result.input[1].output, /�/);
-  assert.equal((result.input[1].output.match(/😀/gu) || []).length, 2);
+  assert.equal(result.stats.toolResultsAged, 1);
+  assert.equal((result.input[1].output.match(/😀/gu) || []).length, 0,
+    "a pair straddling a preview boundary is omitted whole");
 });
 
 // The failure this instrumentation exists for: a session that spends its whole
@@ -255,4 +261,10 @@ test("a pass that ages a result leaves the reasoning and assistant turns around 
     result.input.filter((item) => item.type === "reasoning"),
     [reasoning],
   );
+});
+
+test("missing or failed retention never drops original output", () => {
+  const input = [call("a"), output("a", "x".repeat(40000)), { type: "reasoning" }];
+  assert.equal(applyAging(input, {frontier: 0}).input, input);
+  assert.equal(applyAging(input, {frontier: 0, retain() { throw new Error("disk full"); }}).input, input);
 });

@@ -1,0 +1,233 @@
+import { createHash, createHmac, randomBytes } from "node:crypto";
+import {
+  closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync,
+  openSync, readFileSync, renameSync, unlinkSync, utimesSync, writeFileSync,
+} from "node:fs";
+import path from "node:path";
+
+import { writePrivateFileAsync } from "./file-security.mjs";
+import { acquireFileLock, runWithLockRelease } from "./file-lock.mjs";
+import { ageToolResults } from "./tool-result-aging.mjs";
+import {
+  TOOL_RESULT_RETENTION_DIR, RETENTION_MAX_FILES, RETENTION_MAX_TOTAL_BYTES,
+  expireRetainedToolResults, retainedToolResultsUsage,
+} from "./tool-result-retention.mjs";
+import { retentionTtlMs } from "./tool-result-aging-state.mjs";
+import { SOURCE_ROOT } from "./paths.mjs";
+
+const MAX_RESULT_BYTES = 8 * 1024 * 1024;
+const HANDLE = /^[A-Za-z0-9_-]{43}$/u;
+const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+
+function failure(code) {
+  const error = new Error(`Retained tool result ${code}. Do not rerun the original tool to reconstruct it.`);
+  error.code = code;
+  return error;
+}
+
+function storeRoot(directory, create = false) {
+  const root = path.resolve(directory);
+  if (create) mkdirSync(root, { recursive: true, mode: 0o700 });
+  const stat = lstatSync(root);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw failure("unsafe_store");
+  return root;
+}
+
+function readRegular(file, maxBytes) {
+  const before = lstatSync(file);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > maxBytes) {
+    throw failure("unsafe_file");
+  }
+  const fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size > maxBytes ||
+        stat.ino !== before.ino || stat.dev !== before.dev) throw failure("unsafe_file");
+    return { text: readFileSync(fd, "utf8"), stat };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function identity(key, record) {
+  return createHmac("sha256", key)
+    .update(JSON.stringify([record.scope, record.callId, record.sha256])).digest("base64url");
+}
+
+// Harden an EMPTY file first: no output bytes ever inhabit an inherited Windows
+// ACL while the asynchronous ACL helper is starting. Publish only after fsync.
+async function commit(file, text, writeEmpty = writePrivateFileAsync) {
+  const stage = path.join(path.dirname(file), `.${path.basename(file)}.stage.${randomBytes(16).toString("hex")}`);
+  let fd;
+  try {
+    await writeEmpty(stage, "", { directoryMode: 0o700 });
+    fd = openSync(stage, constants.O_WRONLY | (constants.O_NOFOLLOW || 0));
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size !== 0) throw failure("unsafe_file");
+    writeFileSync(fd, text, "utf8");
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    renameSync(stage, file);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    try { unlinkSync(stage); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+}
+
+/** Immutable snapshots of the exact text received by Router, not a command's
+ * possibly larger, already truncated stdout. Handles are install-keyed and
+ * scoped to a conversation/call, never bare content hashes or arbitrary paths.
+ */
+export async function retainToolResult(text, {
+  directory = TOOL_RESULT_RETENTION_DIR, scope = "", callId = "",
+  ttlMs = retentionTtlMs(), now = Date.now(), maxFiles = RETENTION_MAX_FILES,
+  maxBytes = RETENTION_MAX_TOTAL_BYTES, writeEmpty,
+} = {}) {
+  if (typeof text !== "string" || Buffer.byteLength(text) > MAX_RESULT_BYTES ||
+      Buffer.from(text, "utf8").toString("utf8") !== text) return undefined;
+  const root = storeRoot(directory, true);
+  // No waiting on request traffic: contention leaves the original in context.
+  // The heartbeat covers ACL helpers; leases are shared across CLI/processes.
+  let compromised = false;
+  const release = await acquireFileLock(root, {
+    realpath: false, lockfilePath: `${root}.lock`, retries: 0, stale: 120_000,
+    onCompromised() { compromised = true; },
+  });
+  return runWithLockRelease(async () => {
+    const write = async (...args) => {
+      if (compromised) throw failure("store_locked");
+      await (writeEmpty || writePrivateFileAsync)(...args);
+      if (compromised) throw failure("store_locked");
+    };
+    const keyPath = path.join(root, ".retention-key");
+    let key;
+    try { key = readRegular(keyPath, 128).text; }
+    catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      key = randomBytes(32).toString("hex");
+      await commit(keyPath, key, write);
+    }
+    if (!/^[0-9a-f]{64}$/u.test(key)) throw failure("invalid_key");
+    const record = { version: 1, scope: sha256(String(scope)), callId: String(callId), sha256: sha256(text), text };
+    const handle = identity(key, record);
+    const file = path.join(root, `${handle}.result`);
+    try {
+      const existing = readRegular(file, MAX_RESULT_BYTES * 6 + 4096);
+      const saved = JSON.parse(existing.text);
+      if (saved.version !== 1 || saved.text !== text || identity(key, saved) !== handle) throw failure("corrupt");
+      // Exact content is immutable. Only its lease is renewed on history replay.
+      utimesSync(file, new Date(now), new Date(now));
+      return { handle, sha256: record.sha256, directory: root };
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    expireRetainedToolResults({ directory: root, ttlMs, now });
+    const usage = retainedToolResultsUsage({ directory: root });
+    const serialized = JSON.stringify(record);
+    if (usage.results >= maxFiles || usage.bytes + Buffer.byteLength(serialized) > maxBytes) return undefined;
+    await commit(file, serialized, write);
+    utimesSync(file, new Date(now), new Date(now));
+    return { handle, sha256: record.sha256, directory: root };
+  }, release);
+}
+
+export function readRetainedToolResult(handle, {
+  directory = TOOL_RESULT_RETENTION_DIR, ttlMs = retentionTtlMs(), now = Date.now(),
+  offset = 0, limit = 2000, find,
+} = {}) {
+  if (!HANDLE.test(handle)) throw failure("invalid_handle");
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 16_000) {
+    throw failure("invalid_range");
+  }
+  let root, saved, key;
+  try {
+    root = storeRoot(directory);
+    saved = readRegular(path.join(root, `${handle}.result`), MAX_RESULT_BYTES * 6 + 4096);
+    key = readRegular(path.join(root, ".retention-key"), 128).text;
+  } catch (error) {
+    if (error.code === "ENOENT") throw failure("missing_or_expired");
+    throw error;
+  }
+  if (ttlMs > 0 && now - saved.stat.mtimeMs > ttlMs) throw failure("expired");
+  let record;
+  try { record = JSON.parse(saved.text); } catch { throw failure("corrupt"); }
+  if (record.version !== 1 || typeof record.text !== "string" ||
+      sha256(record.text) !== record.sha256 || identity(key, record) !== handle) throw failure("corrupt");
+  if (find !== undefined) {
+    if (typeof find !== "string" || !find || find.length > 2000) throw failure("invalid_search");
+    const found = record.text.indexOf(find, offset);
+    if (found < 0) return { handle, sha256: record.sha256, found: false };
+    offset = Math.max(offset, found - 128);
+    if (/[\uDC00-\uDFFF]/u.test(record.text[offset] || "")) offset -= 1;
+  }
+  if (offset > record.text.length || /[\uDC00-\uDFFF]/u.test(record.text[offset] || "")) throw failure("invalid_range");
+  let end = Math.min(record.text.length, offset + limit);
+  if (end < record.text.length && /[\uD800-\uDBFF]/u.test(record.text[end - 1])) end -= 1;
+  if (end === offset && end < record.text.length) end += 2;
+  return {
+    handle, sha256: record.sha256, bytes: Buffer.byteLength(record.text),
+    offset, nextOffset: end, eof: end === record.text.length,
+    text: record.text.slice(offset, end),
+  };
+}
+
+// Explicit purge/expiry must not remove the install key between snapshot key
+// creation and publication. Read-only previews need no lease and create no store.
+export async function withRetainedToolResultsLock(operation, { directory = TOOL_RESULT_RETENTION_DIR } = {}) {
+  let root;
+  try { root = storeRoot(directory); }
+  catch (error) { if (error.code === "ENOENT") return operation(); throw error; }
+  const release = await acquireFileLock(root, {
+    realpath: false, lockfilePath: `${root}.lock`, retries: 0, stale: 120_000,
+  });
+  return runWithLockRelease(operation, release);
+}
+
+// Use only known local Codex execution tools. Remote-client and tool-less
+// requests keep full results; a filesystem path alone is not usable recovery.
+export function hasLocalReadbackTool(tools) {
+  return Array.isArray(tools) && tools.some((tool) => {
+    if (tool?.type === "namespace") return hasLocalReadbackTool(tool.tools);
+    const name = tool?.name || tool?.function?.name;
+    if (/^(?:(?:functions|tools)(?:\.|__|_))?exec$/u.test(name || "") &&
+        /tools\.exec_command/u.test(tool.description || tool?.function?.description || "")) return true;
+    return /^(?:(?:functions|tools)(?:\.|__|_))?(?:exec_command|shell_command|shell)$/u.test(name || "");
+  });
+}
+
+function quote(value) { return `'${String(value).replaceAll("'", process.platform === "win32" ? "''" : "'\\''")}'`; }
+
+export function recoveryInstruction(snapshot) {
+  const command = `${process.platform === "win32" ? "& " : ""}${quote(process.execPath)} ${quote(path.join(SOURCE_ROOT, "src", "tool-result-read.mjs"))} ${quote(snapshot.handle)} --store ${quote(snapshot.directory)}`;
+  return `Exact archived result: sha256:${snapshot.sha256}. Read using the local ${process.platform === "win32" ? "PowerShell" : "POSIX shell"}: ${command}\n` +
+    "Returns JSON with text, nextOffset and eof; use --offset N --limit N (UTF-16 characters) or --find 'literal text' for omitted content. " +
+    "An expired, missing or corrupt archive is unavailable evidence; do not repeat the original tool to reconstruct it.";
+}
+
+export async function ageToolResultsWithRecovery(input, { tools, scope = "", retain = retainToolResult, ...options } = {}) {
+  if (!hasLocalReadbackTool(tools)) return ageToolResults(input, options);
+  // Plan in memory, commit snapshots, then apply only successful receipts. The
+  // synchronous policy stays pure and cannot leak uncommitted handles upstream.
+  const candidates = new Map();
+  const keyFor = (text, info) => JSON.stringify([info.callId, sha256(text)]);
+  ageToolResults(input, { ...options, retain(text, info) {
+    candidates.set(keyFor(text, info), { text, info });
+    return "Read the exact archived result.";
+  } });
+  const committed = new Map();
+  const started = Date.now();
+  let bytes = 0;
+  for (const [key, { text, info }] of candidates) {
+    bytes += Buffer.byteLength(text);
+    if (Date.now() - started > 1000 || bytes > MAX_RESULT_BYTES) break;
+    try {
+      const snapshot = await retain(text, { scope, callId: info.callId });
+      if (snapshot) committed.set(key, recoveryInstruction(snapshot));
+    } catch {
+      // Includes full disk, denied ACL, unsafe paths, corrupt existing entries
+      // and lock contention. Never turn optional savings into a failed turn.
+    }
+  }
+  return ageToolResults(input, { ...options, retain: (text, info) => committed.get(keyFor(text, info)) });
+}

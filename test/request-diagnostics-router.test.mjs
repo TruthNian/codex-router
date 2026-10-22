@@ -434,3 +434,59 @@ for (const mode of ["structured", "header", "endpoint"]) test(`actual routed usa
     rmSync(router.stateDir, { recursive: true, force: true });
   }
 });
+
+
+test("routed aging commits exact snapshots, and storage failure passes full results upstream", async () => {
+  const { writeFileSync, readdirSync } = await import("node:fs");
+  const { spawnSync } = await import("node:child_process");
+  const seen = [];
+  const gateway = await mockServer(async (request, response) => {
+    if (request.method === "GET") { json(response, 200, {ok: true}); return; }
+    seen.push(await bodyJson(request));
+    json(response, 200, { id: "resp_archive", output: [{type: "message", role: "assistant",
+      content: [{type: "output_text", text: "ok"}]}], usage: {input_tokens: 1, output_tokens: 1} });
+  });
+  const stateDir = mkdtempSync(path.join(os.tmpdir(), "recovery-router-"));
+  const routerPort = await openPort();
+  const router = run({
+    CODEX_ROUTER_PORT: String(routerPort),
+    CODEX_ROUTER_GATEWAY_BASE_URL: `http://127.0.0.1:${gateway.port}/v1`,
+    MODEL_ROUTER_STATE_DIR: stateDir,
+  });
+  const value = `HEAD${"line\n".repeat(9000)}unique-middle-evidence\nTAIL`;
+  const pair = (id, text) => [
+    {type: "function_call", name: "exec_command", call_id: id, arguments: "{}"},
+    {type: "function_call_output", call_id: id, output: text},
+  ];
+  const input = [...pair("old", value), {type: "message", role: "assistant", content: "used"},
+    ...Array.from({length: 4}, (_, i) => pair(`recent-${i}`, "small")).flat()];
+  const tools = [{type: "function", name: "exec_command", parameters: {type: "object", properties: {}}}];
+  async function send() {
+    const result = await fetch(`${routerBase(routerPort)}/responses`, {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...GROK_PAYLOAD, tools, input}), signal: AbortSignal.timeout(20000)});
+    assert.equal(result.status, 200, await result.text());
+  }
+  try {
+    await waitFor(`${routerBase(routerPort)}/models`, router);
+    writeFileSync(path.join(stateDir, "tool-result-aging.json"), JSON.stringify({version: 1, enabled: true}));
+    await send();
+    assert.match(seen.at(-1).input.find(i => i.call_id === "old" && i.output).output, /tool-result-read.mjs/u);
+    const store = path.join(stateDir, "retained-tool-results");
+    const [file] = readdirSync(store).filter(n => n.endsWith(".result"));
+    const read = spawnSync(process.execPath, [path.join(root, "src/tool-result-read.mjs"), file.slice(0, -7),
+      "--store", store, "--find", "unique-middle-evidence"], {encoding: "utf8", timeout: 20000});
+    assert.equal(read.status, 0, read.stderr);
+    assert.match(JSON.parse(read.stdout).text, /unique-middle-evidence/u);
+    // An actual filesystem failure, not a mocked successful write.
+    rmSync(store, {recursive: true, force: true});
+    writeFileSync(store, "not a directory");
+    await send();
+    assert.equal(seen.at(-1).input.find(i => i.call_id === "old" && i.output).output, value);
+    assert.equal(seen.length, 2, "no extra generation or original-tool execution");
+  } finally {
+    await stopChild(router);
+    await closeServer(gateway.server);
+    rmSync(stateDir, {recursive: true, force: true});
+  }
+});

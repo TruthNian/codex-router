@@ -32,7 +32,7 @@ the public health endpoint omits that resource detail.
 For routed external models, old textual tool results larger than 32 KiB are
 compacted after the model has acted on them. The four newest tool results stay
 intact, and each compacted result keeps a hash, head/tail evidence, and an exact
-rerun instruction.
+read-only snapshot command.
 
 This is **off by default.** It rewrites what the model sees mid-conversation,
 so it is opted into rather than discovered after it has already altered a
@@ -49,14 +49,10 @@ Harness, and Gemini CLI decide when the whole conversation needs compaction.
 Ordinary routed turns only compact consumed old results, so the newest four
 results remain byte-for-byte exact regardless of context size.
 
-When a client actually requests routed context compaction, the same switch also
-applies a small deterministic output shaper inspired by
-[RTK](https://github.com/rtk-ai/rtk). Terminal progress rewrites, exact repeated
-lines, blank runs, and deep boilerplate are collapsed while error-bearing lines
-stay visible. Every shaped result carries its original byte count, SHA-256
-digest, and an exact rerun instruction. This makes noisy GitHub, build, test,
-and terminal output cheaper for the compaction model without changing the
-newest result during an ordinary turn. No second toggle or restart is required.
+The whole-history compaction summarizer has no execution tools. It therefore
+receives exact tool results rather than receipts it could not read back. The
+RTK-style shaper can rewrite text only when a caller supplies a committed,
+usable readback path; it is not applied to tool-less summarization.
 
 Native OpenAI traffic is unchanged by default. `./bin/control
 tool-result-aging native on` extends the same compaction to native GPT models;
@@ -65,10 +61,22 @@ to OpenAI's own endpoint, and an install that has never run it keeps the
 pre-existing behavior. Set `CODEX_ROUTER_TOOL_RESULT_AGING=0` for a hard
 environment-level override that disables both the routed and the native path.
 
-Where compaction parks the exact original bytes of a result it rewrote, they go
+Before any old result is omitted or shaped, its exact received text is saved
 to an owner-private store at `<state dir>/retained-tool-results` (override with
-`MODEL_ROUTER_TOOL_RESULT_RETENTION_DIR`). Nothing evicts that store, so both a
-way to see it and a way to empty it are part of the feature:
+`MODEL_ROUTER_TOOL_RESULT_RETENTION_DIR`). A receipt includes a platform-specific
+local command with an opaque handle. It returns bounded JSON pages (`text`,
+`nextOffset`, `eof`); add `--offset N --limit N` or `--find 'literal text'` to
+retrieve omitted evidence. Offsets and limits count UTF-16 characters without
+splitting a surrogate pair. `control tool-result-aging read HANDLE` exposes the
+same reader. It never runs the original tool again.
+
+A request must expose a known local shell tool. Otherwise results stay intact,
+as they do on storage, ACL, lock, capacity, or integrity failures. Store limits
+are 512 results / 512 MiB, with an 8 MiB maximum per received result. A bounded
+per-request archival budget may leave additional results intact for that turn.
+Originals already truncated by a tool before reaching Router cannot be restored.
+Only the local account may read the files; snapshots are excluded from support
+bundles and are not served over HTTP. These commands inspect and manage them:
 
 ```sh
 ./bin/doctor                                     # count, size, oldest entry, TTL
@@ -89,20 +97,13 @@ files this store wrote, only inside that one directory, never recursing and
 never following a symlink out of it; anything else that ends up there is left in
 place and named.
 
-**Retained results expire after 7 days.** Nothing ever reads those bytes back
-into a turn — the receipt tells the model to repeat the tool call — so a
-retained original's only reader is you, and only while the session that produced
-it still matters. A week is also what keeps the store's caps from becoming
-permanent: at 512 files or 512 MiB retention stops accepting new results, and
-with a TTL that state drains by itself instead of waiting for somebody to notice
-it. Nothing sweeps on a timer: the store expires when it is next written to, and
-`purge --expired` runs the same sweep by hand, with the same `--yes` consent and
-the same containment as a full purge. The key that binds the store to this
-install is never expired, only purged. `ttl off` keeps everything until an
-explicit purge and is remembered verbatim, and the
-`CODEX_ROUTER_TOOL_RESULT_AGING=0` kill switch does not disable expiry — it
-stops the router rewriting context, while expiry is disk hygiene for bytes that
-are already written.
+**Retained results expire after seven days of inactivity by default.** Replaying
+an original renews its lease; normal readback does not. Expired or purged handles
+return an explicit error, as do corrupt files. Such content is unavailable
+evidence, not permission to rerun an old command. Nothing sweeps on a timer:
+expiry runs on new writes or explicit `purge --expired`. The install key is
+never expired. Use `ttl off` for long-lived evidence that must remain until
+explicit purge. The aging kill switch disables rewriting, not explicit expiry.
 
 To estimate the effect without spending provider quota, run:
 

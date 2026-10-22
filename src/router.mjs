@@ -282,7 +282,7 @@ import {
 import { readHiddenModels } from "./model-picker-state.mjs";
 import { readVisionBridgeSettings } from "./vision-bridge-state.mjs";
 import { installedNativeVisionEngines } from "./vision-engines.mjs";
-import { ageToolResults } from "./tool-result-aging.mjs";
+import { ageToolResultsWithRecovery } from "./tool-result-recovery.mjs";
 import { MAX_IMAGE_HISTORY_BYTES, readResponsesRequest } from "./responses-request-body.mjs";
 import {
   IMAGE_REJECTION_MAX_RETRIES,
@@ -3232,13 +3232,13 @@ async function summarize(request, payload, route, signal, { allowFailover = true
   // the same function as a routed turn. The per-image token charge is the
   // conversation's route; a failover hop reuses this input, and the byte budget
   // that stops a 413 does not depend on the route.
-  const reduce = (imageLimits) => {
-    const reduced = prepareProviderInput(normalized, route, {
+  const reduce = async (imageLimits) => {
+    const reduced = await prepareProviderInput(normalized, route, {
+      recoveryTools: payload.tools,
+      recoveryScope: threadIdFromHeaders(request.headers),
       agingEnabled,
-      // The client has already decided this conversation needs compaction.
-      // Dense RTK-style shaping gives its summarizer more distinct evidence
-      // without changing ordinary turns, and every shaped result keeps the
-      // exact rerun path.
+      // A tool-less summarizer cannot follow archive receipts. The shared
+      // reduction gate therefore keeps its exact text, even with aging on.
       denseShaping: agingEnabled,
       imageLimits,
     });
@@ -3249,7 +3249,7 @@ async function summarize(request, payload, route, signal, { allowFailover = true
       stats: { ...reduced.toolResultAging, ...reduced.imageBudget },
     };
   };
-  let aged = reduce();
+  let aged = await reduce();
   let imageRetries = 0;
 
   // The models this compaction may be moved to, in order, starting with the one
@@ -3385,7 +3385,7 @@ async function summarize(request, payload, route, signal, { allowFailover = true
       : undefined;
     if (imageLimits && !signal?.aborted) {
       imageRetries += 1;
-      aged = reduce(imageLimits);
+      aged = await reduce(imageLimits);
       logImageRejectionRetry(attemptRoute, "compaction", imageRetries, aged.stats);
       index -= 1;
       continue;
@@ -4170,7 +4170,9 @@ async function prepareRoutedRequest({
   agingEnabled,
   imageLimits,
 }) {
-  const prepared = prepareProviderInput(normalizedInput, route, {
+  const prepared = await prepareProviderInput(normalizedInput, route, {
+    recoveryTools: payload.tools,
+    recoveryScope: threadIdFromHeaders(request.headers),
     agingEnabled,
     imageLimits,
   });
@@ -4201,12 +4203,14 @@ async function prepareRoutedRequest({
 // tokens a screenshot is trimmed sooner than a native route that pays 1024.
 // `imageLimits` tightens the budget for a resend after a provider refused the
 // image content anyway.
-function prepareProviderInput(
+async function prepareProviderInput(
   normalizedInput,
   route,
-  { agingEnabled, denseShaping = false, imageLimits } = {},
+  { agingEnabled, denseShaping = false, imageLimits, recoveryTools, recoveryScope } = {},
 ) {
-  const aged = ageToolResults(normalizedInput, {
+  const aged = await ageToolResultsWithRecovery(normalizedInput, {
+    tools: recoveryTools,
+    scope: recoveryScope,
     enabled: agingEnabled,
     denseShaping,
   });
@@ -4976,7 +4980,9 @@ async function handleResponses(request, response, requestUrl) {
         // exempt: compactV1 keeps its chaining, and a summary should read the
         // true content rather than a receipt.
         if (!compactV1 && !compactV2) {
-          const aged = ageToolResults(native.input, {
+          const aged = await ageToolResultsWithRecovery(native.input, {
+            tools: payload.tools,
+            scope: threadIdFromHeaders(request.headers),
             enabled: nativeToolResultAgingEnabled(),
           });
           native.input = aged.input;

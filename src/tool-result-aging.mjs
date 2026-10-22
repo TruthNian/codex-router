@@ -148,7 +148,7 @@ function collapseDeeplyIndentedBlocks(lines) {
 
 // A deliberately small, deterministic RTK-style shaper. It removes terminal
 // progress rewrites, exact repetition, blank-line runs, and deep boilerplate,
-// while preserving error-bearing lines. The caller keeps a digest and rerun
+// while preserving error-bearing lines. The caller keeps a digest and readback
 // instruction because this is a lossy compaction optimization.
 export function shapeToolResult(value) {
   if (typeof value !== "string" || !value) return value;
@@ -158,13 +158,7 @@ export function shapeToolResult(value) {
   return shaped.length < value.length ? shaped : value;
 }
 
-function recoveryInstruction(toolName) {
-  return toolName
-    ? `Repeat the preceding ${toolName} call with the same arguments`
-    : "Repeat the preceding tool call with the same arguments";
-}
-
-function shapedResult(value, toolName) {
+function shapedResult(value, recovery) {
   if (
     value.startsWith(DENSE_SHAPING_RECEIPT_PREFIX) ||
     value.startsWith(LEGACY_TOKEN_MAXXING_RECEIPT_PREFIX)
@@ -178,8 +172,7 @@ function shapedResult(value, toolName) {
   const digest = createHash("sha256").update(value, "utf8").digest("hex");
   const receipt = [
     `${DENSE_SHAPING_RECEIPT_PREFIX} ${before} -> ${shapedBytes} bytes, sha256:${digest}.`,
-    `${recoveryInstruction(toolName)} if exact or omitted content is needed. ` +
-      "The original result remains in Codex; only this routed copy was shaped.]",
+    `${recovery} Only this routed copy was shaped.]`,
     "",
     shaped,
   ].join("\n");
@@ -187,12 +180,12 @@ function shapedResult(value, toolName) {
   return before - after >= DENSE_SHAPING_MIN_SAVED_BYTES ? receipt : undefined;
 }
 
-function resultReceipt(value, toolName) {
+function resultReceipt(value, recovery) {
   const bytes = Buffer.byteLength(value, "utf8");
   const digest = createHash("sha256").update(value, "utf8").digest("hex");
   return [
     `[Older tool result compacted by Codex Router after the model acted on it: ${bytes} bytes, sha256:${digest}.`,
-    `${recoveryInstruction(toolName)} if exact or omitted content is needed. The original result remains in Codex; only this routed copy was compacted.]`,
+    `${recovery} Only this routed copy was compacted.]`,
     "",
     "--- beginning of original result ---",
     safeHead(value),
@@ -223,6 +216,7 @@ export function ageToolResults(
     minBytes = TOOL_RESULT_AGING_MIN_BYTES,
     frontier = TOOL_RESULT_AGING_FRONTIER,
     denseShaping = false,
+    retain,
   } = {},
 ) {
   const empty = {
@@ -246,7 +240,7 @@ export function ageToolResults(
   for (let index = 0; index < input.length; index += 1) {
     if (OUTPUT_TYPES.has(input[index]?.type)) outputIndexes.push(index);
   }
-  const protectedIndexes = new Set(outputIndexes.slice(-Math.max(0, frontier)));
+  const protectedIndexes = new Set(frontier > 0 ? outputIndexes.slice(-frontier) : []);
   const names = callNames(input);
   let changed = false;
   let toolResultsAged = 0;
@@ -268,18 +262,35 @@ export function ageToolResults(
     if (protectedResult && !denseShaping) continue;
     const value = textualOutput(item);
     if (value === undefined) continue;
+    if (value.startsWith("[Older tool result compacted by Codex Router") ||
+        value.startsWith(DENSE_SHAPING_RECEIPT_PREFIX) ||
+        value.startsWith(LEGACY_TOKEN_MAXXING_RECEIPT_PREFIX)) continue;
     const size = Buffer.byteLength(value, "utf8");
     if (!protectedResult) {
       toolResultsEvaluated += 1;
       if (size > toolResultBytesLargest) toolResultBytesLargest = size;
     }
     const canAge = !protectedResult && size > minBytes && actedAfter[index];
+    // A digest and a rerun suggestion are not recovery. Without an actually
+    // committed snapshot and a usable readback path, leave the result intact.
+    const eligibleShape = denseShaping && size > DENSE_SHAPING_MIN_BYTES &&
+      !value.startsWith(DENSE_SHAPING_RECEIPT_PREFIX) &&
+      !value.startsWith(LEGACY_TOKEN_MAXXING_RECEIPT_PREFIX) &&
+      shapeToolResult(value) !== value;
+    if ((!canAge && !eligibleShape) || typeof retain !== "function") continue;
+    let recovery;
+    try {
+      recovery = retain(value, { callId: item.call_id, tool: names.get(item.call_id) });
+    } catch {
+      continue;
+    }
+    if (typeof recovery !== "string" || !recovery) continue;
     let receipt;
     let shaped = false;
     if (canAge) {
-      receipt = resultReceipt(value, names.get(item.call_id));
+      receipt = resultReceipt(value, recovery);
     } else if (denseShaping && size > DENSE_SHAPING_MIN_BYTES) {
-      receipt = shapedResult(value, names.get(item.call_id));
+      receipt = shapedResult(value, recovery);
       shaped = receipt !== undefined;
     }
     if (!receipt) continue;

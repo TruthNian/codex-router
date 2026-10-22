@@ -1944,7 +1944,7 @@ async function handleSubagents(action, value, flag, rest = []) {
 }
 
 const TOOL_RESULT_AGING_USAGE =
-  "Usage: control tool-result-aging status|on|off|native <on|off>|ttl <days|off|default>|" +
+  "Usage: control tool-result-aging status|on|off|native <on|off>|ttl <days|off|default>|read <handle> [--offset N] [--limit N] [--find TEXT]|" +
   "purge [--yes] [--dry-run] [--expired]";
 
 // Emptying the store deletes the only copy of bytes the model already saw, so
@@ -1976,9 +1976,11 @@ async function handleToolResultAgingPurge(flags) {
         "Set one with ./bin/control tool-result-aging ttl <days>, or purge without --expired.",
     );
   }
-  const result = expiredOnly
+  const operation = () => expiredOnly
     ? expireRetainedToolResults({ dryRun: previewOnly, ttlMs })
     : purgeRetainedToolResults({ dryRun: previewOnly });
+  const { withRetainedToolResultsLock } = await import("./tool-result-recovery.mjs");
+  const result = previewOnly ? operation() : await withRetainedToolResultsLock(operation);
   const age =
     result.oldestAgeMs === undefined ? "" : `, oldest ${describeRetentionAge(result.oldestAgeMs)} old`;
   const scope = expiredOnly ? ` older than ${describeRetentionTtl(ttlMs)}` : "";
@@ -2023,6 +2025,11 @@ async function handleToolResultAging(action, nativeAction, flags = []) {
   const desired = action || "status";
   if (desired === "status") {
     process.stdout.write(`${JSON.stringify(toolResultAgingSnapshot())}\n`);
+    return;
+  }
+  if (desired === "read") {
+    const { readToolResultCommand } = await import("./tool-result-read.mjs");
+    process.stdout.write(`${JSON.stringify(readToolResultCommand(flags))}\n`);
     return;
   }
   if (desired === "purge") {

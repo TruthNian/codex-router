@@ -17,7 +17,7 @@ if (!path) {
 
   function measure(label) {
     const beforeBytes = Buffer.byteLength(JSON.stringify(input), "utf8");
-    const result = ageToolResults(input);
+    const result = ageToolResults(input, { retain: () => "Offline estimate only: assumes an available archive readback path." });
     const afterBytes = Buffer.byteLength(JSON.stringify(result.input), "utf8");
     const bytesSaved = beforeBytes - afterBytes;
     return {

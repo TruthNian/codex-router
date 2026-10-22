@@ -3,15 +3,9 @@ import path from "node:path";
 
 import { STATE_DIR } from "./paths.mjs";
 
-// Where compaction parks the exact original bytes of a tool result it has
-// rewritten. The directory is owner-private, is excluded from support bundles,
-// and is the first place this router persists model-visible *content* to disk.
-// Nothing here writes to it -- this module only reads it, empties it, and ages
-// entries out of it -- so the path is resolved exactly the way the retention
-// writer resolves it, including the environment override, or a purge would look
-// in a directory the writer never used. A writer belongs on the other side of
-// `expireRetainedToolResults`: it already scans this directory to check the caps
-// before every write, and that scan is where the TTL costs nothing extra.
+// Exact tool-result snapshots are committed by tool-result-recovery.mjs before
+// any text is omitted. This module owns bounded accounting, expiry and explicit
+// purge. The readback CLI shares this directory and never re-executes a tool.
 export const TOOL_RESULT_RETENTION_DIR =
   process.env.MODEL_ROUTER_TOOL_RESULT_RETENTION_DIR ||
   path.join(STATE_DIR, "retained-tool-results");
@@ -33,23 +27,9 @@ const RETENTION_KEY_NAME = ".retention-key";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// How long a retained original is worth keeping, by default.
-//
-// Seven days, and the number is derived rather than round. Nothing ever reads
-// these bytes back into a turn: the receipt tells the model to repeat the tool
-// call, so a retained file's only reader is the operator, forensically, and
-// only while the session that produced it still matters. The caps say the same
-// thing about intent -- 512 files and 512 MiB against a 32 KiB compaction floor
-// is a working set of a few long sessions, not an archive. Seven days is also
-// the horizon this repository already treats as "recent enough to still act on"
-// in the two other places it keeps something around: the catalog's
-// AUTO_ANNOUNCE_WINDOW_MS and the vision host's SIZE_CACHE_TTL_MS are both
-// exactly a week. Anything shorter would delete a store mid-session; anything
-// longer keeps file contents and command output past every use they have.
-//
-// The cap failure the TTL actually fixes: a store parked at 512 files stops
-// accepting new results permanently. With a TTL it drains itself a week later
-// instead of waiting for somebody to notice.
+// Default inactivity lease. Replaying the exact original renews its mtime;
+// merely reading a snapshot does not keep it forever. A historical receipt may
+// outlive this lease: readback must report unavailable evidence explicitly.
 export const RETENTION_DEFAULT_TTL_DAYS = 7;
 export const RETENTION_DEFAULT_TTL_MS = RETENTION_DEFAULT_TTL_DAYS * DAY_MS;
 

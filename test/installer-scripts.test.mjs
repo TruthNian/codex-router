@@ -239,6 +239,7 @@ test("POSIX installer refuses a pending login-free refresh before catalog public
 printf '%s\n' "$*" >>"$CODEX_ROUTER_TEST_CALL_LOG"
 case "\${1:-}" in
   -e) exec "$CODEX_ROUTER_TEST_REAL_NODE" "$@" ;;
+  src/compatibility-layer-state.mjs) printf 'required\n'; exit 0 ;;
   src/install-plan.mjs) [ "\${2:-}" = status ] && printf 'skip\n'; exit 0 ;;
   src/runtime-dependency-requirements.mjs) printf 'required\n'; exit 0 ;;
   src/login-free-refresh-journal.mjs) exec "$CODEX_ROUTER_TEST_REAL_NODE" "$@" ;;
@@ -310,6 +311,7 @@ for argument in "$@"; do
 done
 record="$(mktemp "$CODEX_ROUTER_WRAPPER_DIR/call.XXXXXX")"
 printf 'codex-router-wrapper-call\\0%s\\0%s\\0%s\\0' "$CODEX_ROUTER_NODE_BIN" "$PATH" "$logged_arguments" >"$record"
+if [ "\${1:-}" = src/compatibility-layer-state.mjs ]; then printf 'required\\n'; fi
 if [ "\${1:-}" = src/install-plan.mjs ] && [ "\${2:-}" = status ]; then
   printf 'skip\\n'
 fi
@@ -384,6 +386,7 @@ test(
           path.join(runtimeDir, name),
           `#!/bin/sh
 printf '%s\\n' "${name}" >>"$CODEX_ROUTER_WRAPPER_LOG"
+if [ "\${1:-}" = src/compatibility-layer-state.mjs ]; then printf 'required\\n'; fi
 if [ "\${1:-}" = src/install-plan.mjs ] && [ "\${2:-}" = status ]; then
   printf 'skip\\n'
 fi
@@ -1090,6 +1093,7 @@ test("Windows prepare-only restores the caller foreign-state override live", {
         'if defined CODEX_ROUTER_TEST_FAIL_LEGACY if /I "%~1"=="src\\legacy-migration.mjs" exit /b 17',
         'if defined CODEX_ROUTER_TEST_FAIL_LEGACY if /I "%~1"=="src/legacy-migration.mjs" exit /b 17',
         'if /I "%~1"=="src/runtime-dependency-requirements.mjs" (echo required& exit /b 0)',
+        'if /I "%~1"=="src/compatibility-layer-state.mjs" (echo required& exit /b 0)',
         'if /I "%~1"=="src/install-plan.mjs" if /I "%~2"=="status" (',
         "  echo skip",
         "  exit /b 0",

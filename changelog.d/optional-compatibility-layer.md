@@ -1,0 +1,1 @@
+- Add a persistent compatibility-layer opt-out for native and Responses-only installations. Disabled LiteLLM routes are excluded and explicitly rejected; source installation, startup, updates and forced repair preserve the choice without installing or probing Python.

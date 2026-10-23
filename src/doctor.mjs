@@ -1,3 +1,4 @@
+import { COMPATIBILITY_LAYER } from "./model-registry.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -117,7 +118,12 @@ import { loopbackProxyBypassStatus } from "./loopback-proxy-bypass.mjs";
 import { serviceProxyOptInProblem } from "./proxy-environment.mjs";
 
 const checks = [];
+
 const add = (status, name, detail, fix) => checks.push({ status, name, detail, fix });
+add(COMPATIBILITY_LAYER.invalid ? "warn" : "ok", "Compatibility layer policy",
+  COMPATIBILITY_LAYER.invalid ? "invalid settings; optional compatibility routes are disabled" :
+    COMPATIBILITY_LAYER.enabled ? "enabled" : "disabled; native and Responses routes only",
+  "Run control compatibility-layer on|off, then prepare dependencies, restart and refresh catalogs.");
 const jsonOutput = process.argv.includes("--json");
 const includeAllProviders = process.argv.includes("--all");
 const credentialDiscoveryOff = discoveryDisabled();
@@ -249,7 +255,7 @@ function repair() {
   // installed without pip RECORD metadata. A healthy package can still use
   // doctor --fix to regenerate config and services, but damaged package files
   // must be rebuilt by Homebrew itself before the service transaction starts.
-  if (homebrewManaged && usesBundledVenv) {
+  if (COMPATIBILITY_LAYER.enabled && homebrewManaged && usesBundledVenv) {
     const problem = bundledVenvProblem();
     if (problem) {
       throw new Error(`Homebrew-managed LiteLLM is damaged (${problem}). ${dependencyFix}.`);
@@ -534,6 +540,10 @@ const routedTransportActive = codexTarget
 let idleInstall = false;
 try {
   selection = providerSelectionStatus();
+  if (!COMPATIBILITY_LAYER.enabled) {
+    const activeProviders = new Set(MODELS.map((model) => model.provider));
+    selection = { ...selection, providers: selection.providers.filter((id) => activeProviders.has(id)) };
+  }
   idleInstall =
     selection.explicit && selection.providers.length === 0 && discoveryDisabled();
   // Filter selection before resolving readiness. The general configured scan
@@ -899,7 +909,9 @@ add(
 // without the bundled `.venv`, and a fresh checkout has no venv until the
 // installer runs.
 let venvCheck;
-if (!gatewayRequired && !includeAllProviders) {
+if (!COMPATIBILITY_LAYER.enabled) {
+  venvCheck = { status: "ok", detail: "compatibility layer disabled; Python is not probed" };
+} else if (!gatewayRequired && !includeAllProviders) {
   venvCheck = { status: "ok", detail: "not required by the selected routes" };
 } else if (usesBundledVenv) {
   const venvProblem = bundledVenvProblem();

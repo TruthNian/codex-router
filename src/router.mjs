@@ -1,3 +1,4 @@
+import { compatibilityLayerError } from "./compatibility-layer-state.mjs";
 import { rejectGenerationRedirect } from "./generation-redirect.mjs";
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -105,6 +106,8 @@ import {
 } from "./paths.mjs";
 import {
   MODEL_BY_SLUG,
+  COMPATIBILITY_DISABLED_MODELS,
+  COMPATIBILITY_LAYER,
   MODELS,
   RUNTIME_PROVIDERS,
   USER_MODELS_SKIPPED,
@@ -1717,6 +1720,7 @@ async function healthPayload() {
     degraded,
     activity: activityPayload(),
     resources: resourceLimitsPayload(),
+    compatibilityLayer: { enabled: COMPATIBILITY_LAYER.enabled, invalid: COMPATIBILITY_LAYER.invalid === true },
     executionPlan: adoptedExecutionPlan,
     ...dependencies,
   };
@@ -3604,7 +3608,7 @@ async function handleRoutedCompaction(
 }
 
 async function handleModels(response) {
-  const models = catalogModels();
+  const models = catalogModels().filter((model) => !COMPATIBILITY_DISABLED_MODELS.has(model.slug || model.id));
   const data = models.map((model) => ({
     id: model.slug,
     object: "model",
@@ -4602,6 +4606,11 @@ async function handleResponses(request, response, requestUrl) {
     }
     controller.signal.throwIfAborted();
     requestedModel = typeof payload.model === "string" ? payload.model : "";
+    if (COMPATIBILITY_DISABLED_MODELS.has(requestedModel) ||
+        COMPATIBILITY_DISABLED_MODELS.has(readNativeAliases()[requestedModel])) {
+      writeJson(response, 409, compatibilityLayerError(requestedModel));
+      return;
+    }
     markResponsesStream(response, { model: requestedModel });
     let registeredRoute =
       MODEL_BY_SLUG.get(requestedModel) ??
@@ -4634,7 +4643,12 @@ async function handleResponses(request, response, requestUrl) {
     // provider is hidden leaves the turn native rather than trading a quota
     // failure for a routing error.
     if (!registeredRoute && requestedModel) {
-      const redirect = MODEL_BY_SLUG.get(readNativeRedirect());
+      const redirectSlug = readNativeRedirect();
+      if (COMPATIBILITY_DISABLED_MODELS.has(redirectSlug)) {
+        writeJson(response, 409, compatibilityLayerError(redirectSlug));
+        return;
+      }
+      const redirect = MODEL_BY_SLUG.get(redirectSlug);
       if (redirect && routeProviderEnabled(redirect.provider)) {
         registeredRoute = redirect;
       }
@@ -4646,7 +4660,12 @@ async function handleResponses(request, response, requestUrl) {
     // Codex asks for a review per command, and without this every one of them
     // pays a full round trip to learn the same thing again (#787).
     if (!registeredRoute && isAutoReviewModel(requestedModel) && autoReviewFallbackEngaged()) {
-      const reviewer = MODEL_BY_SLUG.get(readAutoReviewFallback().model);
+      const reviewerSlug = readAutoReviewFallback().model;
+      if (COMPATIBILITY_DISABLED_MODELS.has(reviewerSlug)) {
+        writeJson(response, 409, compatibilityLayerError(reviewerSlug));
+        return;
+      }
+      const reviewer = MODEL_BY_SLUG.get(reviewerSlug);
       if (reviewer && routeProviderEnabled(reviewer.provider)) {
         registeredRoute = reviewer;
         autoReviewFallbackUsed = true;
@@ -6228,6 +6247,10 @@ async function handleNativeRequest(request, response, requestUrl, defaultModel) 
       body = await decodeBody(encoded, request.headers["content-encoding"]);
       payload = await parseBodyAsync(body);
       requestedModel = typeof payload.model === "string" ? payload.model : defaultModel;
+      if (COMPATIBILITY_DISABLED_MODELS.has(requestedModel)) {
+        writeJson(response, 409, compatibilityLayerError(requestedModel));
+        return;
+      }
       const binding = searchSidecarBindingForModel(requestedModel);
       if (binding) {
         servingProvider = `search:${binding.providerId}`;
@@ -6480,6 +6503,12 @@ async function handleEmbeddings(request, response, requestUrl) {
     const payload = await parseBodyAsync(body);
     controller.signal.throwIfAborted();
     requestedModel = typeof payload.model === "string" ? payload.model : "";
+    if (COMPATIBILITY_DISABLED_MODELS.has(requestedModel) ||
+        COMPATIBILITY_DISABLED_MODELS.has(readNativeAliases()[requestedModel])) {
+      status = 409;
+      writeJson(response, status, compatibilityLayerError(requestedModel));
+      return;
+    }
     route = MODEL_BY_SLUG.get(requestedModel);
     if (!route) {
       status = 400;
@@ -6612,6 +6641,12 @@ async function handleDecisions(request, response, requestUrl) {
     const payload = await parseBodyAsync(body);
     controller.signal.throwIfAborted();
     requestedModel = typeof payload.model === "string" ? payload.model : "";
+    if (COMPATIBILITY_DISABLED_MODELS.has(requestedModel) ||
+        COMPATIBILITY_DISABLED_MODELS.has(readNativeAliases()[requestedModel])) {
+      status = 409;
+      writeJson(response, status, compatibilityLayerError(requestedModel));
+      return;
+    }
     route = MODEL_BY_SLUG.get(requestedModel);
     if (!route) {
       status = 400;
@@ -6730,6 +6765,7 @@ async function handleRequest(request, response) {
       service: health.service,
       version: health.version,
       degraded: health.degraded,
+      compatibilityLayer: health.compatibilityLayer,
       activity: health.activity,
       executionPlan: health.executionPlan,
     });

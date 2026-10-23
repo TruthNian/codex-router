@@ -1,3 +1,4 @@
+import { readCompatibilityLayerSettings } from "./compatibility-layer-state.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import os from "node:os";
@@ -218,6 +219,18 @@ export function installationNeedsRefresh(manifest, revision) {
   return manifest?.current?.commit !== revision;
 }
 
+// A downgrade/alternate update must not silently forget an explicit opt-out
+// and run an older installer which always provisions the Python gateway.
+export function requireCompatibilityPolicySupport(revision) {
+  if (readCompatibilityLayerSettings().enabled) return;
+  try {
+    git(["cat-file", "-e", `${revision}:src/compatibility-layer-state.mjs`]);
+  } catch {
+    throw new Error("The candidate revision cannot honor the disabled compatibility layer. " +
+      "The current checkout and service were left unchanged.");
+  }
+}
+
 export function updateCheckout({ force = false } = {}) {
   const status = checkForUpdate();
   if (!status.updateAvailable) {
@@ -228,6 +241,7 @@ export function updateCheckout({ force = false } = {}) {
     refreshTrayCompanion();
     return { ...status, updated: false, reinstalled: true };
   }
+  requireCompatibilityPolicySupport(status.available);
   requireReplaceableCheckout(force);
   let branch = git(["branch", "--show-current"]);
   if (!branch) {
@@ -263,7 +277,6 @@ export function rollbackCheckout({ force = false } = {}) {
   requireManagedCheckout();
   // A rollback checks out a different revision, so it overwrites tracked edits
   // exactly the way an update does.
-  requireReplaceableCheckout(force);
   const current = git(["rev-parse", "HEAD"]);
   let target;
   try {
@@ -275,6 +288,8 @@ export function rollbackCheckout({ force = false } = {}) {
     throw new Error("No locally cached working revision is available to roll back to.");
   }
   if (target === current) throw new Error("The rollback revision is already installed.");
+  requireCompatibilityPolicySupport(target);
+  requireReplaceableCheckout(force);
   git(["update-ref", "refs/codex-router/rollback", current]);
   try {
     restoreRevision(target);

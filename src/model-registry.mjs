@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readCompatibilityLayerSettings, requiresCompatibilityLayer } from "./compatibility-layer-state.mjs";
 import path from "node:path";
 import { usesDeepSeekResponses } from "./deepseek-responses.mjs";
 
@@ -1089,7 +1090,14 @@ export const RUNTIME_PROVIDER_WARNINGS = runtime.warnings;
 // bind to this set: a local overlay is useful routing configuration, but it
 // cannot certify itself for every installer.
 export const CHECKED_IN_MODELS = registry.models;
-export const MODELS = merged.models;
+export const COMPATIBILITY_LAYER = Object.freeze(readCompatibilityLayerSettings());
+export const COMPATIBILITY_DISABLED_MODELS = new Map();
+export const MODELS = Object.freeze(merged.models.filter((model) => {
+  if (COMPATIBILITY_LAYER.enabled || !requiresCompatibilityLayer(model, providerForModel)) return true;
+  COMPATIBILITY_DISABLED_MODELS.set(model.slug, model);
+  COMPATIBILITY_DISABLED_MODELS.set(model.gatewayModel, model);
+  return false;
+}));
 // Slugs of the locally curated models in MODELS -- the `user-models.json`
 // overlay entries that survived the merge. A desktop surface offers removal
 // only for these, because curation removal prunes the overlay and can never
@@ -1106,6 +1114,11 @@ export const MODEL_SLUG_ALIASES = new Map([
   ...staticAliases,
   ...merged.aliases,
 ]);
+for (const [from, to] of MODEL_SLUG_ALIASES) {
+  if (COMPATIBILITY_DISABLED_MODELS.has(to)) {
+    COMPATIBILITY_DISABLED_MODELS.set(from, COMPATIBILITY_DISABLED_MODELS.get(to));
+  }
+}
 export const LISTED_MODELS = Object.freeze(MODELS.filter((model) => model.listed));
 export const API_MODELS = Object.freeze(
   MODELS.filter((model) => RUNTIME_PROVIDERS.get(model.provider)?.kind === "openai-compatible"),

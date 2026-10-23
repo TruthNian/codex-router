@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -29,6 +30,28 @@ import { preservedGeminiSchemas, zillowRangeSchema } from "./fixtures/gemini-too
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INTERNAL_KEY = "test-internal-service-key-with-sufficient-length";
 const CALLER_KEY = "test-router-caller-capability-with-sufficient-length";
+
+// Run the public reader against this test's committed snapshot. Routing tests
+// must prove local readback just as a real client does; a fabricated token or
+// an internal aging override would miss the permission gate being exercised.
+function readbackHistory(stateDir, callId, toolName = "exec_command") {
+  const store = path.join(stateDir, "retained-tool-results");
+  const file = readdirSync(store).find(name => name.endsWith(".result") &&
+    JSON.parse(readFileSync(path.join(store, name), "utf8")).callId === callId);
+  assert.ok(file, "router did not commit the expected snapshot");
+  const args = [path.join(root, "src", "tool-result-read.mjs"), file.slice(0, -7),
+    "--store", store, "--limit", "1"];
+  const output = execFileSync(process.execPath, args, {
+    encoding: "utf8", timeout: 20_000, windowsHide: true,
+    env: { ...process.env, MODEL_ROUTER_STATE_DIR: stateDir },
+  });
+  assert.equal(typeof JSON.parse(output).readbackProof, "string");
+  return [
+    { type: "function_call", call_id: "readback", name: toolName,
+      arguments: JSON.stringify({ cmd: [process.execPath, ...args].join(" ") }) },
+    { type: "function_call_output", call_id: "readback", output },
+  ];
+}
 
 function routerBase(port) {
   return callerBaseUrl(port, CALLER_KEY);
@@ -473,7 +496,7 @@ test("router requires the configured path capability before any model route", as
     const publicPayload = await publicHealth.json();
     assert.deepEqual(
       Object.keys(publicPayload).sort(),
-      ["activity", "degraded", "executionPlan", "ok", "service", "version"],
+      ["activity", "compatibilityLayer", "degraded", "executionPlan", "ok", "service", "version"],
     );
     // `degraded` names which local service is unreachable so doctor can say the
     // gateway died rather than "the router is not ready". It is a closed set of
@@ -1069,7 +1092,8 @@ test("native tool-result aging is opt-in and rewrites only consumed old results"
         Authorization: "Bearer CODEX_CALLER_SECRET",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ model: "gpt-5.6-sol", input }),
+      body: JSON.stringify({ model: "gpt-5.6-sol",
+        tools: [{ type: "function", name: "shell", parameters: { type: "object", properties: {} } }], input }),
     });
   const send = async (routerPort) => sendInput(routerPort, agableInput);
 
@@ -1088,8 +1112,8 @@ test("native tool-result aging is opt-in and rewrites only consumed old results"
     await stopChild(defaultRouter);
   }
 
-  // Opted in: the blob becomes a receipt, the newest results stay intact,
-  // and the usage event records the savings.
+  // Opted in: preserve the full blob until the client proves readback. Only
+  // then may a receipt replace it and a usage event record savings.
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "native-aging-state-"));
   writeFileSync(
     path.join(stateDir, "tool-result-aging.json"),
@@ -1106,15 +1130,20 @@ test("native tool-result aging is opt-in and rewrites only consumed old results"
   try {
     await waitFor(`${routerBase(agingPort)}/models`, agingRouter);
     assert.equal((await send(agingPort)).status, 200);
+    const pending = nativeRequests.at(-1).body.input[1].output;
+    assert.ok(pending.startsWith(bigOutput), "unverified readback must preserve the full result");
+    assert.match(pending, /Router archive readback pending/u);
+    const proof = readbackHistory(stateDir, "call-old", "shell");
+    assert.equal((await sendInput(agingPort, [...agableInput, ...proof])).status, 200);
     const forwarded = nativeRequests.at(-1).body.input;
     assert.match(forwarded[1].output, /^\[Older tool result compacted by Codex Router/);
     assert.match(forwarded[1].output, /sha256:[0-9a-f]{64}/);
-    assert.equal(forwarded.at(-1).output, "small result 4");
+    assert.equal(forwarded.find(item => item.call_id === "call-4").output, "small result 4");
 
     // Remote compaction V2 arrives on the ordinary Responses endpoint. Even
     // when the operator opted native turns into aging, the summary must read
     // the original tool output rather than the router's compact receipt.
-    const compactInput = [...agableInput, { type: "compaction_trigger" }];
+    const compactInput = [...agableInput, ...proof, { type: "compaction_trigger" }];
     assert.equal((await sendInput(agingPort, compactInput)).status, 200);
     const compactForwarded = nativeRequests.at(-1).body.input;
     assert.equal(compactForwarded[1].output, bigOutput);
@@ -9686,25 +9715,42 @@ test("router ages consumed large tool results but preserves the newest result fr
 
   try {
     await waitFor(`${routerBase(routerPort)}/models`, router);
+    const tools = [{ type: "function", name: "exec_command", parameters: { type: "object", properties: {} } }];
     const response = await fetch(`${routerBase(routerPort)}/responses`, {
       method: "POST",
       headers: {
         Authorization: "Bearer CODEX_CALLER_SECRET",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", stream: false, input }),
+      body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", stream: false, tools, input }),
     });
     assert.equal(response.status, 200, await response.text());
-    const forwarded = gatewayBodies[0].input;
+    const unverified = gatewayBodies[0].input;
+    assert.ok(unverified[1].output.startsWith(large));
+    assert.match(unverified[1].output, /Router archive readback pending/u);
+    for (let index = 0; index < 4; index += 1) {
+      assert.equal(unverified.find(item => item.call_id === `new-${index}` && item.output).output,
+        `${index}:${"n".repeat(34_000)}`);
+    }
+    const proof = readbackHistory(stateDir, "old");
+    const verifiedInput = [...input, ...proof];
+    const verified = await fetch(`${routerBase(routerPort)}/responses`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", stream: false, tools, input: verifiedInput }),
+    });
+    assert.equal(verified.status, 200, await verified.text());
+    const forwarded = gatewayBodies[1].input;
     assert.match(forwarded[1].output, /Older tool result compacted by Codex Router/);
     assert.match(forwarded[1].output, /old-head/);
     assert.match(forwarded[1].output, /old-tail/);
-    for (let index = 0; index < 4; index += 1) {
-      const result = forwarded.find((item) => item.call_id === `new-${index}` && item.type === "function_call_output");
-      assert.equal(result.output, `${index}:${"n".repeat(34_000)}`);
+    for (const expected of verifiedInput.filter(item => item.type === "function_call_output").slice(-4)) {
+      const result = forwarded.find(item => item.call_id === expected.call_id && item.type === "function_call_output");
+      assert.equal(result.output, expected.output);
     }
-    const [event] = await waitForUsageEvents(stateDir, 1, router);
-    assert.equal(event.toolResultsAged, 1);
+    const events = await waitForUsageEvents(stateDir, 2, router);
+    assert.equal(events[0].toolResultsAged ?? 0, 0);
+    const event = events[1];
+    assert.equal(event.toolResultsAged, 2, "the probe advanced the frontier past old and new-0");
     assert.ok(event.toolResultBytesSaved > 30_000);
 
     // Settings are read for each routed request, so a UI toggle takes effect
@@ -9720,10 +9766,10 @@ test("router ages consumed large tool results but preserves the newest result fr
         Authorization: "Bearer CODEX_CALLER_SECRET",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", stream: false, input }),
+      body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", stream: false, tools, input }),
     });
     assert.equal(exactResponse.status, 200, await exactResponse.text());
-    assert.equal(gatewayBodies[1].input[1].output, large);
+    assert.equal(gatewayBodies[2].input[1].output, large);
   } finally {
     await stopChild(router);
     await closeServer(gateway.server);
@@ -9731,7 +9777,7 @@ test("router ages consumed large tool results but preserves the newest result fr
   }
 });
 
-test("RTK shaping is reserved for routed compaction and ordinary turns keep newest results exact", async () => {
+test("tool-less routed compaction and ordinary turns keep newest tool results exact", async () => {
   const gatewayBodies = [];
   const gateway = await mockServer(async (request, response) => {
     gatewayBodies.push(await bodyJson(request));
@@ -9794,16 +9840,15 @@ test("RTK shaping is reserved for routed compaction and ordinary turns keep newe
     assert.equal(gatewayBodies[0].input[1].output, value);
     assert.equal(gatewayBodies[0].instructions, "Base instructions.");
     assert.doesNotMatch(gatewayBodies[0].instructions, /Token maxxing pressure|decision packet|Be terse/u);
-    assert.match(gatewayBodies[1].input[1].output, /Tool result shaped by Codex Router RTK-style compaction/u);
-    assert.match(gatewayBodies[1].input[1].output, /same line repeated 109999 more times/u);
-    assert.match(gatewayBodies[1].input[1].output, /ERROR final link failed/u);
-    assert.match(gatewayBodies[1].input[1].output, /Repeat the preceding exec_command call/u);
+    assert.equal(gatewayBodies[1].input[1].output, value,
+      "a tool-less summarizer cannot recover omitted text and must see the original");
+    assert.deepEqual(gatewayBodies[1].tools, []);
     assert.doesNotMatch(gatewayBodies[1].instructions, /Token maxxing pressure|decision packet|Be terse/u);
 
     const events = await waitForUsageEvents(stateDir, 2, router);
     assert.equal(events[0].toolResultsShaped, undefined);
-    assert.equal(events[1].toolResultsShaped, 1);
-    assert.ok(events[1].toolResultShapeBytesSaved > 2_000_000);
+    assert.equal(events[1].toolResultsShaped ?? 0, 0);
+    assert.equal(events[1].toolResultShapeBytesSaved ?? 0, 0);
   } finally {
     await stopChild(router);
     await closeServer(gateway.server);
@@ -10708,16 +10753,26 @@ test("reasoning survives the replay onto tool-call and prose assistant turns ali
 
   try {
     await waitFor(`${routerBase(routerPort)}/models`, router);
+    const tools = [{ type: "function", name: "exec_command", parameters: { type: "object", properties: {} } }];
     const response = await fetch(`${routerBase(routerPort)}/responses`, {
       method: "POST",
       headers: {
         Authorization: "Bearer CODEX_CALLER_SECRET",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", stream: false, input }),
+      body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", stream: false, tools, input }),
     });
     assert.equal(response.status, 200, await response.text());
-    const forwarded = gatewayBodies[0].input;
+    const pending = gatewayBodies[0].input.find(item => item.call_id === "old" && item.output);
+    assert.ok(pending.output.startsWith("x".repeat(40_000)));
+    assert.match(pending.output, /Router archive readback pending/u);
+    const verified = await fetch(`${routerBase(routerPort)}/responses`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", stream: false, tools,
+        input: [...input, ...readbackHistory(stateDir, "old")] }),
+    });
+    assert.equal(verified.status, 200, await verified.text());
+    const forwarded = gatewayBodies[1].input;
     const text = (item) =>
       (Array.isArray(item?.content) ? item.content : [])
         .map((part) => (typeof part?.text === "string" ? part.text : ""))

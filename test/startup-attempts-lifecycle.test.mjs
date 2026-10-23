@@ -112,6 +112,7 @@ async function run({ foreground = false, disabled = false, mode = "healthy", see
     "./service-shutdown.mjs": { stopServiceChildren },
     "./litellm-config.mjs": { writeLiteLlmConfig: () => {} },
     "./model-registry.mjs": {
+      COMPATIBILITY_LAYER: { enabled: true },
       MODELS: [fixtureModel], RUNTIME_PROVIDERS: new Map([["fixture", fixtureProvider]]),
       providerForModel: () => fixtureProvider,
     },

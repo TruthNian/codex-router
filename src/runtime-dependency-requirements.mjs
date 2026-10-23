@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { MODELS, RUNTIME_PROVIDERS, providerForModel } from "./model-registry.mjs";
+import { COMPATIBILITY_LAYER, MODELS, RUNTIME_PROVIDERS, providerForModel } from "./model-registry.mjs";
 import { readProviderSelection } from "./provider-selection.mjs";
 import { createExecutionPlan } from "./route-execution-plan.mjs";
 import { antigravityOAuthStartupState } from "./antigravity-oauth-status.mjs";
@@ -16,7 +16,7 @@ export function runtimeDependencyRequirements({ includePendingActivation = true 
   // An explicit probe can leave a protected pending proof while the provider
   // is still unselected. Its temporary listener must confirm adoption before
   // enablement. Gateway-only install queries skip this Node-only exception.
-  const antigravity = includePendingActivation ? antigravityOAuthStartupState() : {};
+  const antigravity = COMPATIBILITY_LAYER.enabled && includePendingActivation ? antigravityOAuthStartupState() : {};
   return createExecutionPlan({
     models: MODELS,
     providerForModel,

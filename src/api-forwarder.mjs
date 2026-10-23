@@ -1,3 +1,4 @@
+import { compatibilityLayerError } from "./compatibility-layer-state.mjs";
 import { rejectGenerationRedirect } from "./generation-redirect.mjs";
 import { normalizeAzureOpenAIResponsesRequest } from "./azure-openai-compat.mjs";
 import http from "node:http";
@@ -36,6 +37,7 @@ import { PORTS, TARGET } from "./paths.mjs";
 import {
   API_MODELS,
   MODEL_BY_GATEWAY_ID,
+  COMPATIBILITY_DISABLED_MODELS,
   PROVIDERS,
   RUNTIME_PROVIDERS,
   providerForModel,
@@ -1039,6 +1041,12 @@ function normalizeBody(buffer, contentType, route) {
   delete payload.client_metadata;
   delete payload.access_programs;
   const requestedModel = String(payload.model || "");
+  if (COMPATIBILITY_DISABLED_MODELS.has(requestedModel.replace(/^responses\//, ""))) {
+    const error = new Error(compatibilityLayerError(requestedModel).error.message);
+    error.status = 409;
+    error.code = "compatibility_layer_disabled";
+    throw error;
+  }
   // LiteLLM's Responses bridge prefixes the gateway id with `responses/` on
   // the upstream wire format; the forwarder still owns the id translation.
   const model =
@@ -2398,7 +2406,7 @@ const server = http.createServer((request, response) => {
     if (!response.headersSent) {
       if (transport) response.setHeader(PROVIDER_DELIVERY_STATE_HEADER, transport.deliveryState);
       writeJson(response, status, {
-        error: transport || (error?.code === "upstream_redirect_refused" ? {
+        error: error.code === "compatibility_layer_disabled" ? compatibilityLayerError("the requested route").error : transport || (error?.code === "upstream_redirect_refused" ? {
           type: "provider_redirect_refused", message: error.message,
         } : {
           type: "provider_api_proxy_error",

@@ -1,3 +1,4 @@
+import { COMPATIBILITY_LAYER } from "./model-registry.mjs";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeSync } from "node:fs";
 import path from "node:path";
@@ -105,7 +106,7 @@ const dependencyFix = dependencyRepairHint();
 const selectedProviders = new Set(readProviderSelection());
 // A pending explicit probe needs its listener even before provider selection.
 // A verified but unselected account still contributes no ordinary route.
-const antigravityStartup = antigravityOAuthStartupState();
+const antigravityStartup = COMPATIBILITY_LAYER.enabled ? antigravityOAuthStartupState() : {};
 const executionPlan = createExecutionPlan({
   models: MODELS,
   providerForModel,

@@ -351,8 +351,9 @@ try {
   $Python = Join-Path $ScriptDirectory ".venv\Scripts\python.exe"
   # Explicit repair rebuilds both trees; normal preparation follows requestable
   # routes, without probing credentials or filtering hidden models.
-  $GatewayRequired = "required"
-  if (-not $ForceDeps) {
+  $GatewayRequired = (& node src/compatibility-layer-state.mjs required | Select-Object -Last 1)
+  if ($LASTEXITCODE -ne 0 -or $GatewayRequired -notin @("required", "unused")) { throw "Could not read compatibility policy." }
+  if ($GatewayRequired -eq "required" -and -not $ForceDeps) {
     $GatewayRequired = (& node src/runtime-dependency-requirements.mjs --gateway-required | Select-Object -Last 1)
     if ($LASTEXITCODE -ne 0 -or $GatewayRequired -notin @("required", "unused")) {
       throw "Could not determine runtime dependency requirements."

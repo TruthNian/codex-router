@@ -6,7 +6,7 @@ import { writePrivateFile } from "./file-security.mjs";
 import { grokGatewayStreamTimeoutSeconds } from "./grok-stream-timeouts.mjs";
 import { localTimeoutSeconds } from "./local-timeouts.mjs";
 import { LITELLM_CONFIG_PATH } from "./paths.mjs";
-import { MODELS, providerForModel } from "./model-registry.mjs";
+import { COMPATIBILITY_LAYER, MODELS, providerForModel } from "./model-registry.mjs";
 import { assertStateOwnership } from "./state-owner.mjs";
 import { vertexAdapterForModel } from "./vertex-adapters.mjs";
 
@@ -139,6 +139,7 @@ export function renderLiteLlmConfig() {
 }
 
 export function writeLiteLlmConfig(target = LITELLM_CONFIG_PATH) {
+  if (!COMPATIBILITY_LAYER.enabled) return undefined;
   // Only guard the managed path. Tests and tooling that render to an explicit
   // temporary file are not touching the live gateway config.
   if (target === LITELLM_CONFIG_PATH) {

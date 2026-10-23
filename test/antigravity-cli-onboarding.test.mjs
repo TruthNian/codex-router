@@ -242,7 +242,7 @@ test("desktop onboarding keeps the Antigravity probe explicit on every platform"
   assert.match(page, /setup\.disconnectable/);
   assert.match(tray, /case "probe": return routerLocalized\("Test & Enable"\)/);
   assert.match(tray, /setup\?\.disconnectable == true/);
-  assert.match(startup, /const antigravityStartup = antigravityOAuthStartupState\(\)/);
+  assert.match(startup, /const antigravityStartup = COMPATIBILITY_LAYER.enabled \? antigravityOAuthStartupState\(\) : \{\}/);
   assert.match(startup, /attemptAntigravityProbePromotionAfterReadiness/);
   assert.match(startup, /\["antigravity", "Antigravity OAuth forwarder"/);
   assert.match(startup, /\.filter\(\(\[service\]\) => requiredServices\.has\(service\)\)/);

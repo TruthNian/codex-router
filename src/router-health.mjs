@@ -1,3 +1,4 @@
+import { readCompatibilityLayerSettings } from "./compatibility-layer-state.mjs";
 import { PORTS, ROUTER_PLANE_TARGET, TARGET, loopback } from "./paths.mjs";
 
 // The name the router reports on `/health`. It identifies the *service*, which
@@ -87,18 +88,25 @@ export async function waitForRouterHealth({
       } catch {
         lastError = "health response was not JSON";
       }
-      if (response.ok && payload.service === expectedService) {
+      const expectedCompatibility = readCompatibilityLayerSettings().enabled;
+      // A healthy old process is not proof that a newly persisted policy was
+      // adopted. Legacy health replies represent the legacy enabled default.
+      const policyMatches = (payload.compatibilityLayer?.enabled ?? true) === expectedCompatibility;
+      if (!policyMatches && payload.service === expectedService) {
+        lastPayload = payload;
+        lastError = "compatibility layer policy changed; restart the router before publishing routes";
+      } else if (response.ok && payload.service === expectedService) {
         return { ok: true, payload };
       }
       if (payload.service && payload.service !== expectedService) {
         lastError = `a different service (${payload.service}) is listening on the router port`;
-      } else if (payload.service === expectedService) {
+      } else if (payload.service === expectedService && policyMatches) {
         lastPayload = payload;
         const down = Array.isArray(payload.degraded) ? payload.degraded : [];
         lastError = down.length
           ? `it is listening but reports ${down.join(", ")} unreachable (HTTP ${response.status})`
           : `it is listening but answered HTTP ${response.status}`;
-      } else if (response.status) {
+      } else if (!payload.service && response.status) {
         lastError = `HTTP ${response.status}`;
       }
     } catch (error) {

@@ -217,8 +217,9 @@ ensure_uv_venv() {
 
 # --force-deps is the explicit full repair contract, even for an idle or
 # Responses-only installation. Ordinary preparation follows the actual routes.
-gateway_required=required
-if [ "$force_deps" != true ]; then
+gateway_required=$(node src/compatibility-layer-state.mjs required)
+case "$gateway_required" in required|unused) ;; *) echo "Could not read compatibility policy." >&2; exit 1 ;; esac
+if [ "$gateway_required" = required ] && [ "$force_deps" != true ]; then
   gateway_required=$(node src/runtime-dependency-requirements.mjs --gateway-required)
 fi
 case "$gateway_required" in

@@ -430,6 +430,7 @@ async function emitProbe() {
               subagents: subagentSettings,
               picker: modelPickerSnapshot(),
               toolResultAging: toolResultAgingSnapshot(),
+              compatibilityLayer: (await import("./compatibility-layer-state.mjs")).readCompatibilityLayerSettings(),
               localModels: {
                 ...localModelsSnapshot({
                   inventory: localInventory,
@@ -3753,6 +3754,20 @@ if (args.includes("--probe")) {
   await setRouterDefault(args[1], args[2]);
 } else if (args[0] === "subagents") {
   await handleSubagents(args[1], args[2], args[3], args.slice(2));
+} else if (args[0] === "compatibility-layer") {
+  const { readCompatibilityLayerSettings, setCompatibilityLayerEnabled, COMPATIBILITY_LAYER_PATH } =
+    await import("./compatibility-layer-state.mjs");
+  const action = args[1] || "status";
+  if (!["status", "on", "off"].includes(action) || args.length > 2) {
+    throw new Error("Usage: control compatibility-layer status|on|off");
+  }
+  if (action !== "status") {
+    const { assertStateOwnership } = await import("./state-owner.mjs");
+    assertStateOwnership("change compatibility layer settings");
+  }
+  process.stdout.write(`${JSON.stringify(action === "status"
+    ? { ...readCompatibilityLayerSettings(), path: COMPATIBILITY_LAYER_PATH }
+    : setCompatibilityLayerEnabled(action === "on"))}\n`);
 } else if (args[0] === "tool-result-aging") {
   await handleToolResultAging(args[1], args[2], args.slice(2));
 } else if (args[0] === "local-models") {

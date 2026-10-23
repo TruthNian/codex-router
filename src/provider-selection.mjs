@@ -1,3 +1,4 @@
+import { COMPATIBILITY_LAYER } from "./model-registry.mjs";
 import {
   chmodSync,
   existsSync,
@@ -349,7 +350,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         );
       }
       const configured = new Set(configuredProviderIds());
-      const missing = providers.filter((provider) => !configured.has(provider));
+      const active = new Set(LISTED_MODELS.map((model) => model.provider));
+      const missing = providers.filter((provider) =>
+        (COMPATIBILITY_LAYER.enabled || active.has(provider)) && !configured.has(provider));
       if (missing.length) {
         throw new Error(
           `Selected providers need persistent authentication: ${missing.join(", ")}. Run ${

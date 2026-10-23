@@ -1680,8 +1680,9 @@ test(`${language} covers every page, dialogs, raw values, English round trips an
   const errors = [];
   const artifacts = process.env.CODEX_ROUTER_UI_ARTIFACTS;
   if (artifacts) mkdirSync(artifacts, { recursive: true });
+  let page;
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 840 }, locale: "en-US" });
+    page = await browser.newPage({ viewport: { width: 1280, height: 840 }, locale: "en-US" });
     page.setDefaultTimeout(10_000);
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(url);
@@ -1739,6 +1740,17 @@ test(`${language} covers every page, dialogs, raw values, English round trips an
     assert.equal(await page.locator("html").getAttribute("lang"), language);
     assert.equal(await page.getByRole("combobox", { name: copy.language }).inputValue(), language);
     assert.deepEqual(errors, []);
+  } catch (error) {
+    if (page) {
+      const state = await page.evaluate(() => ({
+        language: document.documentElement.lang,
+        headings: [...document.querySelectorAll("h1")].map(node => node.textContent),
+        selected: [...document.querySelectorAll("select")].map(node => ({ label: node.getAttribute("aria-label"), value: node.value })),
+        storedLanguage: localStorage.getItem("codex-router-language"),
+      })).catch(() => null);
+      console.error("Localized UI failure state:", JSON.stringify({ expectedLanguage: language, state, errors }));
+    }
+    throw error;
   } finally {
     await browser.close();
     await close();

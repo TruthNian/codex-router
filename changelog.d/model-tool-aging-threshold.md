@@ -1,0 +1,1 @@
+- **Recover old tool results through Desktop wrappers and exact scoped lookup.** Add literal archive search within a signed conversation/permission scope, plus optional per-model size floors and readback notices. Minimum-savings and failed-probe guards preserve the default policy, newest-four protection, and full-text fallback.

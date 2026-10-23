@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync,
-  openSync, readFileSync, renameSync, unlinkSync, utimesSync, writeFileSync,
+  openSync, readFileSync, readdirSync, renameSync, unlinkSync, utimesSync, writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -68,20 +68,40 @@ function readbackProof(key, scope, now) {
 // A shell declaration does not establish filesystem access: a Codex restricted
 // token may be unable to read owner-private files. Accept only a signed proof
 // returned by a successful reader call in this conversation/permission context.
+function* readbackTexts(value, depth = 0) {
+  if (depth > 8) return;
+  if (typeof value === "string") {
+    yield value;
+    // Desktop batched tools wrap exec output in JSON strings. Decode only
+    // bounded, complete JSON envelopes; signatures and scope are still
+    // checked below. Large/unknown formats simply keep the original text.
+    if (value.length <= 64 * 1024) {
+      try { yield* readbackTexts(JSON.parse(value), depth + 1); } catch { /* plain text */ }
+    }
+  } else if (Array.isArray(value)) {
+    for (const item of value.slice(0, 64)) yield* readbackTexts(item, depth + 1);
+  } else if (value && typeof value === "object") {
+    for (const key of ["text", "output", "content", "value"]) {
+      if (Object.hasOwn(value, key)) yield* readbackTexts(value[key], depth + 1);
+    }
+  }
+}
+
 export function hasVerifiedToolResultReadback(input, scope, { directory, now = Date.now() } = {}) {
   try {
     const key = readRegular(path.join(storeRoot(directory), ".retention-key"), 128).text;
-    for (const item of input) {
+    for (let index = input.length - 1; index >= 0; index -= 1) {
+      const item = input[index];
       if (!["function_call_output", "custom_tool_call_output"].includes(item?.type)) continue;
-      const text = typeof item.output === "string" ? item.output
-        : Array.isArray(item.output) ? item.output.map(part => part?.text || "").join("") : "";
-      for (const match of (text || "").matchAll(/"readbackProof"\s*:\s*"([A-Za-z0-9_-]{1,512})\.([A-Za-z0-9_-]{43})"/gu)) {
-        const expected = Buffer.from(signProof(key, match[1]));
-        const signature = Buffer.from(match[2]);
-        if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) continue;
-        const proof = JSON.parse(Buffer.from(match[1], "base64url").toString("utf8"));
-        if (proof.scope === sha256(String(scope)) && Number.isSafeInteger(proof.expiresAt) &&
-            proof.expiresAt > now && proof.expiresAt <= now + PROOF_TTL_MS) return true;
+      for (const text of readbackTexts(item.output)) {
+        for (const match of text.matchAll(/"readbackProof"\s*:\s*"([A-Za-z0-9_-]{1,512})\.([A-Za-z0-9_-]{43})"/gu)) {
+          const expected = Buffer.from(signProof(key, match[1]));
+          const signature = Buffer.from(match[2]);
+          if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) continue;
+          const proof = JSON.parse(Buffer.from(match[1], "base64url").toString("utf8"));
+          if (proof.scope === sha256(String(scope)) && Number.isSafeInteger(proof.expiresAt) &&
+              proof.expiresAt > now && proof.expiresAt <= now + PROOF_TTL_MS) return true;
+        }
       }
     }
   } catch { /* Missing/inaccessible proof is no permission to omit text. */ }
@@ -231,6 +251,56 @@ export async function withRetainedToolResultsLock(operation, { directory = TOOL_
   return runWithLockRelease(operation, release);
 }
 
+export function searchRetainedToolResults(handle, {
+  directory = TOOL_RESULT_RETENTION_DIR, ttlMs = retentionTtlMs(), now = Date.now(),
+  find, limit = 2000, cursor = 0, index,
+} = {}) {
+  if (typeof find !== "string" || !find || find.length > 2000) throw failure("invalid_search");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16000 ||
+      !Number.isSafeInteger(cursor) || cursor < 0) throw failure("invalid_range");
+  const root = storeRoot(directory);
+  // Reuse the existing authenticated reader for the reference and every
+  // candidate. A reference handle grants lookup only in its own signed scope.
+  const reference = readRetainedToolResult(handle, {directory: root, ttlMs, now, limit: 1});
+  const proofScope = result => JSON.parse(Buffer.from(result.readbackProof.split(".")[0], "base64url").toString("utf8")).scope;
+  const scope = proofScope(reference);
+  const files = readdirSync(root).filter(name => /^[A-Za-z0-9_-]{43}\.result$/u.test(name)).sort();
+  const fingerprint = sha256(JSON.stringify(files));
+  if (cursor > files.length || (cursor > 0 && index !== fingerprint) ||
+      (index !== undefined && index !== fingerprint)) throw failure("search_changed");
+  const matches = [];
+  let bytes = 0, characters = 0, searched = 0, unavailable = 0, position = cursor;
+  const started = Date.now();
+  for (; position < files.length; position += 1) {
+    if (position > cursor && (bytes >= 16 * 1024 * 1024 || Date.now() - started > 1000 ||
+        characters >= limit || matches.length >= 32)) break;
+    const candidate = files[position].slice(0, -7);
+    let result;
+    try {
+      bytes += lstatSync(path.join(root, files[position])).size;
+      result = readRetainedToolResult(candidate, {directory: root, ttlMs, now, find,
+        limit: Math.max(1, limit - characters)});
+    } catch {
+      // Unknown/corrupt/expired entries cannot establish absence. Do not leak
+      // their handles or contents; report an incomplete search instead.
+      unavailable += 1;
+      continue;
+    }
+    if (proofScope(result) !== scope) continue;
+    searched += 1;
+    if (result.found === false) continue;
+    characters += result.text.length;
+    matches.push(Object.fromEntries(["handle","sha256","offset","nextOffset","eof","text"]
+      .map(key => [key, result[key]])));
+  }
+  return {
+    matches, searched, complete: position === files.length && unavailable === 0,
+    nextCursor: position < files.length ? position : null, index: fingerprint,
+    unavailable, matchPolicy: "first occurrence per archive; use individual --offset for later occurrences",
+    readbackProof: reference.readbackProof,
+  };
+}
+
 // Use only known local Codex execution tools. Remote-client and tool-less
 // requests keep full results; a filesystem path alone is not usable recovery.
 export function hasLocalReadbackTool(tools) {
@@ -249,19 +319,44 @@ export function recoveryInstruction(snapshot) {
   const command = `${process.platform === "win32" ? "& " : ""}${quote(process.execPath)} ${quote(path.join(SOURCE_ROOT, "src", "tool-result-read.mjs"))} ${quote(snapshot.handle)} --store ${quote(snapshot.directory)}`;
   return `Exact archived result: sha256:${snapshot.sha256}. Read using the local ${process.platform === "win32" ? "PowerShell" : "POSIX shell"}: ${command}\n` +
     "Returns JSON with text, nextOffset and eof; use --offset N --limit N (UTF-16 characters) or --find 'literal text' for omitted content. " +
+    "If the matching archive is unknown, use this handle with --scope-search --find 'literal text'; it searches only this conversation/permission scope. " +
     "An expired, missing or corrupt archive is unavailable evidence; do not repeat the original tool to reconstruct it.";
 }
 
-export async function ageToolResultsWithRecovery(input, { tools, scope = "", retain = retainToolResult, ...options } = {}) {
+function hasFailedReadbackAttempt(input) {
+  const completed = new Map(input.filter(item =>
+    ["function_call_output", "custom_tool_call_output"].includes(item?.type))
+    .map(item => [item.call_id, item.output]));
+  return input.some(item => {
+    if (!["function_call", "custom_tool_call"].includes(item?.type) || !completed.has(item.call_id)) return false;
+    const args = typeof item.arguments === "string" ? item.arguments : String(item.input || "");
+    if (!args.includes("tool-result-read.mjs")) return false;
+    // An attempted read that returned no proof must not create an automatic
+    // retry loop. This only suppresses the optional hint; it never authorizes
+    // omission. A past successful proof can be renewed after it expires.
+    return ![...readbackTexts(completed.get(item.call_id))].some(text => text.includes('"readbackProof"'));
+  });
+}
+
+export async function ageToolResultsWithRecovery(input, { tools, scope = "", retain = retainToolResult, readbackHint = false, minSavingsBytes = 0, ...options } = {}) {
   if (!hasLocalReadbackTool(tools)) return ageToolResults(input, options);
   // Plan in memory, commit snapshots, then apply only successful receipts. The
   // synchronous policy stays pure and cannot leak uncommitted handles upstream.
   const candidates = new Map();
   const keyFor = (text, info) => JSON.stringify([info.callId, sha256(text)]);
-  ageToolResults(input, { ...options, retain(text, info) {
+  const planned = ageToolResults(input, { ...options, retain(text, info) {
     candidates.set(keyFor(text, info), { text, info });
     return "Read the exact archived result.";
   } });
+  // A probe and cache rebuild can cost more than a small omission saves.
+  // For an explicitly configured threshold, fall back to the existing policy
+  // before writing snapshots or changing the wire history when the potential
+  // is too small. Defaults and callers without this opt-in are unchanged.
+  if (Number.isFinite(minSavingsBytes) && minSavingsBytes > 0 &&
+      planned.stats.toolResultBytesSaved < minSavingsBytes) {
+    return ageToolResultsWithRecovery(input, { tools, scope, retain,
+      ...options, minBytes: undefined, readbackHint: false });
+  }
   const committed = new Map();
   const started = Date.now();
   let bytes = 0;
@@ -295,5 +390,23 @@ export async function ageToolResultsWithRecovery(input, { tools, scope = "", ret
       ? item.output + footer : [...item.output, { type: "input_text", text: footer }] });
   }
   if (pending.size) result.input = result.input.map((item, index) => pending.get(index) || item);
+  if (readbackHint && pending.size && !hasFailedReadbackAttempt(input)) {
+    // A per-model opt-in, constructed solely from this request's committed
+    // snapshots. Keep the permission proof requirement; never synthesize one
+    // from the router's own filesystem access. This notice is a wire-only
+    // addition and does not mutate the client's persisted conversation.
+    const first = [...committed.values()].find(({ snapshot, info }) =>
+      pending.has(info.index) && !verified.get(snapshot.directory));
+    if (first) result.input = [...result.input, {
+      type: "message", role: "developer", content: [{ type: "input_text", text:
+        "Router archive access check: before continuing, use an available local execution tool once " +
+        "to run the exact read-only archive reader below with --limit 1. This verifies local access " +
+        "so old results can be omitted safely in later requests. Then continue the user task. " +
+        "For an unknown archive, use --scope-search --find with any shown handle instead of guessing handles. " +
+        "Respect user restrictions and permission policy; if a local read is disallowed, continue with the full text. " +
+        "Do not rerun historical commands merely to reconstruct archived output.\n" + first.instruction,
+      }],
+    }];
+  }
   return result;
 }

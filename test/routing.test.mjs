@@ -9777,6 +9777,42 @@ test("router ages consumed large tool results but preserves the newest result fr
   }
 });
 
+test("per-model 16KiB policy recognizes Desktop wrapped readback and leaves other routes unchanged", async () => {
+  const bodies = [];
+  const gateway = await mockServer(async (request, response) => {
+    bodies.push(await bodyJson(request));
+    json(response, 200, {output:[{type:"message",role:"assistant",content:"ok"}]});
+  });
+  const stateDir = mkdtempSync(path.join(os.tmpdir(),"routing-model-history-policy-"));
+  const model = "deepseek/deepseek-v4-pro";
+  writeFileSync(path.join(stateDir,"tool-result-aging.json"),JSON.stringify({version:1,enabled:true,nativeEnabled:false,modelMinBytes:{[model]:16384},readbackHintModels:[model]}));
+  const port = await openPort();
+  const router = run("router.mjs",{CODEX_ROUTER_PORT:String(port),CODEX_ROUTER_GATEWAY_BASE_URL:`http://127.0.0.1:${gateway.port}/v1`,MODEL_ROUTER_STATE_DIR:stateDir,CODEX_ROUTER_QUIET:"1"});
+  const text="head\n"+"real evidence row\n".repeat(1300)+"tail";
+  const input=[{type:"function_call",name:"exec_command",call_id:"old16",arguments:'{"cmd":"original-command"}'},{type:"function_call_output",call_id:"old16",output:text},{type:"message",role:"assistant",content:"processed"},...Array.from({length:7},(_,i)=>[{type:"function_call",name:"exec_command",call_id:`medium-${i}`,arguments:"{}"},{type:"function_call_output",call_id:`medium-${i}`,output:text},{type:"message",role:"assistant",content:"used"}]).flat(),...Array.from({length:4},(_,i)=>[{type:"function_call",name:"exec_command",call_id:`new16-${i}`,arguments:"{}"},{type:"function_call_output",call_id:`new16-${i}`,output:"small"},{type:"message",role:"assistant",content:"used"}]).flat()];
+  const tools=[{type:"function",name:"exec_command",parameters:{type:"object",properties:{}}}];
+  const send=async (items,selected=model)=>{
+    const r=await fetch(`${routerBase(port)}/responses`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:selected,stream:false,tools,input:items})});
+    assert.equal(r.status,200,await r.text());return bodies.at(-1).input;
+  };
+  try {
+    await waitFor(`${routerBase(port)}/models`,router);
+    const pending=await send(input);
+    assert.ok(pending[1].output.startsWith(text));
+    assert.equal(pending.at(-1).role,"developer");
+    assert.match(pending.at(-1).content[0].text,/--limit 1/u);
+    const proof=readbackHistory(stateDir,"old16");
+    proof[1].output=[{type:"input_text",text:JSON.stringify({exit_code:0,output:proof[1].output})}];
+    const aged=await send([...input,...proof]);
+    assert.match(aged[1].output,/Older tool result compacted/u);
+    assert.equal(aged[0].arguments,input[0].arguments);
+    assert.equal(aged.filter(x=>x.role==="developer").length,0);
+    const unaffected=await send(input,"deepseek/deepseek-v4-flash");
+    assert.equal(unaffected[1].output,text);
+    assert.equal(unaffected.some(x=>x.role==="developer"),false);
+  } finally {await stopChild(router);await closeServer(gateway.server);rmSync(stateDir,{recursive:true,force:true});}
+});
+
 test("tool-less routed compaction and ordinary turns keep newest tool results exact", async () => {
   const gatewayBodies = [];
   const gateway = await mockServer(async (request, response) => {

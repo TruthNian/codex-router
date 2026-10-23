@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { privateFileIsProtected } from "../src/file-security.mjs";
 import { acquireFileLock } from "../src/file-lock.mjs";
-import { ageToolResultsWithRecovery, readRetainedToolResult, retainToolResult, hasLocalReadbackTool, hasVerifiedToolResultReadback, toolResultRecoveryScope, toolResultReadbackTools } from "../src/tool-result-recovery.mjs";
+import { ageToolResultsWithRecovery, readRetainedToolResult, retainToolResult, searchRetainedToolResults, hasLocalReadbackTool, hasVerifiedToolResultReadback, toolResultRecoveryScope, toolResultReadbackTools } from "../src/tool-result-recovery.mjs";
 import { expireRetainedToolResults } from "../src/tool-result-retention.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -27,6 +27,125 @@ async function fixture(t) {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return { directory, scope: "thread-a", callId: "old", ttlMs: 10000 };
 }
+
+test("opt-in notice enables exact 16KiB recovery without bypassing proof or changing calls", async t => {
+  const options = await fixture(t);
+  const value = `head\n${"distinct audit row\r\n".repeat(1100)}middle-only-evidence-7439\ntail`;
+  assert.ok(Buffer.byteLength(value) > 16384 && Buffer.byteLength(value) < 32768);
+  const input = history(value);
+  const original = JSON.stringify(input);
+  const retain = (text, info) => retainToolResult(text, {...options, ...info});
+  const ordinary = await ageToolResultsWithRecovery(input, {tools, frontier: 0, retain, readbackHint: true});
+  assert.equal(ordinary.input, input, "default 32KiB policy does not qualify this result");
+  const pending = await ageToolResultsWithRecovery(input, {tools, frontier: 0, retain, minBytes: 16384, readbackHint: true});
+  assert.equal(pending.stats.toolResultsAged, 0);
+  assert.ok(pending.input[1].output.startsWith(value));
+  const notice = pending.input.at(-1);
+  assert.equal(notice.role, "developer");
+  assert.match(notice.content[0].text, /--limit 1/u);
+  assert.match(notice.content[0].text, /tool-result-read.mjs/u);
+  assert.equal(JSON.stringify(input), original, "neither history nor call arguments were changed");
+  const filename = readdirSync(options.directory).find(n => n.endsWith(".result"));
+  const proof = readRetainedToolResult(filename.slice(0,-7), {...options,limit: 1});
+  const verified = [...input, {type: "function_call_output",call_id:"reader",output:JSON.stringify(proof)}];
+  const result = await ageToolResultsWithRecovery(verified, {tools, frontier:0, retain, minBytes:16384, readbackHint:true});
+  assert.equal(result.stats.toolResultsAged, 1);
+  assert.equal(result.input.length, verified.length, "a valid proof removes the wire-only notice");
+  assert.equal(result.input[0], input[0]);
+  assert.match(readRetainedToolResult(filename.slice(0,-7), {...options,find:"middle-only-evidence-7439"}).text, /middle-only-evidence-7439/u);
+  for (const inventory of [[], [{type:"function",name:"web_search"}]]) {
+    const denied = await ageToolResultsWithRecovery(input, {tools:inventory,frontier:0,minBytes:16384,readbackHint:true,retain(){assert.fail("no local tool must not archive");}});
+    assert.equal(denied.input,input);
+  }
+  const failed = await ageToolResultsWithRecovery(input, {tools,frontier:0,minBytes:16384,readbackHint:true,retain(){throw Error("disk unavailable");}});
+  assert.equal(failed.input,input,"failed storage cannot inject a readback command or omit text");
+});
+
+test("real Desktop JSON wrappers retain signature/scope checks and failed probes do not loop", async t => {
+  const options = await fixture(t);
+  const saved = await retainToolResult(full, options);
+  const proof = readRetainedToolResult(saved.handle, {...options,limit:1});
+  const wrap = text => JSON.stringify({chunk_id:"real-wrapper",exit_code:0,output:text});
+  const nested = [
+    {type:"input_text",text:"Script completed\nOutput:\n"},
+    {type:"input_text",text:wrap(JSON.stringify(proof))},
+  ];
+  const item = {type:"custom_tool_call_output",call_id:"readback",output:nested};
+  assert.equal(hasVerifiedToolResultReadback([item],options.scope,options),true);
+  const batch = {type:"custom_tool_call_output",call_id:"batch",output:[{type:"input_text",text:JSON.stringify({status:"fulfilled",value:JSON.parse(wrap(JSON.stringify(proof)))})}]};
+  assert.equal(hasVerifiedToolResultReadback([batch],options.scope,options),true);
+  assert.equal(hasVerifiedToolResultReadback([item],"different-context",options),false);
+  const forged = structuredClone(item);forged.output[1].text=forged.output[1].text.replace(proof.readbackProof,proof.readbackProof.slice(0,-1)+(proof.readbackProof.endsWith("A")?"B":"A"));
+  assert.equal(hasVerifiedToolResultReadback([forged],options.scope,options),false);
+  assert.equal(hasVerifiedToolResultReadback([item],options.scope,{...options,now:Date.now()+31*60_000}),false);
+  const input = [...history(),
+    {type:"function_call",name:"exec_command",call_id:"failed-reader",arguments:JSON.stringify({cmd:`node tool-result-read.mjs ${saved.handle} --store denied`})},
+    {type:"function_call_output",call_id:"failed-reader",output:JSON.stringify({error:"EACCES"})},
+  ];
+  const result = await ageToolResultsWithRecovery(input,{tools,scope:options.scope,frontier:0,readbackHint:true,retain:(text,info)=>retainToolResult(text,{...options,...info})});
+  assert.equal(result.stats.toolResultsAged,0);
+  assert.equal(result.input.some(x=>x.role==="developer"),false,"permission failure must not force repeated model/tool probes");
+  assert.ok(result.input[1].output.startsWith(full),"failed readback preserves all original bytes");
+});
+
+test("small savings keep the default policy without extra archives or hints", async () => {
+  const input=history("x".repeat(20000));
+  const result=await ageToolResultsWithRecovery(input,{tools,frontier:0,minBytes:16384,readbackHint:true,minSavingsBytes:131072,retain(){assert.fail("small opt-in cannot create an unnecessary archive");}});
+  assert.equal(result.input,input);
+  assert.equal(result.stats.toolResultsAged,0);
+});
+
+test("scope search returns exact evidence only from the reference permission scope", async t => {
+  const options=await fixture(t);
+  const reference=await retainToolResult("reference without the requested value",options);
+  const exact="prefix\r\n😀needle-7439\r\nactual original evidence\r\ntail";
+  const saved=await retainToolResult(exact,{...options,callId:"matching"});
+  const foreign=await retainToolResult("needle-7439 FOREIGN PRIVATE RESULT",{...options,scope:"other-thread",callId:"foreign"});
+  const result=searchRetainedToolResults(reference.handle,{...options,find:"needle-7439",limit:2000});
+  assert.equal(result.complete,true);
+  assert.equal(result.matches.length,1);
+  assert.equal(result.matches[0].handle,saved.handle);
+  assert.equal(result.matches[0].text,exact);
+  assert.equal(JSON.stringify(result).includes(foreign.handle),false);
+  assert.equal(JSON.stringify(result).includes("FOREIGN PRIVATE RESULT"),false);
+  assert.equal(hasVerifiedToolResultReadback([{type:"function_call_output",output:JSON.stringify(result)}],options.scope,options),true);
+  const absent=searchRetainedToolResults(reference.handle,{...options,find:"FOREIGN PRIVATE RESULT"});
+  assert.deepEqual(absent.matches,[]);
+  assert.equal(absent.complete,true);
+  const cli=spawnSync(process.execPath,[path.join(root,"src/tool-result-read.mjs"),reference.handle,"--store",options.directory,"--scope-search","--find","needle-7439"],{encoding:"utf8",timeout:20000,windowsHide:true});
+  assert.equal(cli.status,0,cli.stderr);
+  assert.equal(JSON.parse(cli.stdout).matches[0].text,exact);
+  for(const args of [
+    ["--scope-search"],
+    ["--cursor","1"],
+    ["--scope-search","--find","x","--offset","1"],
+    ["--scope-search","--scope-search","--find","x"],
+  ]){
+    const bad=spawnSync(process.execPath,[path.join(root,"src/tool-result-read.mjs"),reference.handle,"--store",options.directory,...args],{encoding:"utf8",timeout:20000,windowsHide:true});
+    assert.notEqual(bad.status,0);
+  }
+});
+
+test("scope search bounds excerpts, detects index changes, and cannot treat corrupt evidence as absent", async t => {
+  const options=await fixture(t);const saved=[];
+  for(let i=0;i<4;i++)saved.push(await retainToolResult(`😀needle-${i}\r\n${"evidence\n".repeat(50)}`,{...options,callId:String(i)}));
+  const first=searchRetainedToolResults(saved[0].handle,{...options,find:"needle",limit:20});
+  assert.equal(first.matches.length,1);
+  assert.equal(first.complete,false);
+  assert.ok(first.matches[0].text.length<=21);
+  const next=searchRetainedToolResults(saved[0].handle,{...options,find:"needle",limit:20,cursor:first.nextCursor,index:first.index});
+  assert.notEqual(next.matches[0].handle,first.matches[0].handle);
+  assert.throws(()=>searchRetainedToolResults(saved[0].handle,{...options,find:"needle",cursor:first.nextCursor,index:"bad-index"}),{code:"search_changed"});
+  await retainToolResult("new entry",{...options,callId:"new-entry"});
+  assert.throws(()=>searchRetainedToolResults(saved[0].handle,{...options,find:"needle",cursor:first.nextCursor,index:first.index}),{code:"search_changed"});
+  writeFileSync(path.join(options.directory,`${saved[1].handle}.result`),"corrupt");
+  const unavailable=searchRetainedToolResults(saved[0].handle,{...options,find:"absent"});
+  assert.equal(unavailable.complete,false);
+  assert.ok(unavailable.unavailable>0);
+  assert.equal(JSON.stringify(unavailable).includes(saved[1].handle),false);
+  assert.throws(()=>searchRetainedToolResults(saved[1].handle,{...options,find:"needle"}),{code:"corrupt"});
+  assert.throws(()=>searchRetainedToolResults(saved[0].handle,{...options,find:"needle",now:Date.now()+20000}),{code:"expired"});
+});
 
 test("a real committed snapshot survives restart and reads exact Unicode/CRLF bytes in pages", async t => {
   const options = await fixture(t);

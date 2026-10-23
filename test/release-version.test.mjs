@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -143,9 +145,6 @@ test("releases are tag-driven and validate every asset before publishing", () =>
   );
   assert.match(ci, /Smoke the unified macOS app lifecycle/);
   assert.match(ci, /"\$outer" --supervised/);
-  assert.match(ci, /execFileSync\(process\.argv\[1\], \["--query-lifecycle"\]/);
-  assert.match(ci, /timeout: 10000, killSignal: "SIGKILL"/);
-  assert.match(ci, /delete env\.ELECTRON_RUN_AS_NODE/);
   assert.match(ci, /if ! last_state=\$\(query_lifecycle\); then\s+cat "\$log" >&2 \|\| true\s+return 1/);
   assert.match(ci, /terminate_bundle io\.github\.codex-router\.control-center/);
   assert.match(ci, /terminate_bundle io\.github\.codex-router\.tray/);
@@ -162,4 +161,43 @@ test("releases are tag-driven and validate every asset before publishing", () =>
   assert.match(ci, /if \(\$open\.ExitCode -ne 0\)/);
   assert.match(ci, /if \(\$quit\.ExitCode -ne 0\)/);
   assert.match(ci, /if \(\$process\.ExitCode -ne 0\)/);
+});
+
+test("the macOS CI lifecycle probe reads real state without starting helper processes", () => {
+  const ci = readFileSync(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+  const query = ci.slice(ci.indexOf("          query_lifecycle() {"), ci.indexOf("          wait_for_lifecycle() {"));
+  const script = query.match(/node(?: --input-type=module)? -e '([\s\S]*?)'/)?.[1];
+  assert.ok(script, "the smoke test must provide an executable Node lifecycle query");
+  const directory = mkdtempSync(path.join(os.tmpdir(), "macos-ci-lifecycle-"));
+  const stateFile = path.join(directory, "control-center-lifecycle.json");
+  const updatedAt = new Date().toISOString();
+  const live = { version: 1, pid: process.pid, ready: true, visible: true, updatedAt };
+  const guard = `
+    import { createRequire, syncBuiltinESMExports } from "node:module";
+    const require = createRequire(import.meta.url);
+    const childProcess = require("node:child_process");
+    for (const method of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"]) {
+      childProcess[method] = () => { throw new Error("A lifecycle observation must not launch a helper process"); };
+    }
+    syncBuiltinESMExports();
+  `;
+  try {
+    for (const [record, running] of [[live, true], [{ ...live, pid: 2147483647 }, false], ["invalid JSON", false]]) {
+      writeFileSync(stateFile, typeof record === "string" ? record : JSON.stringify(record));
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e", guard + script], {
+        cwd: root,
+        env: { ...process.env, MODEL_ROUTER_CONTROL_CENTER_STATE: stateFile },
+        encoding: "utf8", timeout: 10_000, maxBuffer: 8192, windowsHide: true,
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      const state = JSON.parse(result.stdout);
+      assert.equal(state.version, 1);
+      assert.equal(state.running, running);
+      assert.equal(state.pid, running ? process.pid : null);
+      assert.equal(state.ready, running);
+      assert.equal(state.visible, running);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

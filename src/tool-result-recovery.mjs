@@ -323,16 +323,40 @@ export function recoveryInstruction(snapshot) {
     "An expired, missing or corrupt archive is unavailable evidence; do not repeat the original tool to reconstruct it.";
 }
 
-export async function ageToolResultsWithRecovery(input, { tools, scope = "", retain = retainToolResult, ...options } = {}) {
+function hasFailedReadbackAttempt(input) {
+  const completed = new Map(input.filter(item =>
+    ["function_call_output", "custom_tool_call_output"].includes(item?.type))
+    .map(item => [item.call_id, item.output]));
+  return input.some(item => {
+    if (!["function_call", "custom_tool_call"].includes(item?.type) || !completed.has(item.call_id)) return false;
+    const args = typeof item.arguments === "string" ? item.arguments : String(item.input || "");
+    if (!args.includes("tool-result-read.mjs")) return false;
+    // An attempted read that returned no proof must not create an automatic
+    // retry loop. This only suppresses the optional hint; it never authorizes
+    // omission. A past successful proof can be renewed after it expires.
+    return ![...readbackTexts(completed.get(item.call_id))].some(text => text.includes('"readbackProof"'));
+  });
+}
+
+export async function ageToolResultsWithRecovery(input, { tools, scope = "", retain = retainToolResult, readbackHint = false, minSavingsBytes = 0, ...options } = {}) {
   if (!hasLocalReadbackTool(tools)) return ageToolResults(input, options);
   // Plan in memory, commit snapshots, then apply only successful receipts. The
   // synchronous policy stays pure and cannot leak uncommitted handles upstream.
   const candidates = new Map();
   const keyFor = (text, info) => JSON.stringify([info.callId, sha256(text)]);
-  ageToolResults(input, { ...options, retain(text, info) {
+  const planned = ageToolResults(input, { ...options, retain(text, info) {
     candidates.set(keyFor(text, info), { text, info });
     return "Read the exact archived result.";
   } });
+  // A probe and cache rebuild can cost more than a small omission saves.
+  // For an explicitly configured threshold, fall back to the existing policy
+  // before writing snapshots or changing the wire history when the potential
+  // is too small. Defaults and callers without this opt-in are unchanged.
+  if (Number.isFinite(minSavingsBytes) && minSavingsBytes > 0 &&
+      planned.stats.toolResultBytesSaved < minSavingsBytes) {
+    return ageToolResultsWithRecovery(input, { tools, scope, retain,
+      ...options, minBytes: undefined, readbackHint: false });
+  }
   const committed = new Map();
   const started = Date.now();
   let bytes = 0;
@@ -366,5 +390,23 @@ export async function ageToolResultsWithRecovery(input, { tools, scope = "", ret
       ? item.output + footer : [...item.output, { type: "input_text", text: footer }] });
   }
   if (pending.size) result.input = result.input.map((item, index) => pending.get(index) || item);
+  if (readbackHint && pending.size && !hasFailedReadbackAttempt(input)) {
+    // A per-model opt-in, constructed solely from this request's committed
+    // snapshots. Keep the permission proof requirement; never synthesize one
+    // from the router's own filesystem access. This notice is a wire-only
+    // addition and does not mutate the client's persisted conversation.
+    const first = [...committed.values()].find(({ snapshot, info }) =>
+      pending.has(info.index) && !verified.get(snapshot.directory));
+    if (first) result.input = [...result.input, {
+      type: "message", role: "developer", content: [{ type: "input_text", text:
+        "Router archive access check: before continuing, use an available local execution tool once " +
+        "to run the exact read-only archive reader below with --limit 1. This verifies local access " +
+        "so old results can be omitted safely in later requests. Then continue the user task. " +
+        "For an unknown archive, use --scope-search --find with any shown handle instead of guessing handles. " +
+        "Respect user restrictions and permission policy; if a local read is disallowed, continue with the full text. " +
+        "Do not rerun historical commands merely to reconstruct archived output.\n" + first.instruction,
+      }],
+    }];
+  }
   return result;
 }

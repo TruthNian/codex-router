@@ -99,6 +99,59 @@ test("scope search bounds excerpts, detects index changes, and cannot treat corr
   assert.throws(()=>searchRetainedToolResults(saved[0].handle,{...options,find:"needle",now:Date.now()+20000}),{code:"expired"});
 });
 
+test("opt-in notice enables exact 16KiB recovery without bypassing proof or changing calls", async t => {
+  const options = await fixture(t);
+  const value = `head\n${"distinct audit row\r\n".repeat(1100)}middle-only-evidence-7439\ntail`;
+  assert.ok(Buffer.byteLength(value) > 16384 && Buffer.byteLength(value) < 32768);
+  const input = history(value);
+  const original = JSON.stringify(input);
+  const retain = (text, info) => retainToolResult(text, {...options, ...info});
+  const ordinary = await ageToolResultsWithRecovery(input, {tools, frontier: 0, retain, readbackHint: true});
+  assert.equal(ordinary.input, input, "default 32KiB policy does not qualify this result");
+  const pending = await ageToolResultsWithRecovery(input, {tools, frontier: 0, retain, minBytes: 16384, readbackHint: true});
+  assert.equal(pending.stats.toolResultsAged, 0);
+  assert.ok(pending.input[1].output.startsWith(value));
+  const notice = pending.input.at(-1);
+  assert.equal(notice.role, "developer");
+  assert.match(notice.content[0].text, /--limit 1/u);
+  assert.match(notice.content[0].text, /tool-result-read.mjs/u);
+  assert.equal(JSON.stringify(input), original, "neither history nor call arguments were changed");
+  const filename = readdirSync(options.directory).find(n => n.endsWith(".result"));
+  const proof = readRetainedToolResult(filename.slice(0,-7), {...options,limit: 1});
+  const verified = [...input, {type: "function_call_output",call_id:"reader",output:JSON.stringify(proof)}];
+  const result = await ageToolResultsWithRecovery(verified, {tools, frontier:0, retain, minBytes:16384, readbackHint:true});
+  assert.equal(result.stats.toolResultsAged, 1);
+  assert.equal(result.input.length, verified.length, "a valid proof removes the wire-only notice");
+  assert.equal(result.input[0], input[0]);
+  assert.match(readRetainedToolResult(filename.slice(0,-7), {...options,find:"middle-only-evidence-7439"}).text, /middle-only-evidence-7439/u);
+  for (const inventory of [[], [{type:"function",name:"web_search"}]]) {
+    const denied = await ageToolResultsWithRecovery(input, {tools:inventory,frontier:0,minBytes:16384,readbackHint:true,retain(){assert.fail("no local tool must not archive");}});
+    assert.equal(denied.input,input);
+  }
+  const failed = await ageToolResultsWithRecovery(input, {tools,frontier:0,minBytes:16384,readbackHint:true,retain(){throw Error("disk unavailable");}});
+  assert.equal(failed.input,input,"failed storage cannot inject a readback command or omit text");
+});
+
+test("failed archive probes suppress optional hints and preserve full results", async t => {
+  const options = await fixture(t);
+  const saved = await retainToolResult(full, options);
+  const input = [...history(),
+    {type:"function_call",name:"exec_command",call_id:"failed-reader",arguments:JSON.stringify({cmd:`node tool-result-read.mjs ${saved.handle} --store denied`})},
+    {type:"function_call_output",call_id:"failed-reader",output:JSON.stringify({error:"EACCES"})},
+  ];
+  const result = await ageToolResultsWithRecovery(input,{tools,scope:options.scope,frontier:0,readbackHint:true,retain:(text,info)=>retainToolResult(text,{...options,...info})});
+  assert.equal(result.stats.toolResultsAged,0);
+  assert.equal(result.input.some(x=>x.role==="developer"),false,"permission failure must not force repeated model/tool probes");
+  assert.ok(result.input[1].output.startsWith(full),"failed readback preserves all original bytes");
+});
+
+test("small savings keep the default policy without extra archives or hints", async () => {
+  const input=history("x".repeat(20000));
+  const result=await ageToolResultsWithRecovery(input,{tools,frontier:0,minBytes:16384,readbackHint:true,minSavingsBytes:131072,retain(){assert.fail("small opt-in cannot create an unnecessary archive");}});
+  assert.equal(result.input,input);
+  assert.equal(result.stats.toolResultsAged,0);
+});
+
 test("a real committed snapshot survives restart and reads exact Unicode/CRLF bytes in pages", async t => {
   const options = await fixture(t);
   const saved = await retainToolResult(full, options);

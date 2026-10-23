@@ -1,0 +1,1 @@
+- **Opt routed models into smaller tool-result size floors and readback notices.** Persist validated per-model choices while preserving defaults, newest-four protection and full-text fallback; minimum-savings and failed-probe guards avoid unnecessary repeated readback requests.

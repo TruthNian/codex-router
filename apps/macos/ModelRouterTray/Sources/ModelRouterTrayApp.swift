@@ -940,6 +940,9 @@ enum ControlCenterLauncher {
         }
         return
       }
+      if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
+        NSLog("[macos-launch] LaunchServices error details: %@", String(reflecting: error as NSError))
+      }
       let message = error.localizedDescription
       Task { @MainActor in
         RouterStore.shared.reportControlCenterLaunchFailure(

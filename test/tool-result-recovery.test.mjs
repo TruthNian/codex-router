@@ -28,6 +28,25 @@ async function fixture(t) {
   return { directory, scope: "thread-a", callId: "old", ttlMs: 10000 };
 }
 
+test("Desktop JSON wrappers preserve readback signature, expiry and scope checks", async t => {
+  const options = await fixture(t);
+  const saved = await retainToolResult(full, options);
+  const proof = readRetainedToolResult(saved.handle, {...options,limit:1});
+  const wrap = text => JSON.stringify({chunk_id:"real-wrapper",exit_code:0,output:text});
+  const nested = [
+    {type:"input_text",text:"Script completed\nOutput:\n"},
+    {type:"input_text",text:wrap(JSON.stringify(proof))},
+  ];
+  const item = {type:"custom_tool_call_output",call_id:"readback",output:nested};
+  assert.equal(hasVerifiedToolResultReadback([item],options.scope,options),true);
+  const batch = {type:"custom_tool_call_output",call_id:"batch",output:[{type:"input_text",text:JSON.stringify({status:"fulfilled",value:JSON.parse(wrap(JSON.stringify(proof)))})}]};
+  assert.equal(hasVerifiedToolResultReadback([batch],options.scope,options),true);
+  assert.equal(hasVerifiedToolResultReadback([item],"different-context",options),false);
+  const forged = structuredClone(item);forged.output[1].text=forged.output[1].text.replace(proof.readbackProof,proof.readbackProof.slice(0,-1)+(proof.readbackProof.endsWith("A")?"B":"A"));
+  assert.equal(hasVerifiedToolResultReadback([forged],options.scope,options),false);
+  assert.equal(hasVerifiedToolResultReadback([item],options.scope,{...options,now:Date.now()+31*60_000}),false);
+});
+
 test("a real committed snapshot survives restart and reads exact Unicode/CRLF bytes in pages", async t => {
   const options = await fixture(t);
   const saved = await retainToolResult(full, options);

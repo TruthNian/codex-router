@@ -1,0 +1,1 @@
+- **Find exact archived evidence within one conversation/permission scope.** Add literal archive search with bounded excerpts, stable pagination and incomplete-search reporting, reusing existing integrity and expiry checks without exposing foreign-scope handles or rerunning commands.

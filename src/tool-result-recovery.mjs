@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync,
-  openSync, readFileSync, renameSync, unlinkSync, utimesSync, writeFileSync,
+  openSync, readFileSync, readdirSync, renameSync, unlinkSync, utimesSync, writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -251,6 +251,56 @@ export async function withRetainedToolResultsLock(operation, { directory = TOOL_
   return runWithLockRelease(operation, release);
 }
 
+export function searchRetainedToolResults(handle, {
+  directory = TOOL_RESULT_RETENTION_DIR, ttlMs = retentionTtlMs(), now = Date.now(),
+  find, limit = 2000, cursor = 0, index,
+} = {}) {
+  if (typeof find !== "string" || !find || find.length > 2000) throw failure("invalid_search");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16000 ||
+      !Number.isSafeInteger(cursor) || cursor < 0) throw failure("invalid_range");
+  const root = storeRoot(directory);
+  // Reuse the existing authenticated reader for the reference and every
+  // candidate. A reference handle grants lookup only in its own signed scope.
+  const reference = readRetainedToolResult(handle, {directory: root, ttlMs, now, limit: 1});
+  const proofScope = result => JSON.parse(Buffer.from(result.readbackProof.split(".")[0], "base64url").toString("utf8")).scope;
+  const scope = proofScope(reference);
+  const files = readdirSync(root).filter(name => /^[A-Za-z0-9_-]{43}\.result$/u.test(name)).sort();
+  const fingerprint = sha256(JSON.stringify(files));
+  if (cursor > files.length || (cursor > 0 && index !== fingerprint) ||
+      (index !== undefined && index !== fingerprint)) throw failure("search_changed");
+  const matches = [];
+  let bytes = 0, characters = 0, searched = 0, unavailable = 0, position = cursor;
+  const started = Date.now();
+  for (; position < files.length; position += 1) {
+    if (position > cursor && (bytes >= 16 * 1024 * 1024 || Date.now() - started > 1000 ||
+        characters >= limit || matches.length >= 32)) break;
+    const candidate = files[position].slice(0, -7);
+    let result;
+    try {
+      bytes += lstatSync(path.join(root, files[position])).size;
+      result = readRetainedToolResult(candidate, {directory: root, ttlMs, now, find,
+        limit: Math.max(1, limit - characters)});
+    } catch {
+      // Unknown/corrupt/expired entries cannot establish absence. Do not leak
+      // their handles or contents; report an incomplete search instead.
+      unavailable += 1;
+      continue;
+    }
+    if (proofScope(result) !== scope) continue;
+    searched += 1;
+    if (result.found === false) continue;
+    characters += result.text.length;
+    matches.push(Object.fromEntries(["handle","sha256","offset","nextOffset","eof","text"]
+      .map(key => [key, result[key]])));
+  }
+  return {
+    matches, searched, complete: position === files.length && unavailable === 0,
+    nextCursor: position < files.length ? position : null, index: fingerprint,
+    unavailable, matchPolicy: "first occurrence per archive; use individual --offset for later occurrences",
+    readbackProof: reference.readbackProof,
+  };
+}
+
 // Use only known local Codex execution tools. Remote-client and tool-less
 // requests keep full results; a filesystem path alone is not usable recovery.
 export function hasLocalReadbackTool(tools) {
@@ -269,6 +319,7 @@ export function recoveryInstruction(snapshot) {
   const command = `${process.platform === "win32" ? "& " : ""}${quote(process.execPath)} ${quote(path.join(SOURCE_ROOT, "src", "tool-result-read.mjs"))} ${quote(snapshot.handle)} --store ${quote(snapshot.directory)}`;
   return `Exact archived result: sha256:${snapshot.sha256}. Read using the local ${process.platform === "win32" ? "PowerShell" : "POSIX shell"}: ${command}\n` +
     "Returns JSON with text, nextOffset and eof; use --offset N --limit N (UTF-16 characters) or --find 'literal text' for omitted content. " +
+    "If the matching archive is unknown, use this handle with --scope-search --find 'literal text'; it searches only this conversation/permission scope. " +
     "An expired, missing or corrupt archive is unavailable evidence; do not repeat the original tool to reconstruct it.";
 }
 

@@ -427,18 +427,17 @@ jobs:
           set -euo pipefail
           app="$RUNNER_TEMP/Codex Router.app"
           outer="$app/Contents/MacOS/ModelRouterTray"
-          embedded="$app/Contents/Resources/Control Center.app/Contents/MacOS/Codex Router"
           log="$RUNNER_TEMP/model-router-macos-smoke.log"
 
           query_lifecycle() {
-            node -e '
-              const { execFileSync } = require("node:child_process");
-              const env = { ...process.env };
-              delete env.ELECTRON_RUN_AS_NODE;
-              process.stdout.write(execFileSync(process.argv[1], ["--query-lifecycle"], {
-                env, encoding: "utf8", timeout: 10000, killSignal: "SIGKILL",
-              }));
-            ' "$embedded"
+            # Starting Electron just to read state registers a short-lived GUI
+            # process while NSWorkspace is opening the same bundle. Its exit
+            # can race LaunchServices Apple Event delivery (procNotFound/-600).
+            # Observe the same state and PID checks without launching the app.
+            node --input-type=module -e '
+              import { lifecycleStatePath, queryLifecycleState } from "./apps/control-center/electron/lifecycle-state.mjs";
+              process.stdout.write(`${JSON.stringify(queryLifecycleState(lifecycleStatePath()))}\n`);
+            '
           }
 
           wait_for_lifecycle() {

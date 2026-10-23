@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { privateFileIsProtected } from "../src/file-security.mjs";
 import { acquireFileLock } from "../src/file-lock.mjs";
-import { ageToolResultsWithRecovery, readRetainedToolResult, retainToolResult, hasLocalReadbackTool, hasVerifiedToolResultReadback, toolResultRecoveryScope, toolResultReadbackTools } from "../src/tool-result-recovery.mjs";
+import { ageToolResultsWithRecovery, readRetainedToolResult, retainToolResult, searchRetainedToolResults, hasLocalReadbackTool, hasVerifiedToolResultReadback, toolResultRecoveryScope, toolResultReadbackTools } from "../src/tool-result-recovery.mjs";
 import { expireRetainedToolResults } from "../src/tool-result-retention.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -45,6 +45,58 @@ test("Desktop JSON wrappers preserve readback signature, expiry and scope checks
   const forged = structuredClone(item);forged.output[1].text=forged.output[1].text.replace(proof.readbackProof,proof.readbackProof.slice(0,-1)+(proof.readbackProof.endsWith("A")?"B":"A"));
   assert.equal(hasVerifiedToolResultReadback([forged],options.scope,options),false);
   assert.equal(hasVerifiedToolResultReadback([item],options.scope,{...options,now:Date.now()+31*60_000}),false);
+});
+
+test("scope search returns exact evidence only from the reference permission scope", async t => {
+  const options=await fixture(t);
+  const reference=await retainToolResult("reference without the requested value",options);
+  const exact="prefix\r\n😀needle-7439\r\nactual original evidence\r\ntail";
+  const saved=await retainToolResult(exact,{...options,callId:"matching"});
+  const foreign=await retainToolResult("needle-7439 FOREIGN PRIVATE RESULT",{...options,scope:"other-thread",callId:"foreign"});
+  const result=searchRetainedToolResults(reference.handle,{...options,find:"needle-7439",limit:2000});
+  assert.equal(result.complete,true);
+  assert.equal(result.matches.length,1);
+  assert.equal(result.matches[0].handle,saved.handle);
+  assert.equal(result.matches[0].text,exact);
+  assert.equal(JSON.stringify(result).includes(foreign.handle),false);
+  assert.equal(JSON.stringify(result).includes("FOREIGN PRIVATE RESULT"),false);
+  assert.equal(hasVerifiedToolResultReadback([{type:"function_call_output",output:JSON.stringify(result)}],options.scope,options),true);
+  const absent=searchRetainedToolResults(reference.handle,{...options,find:"FOREIGN PRIVATE RESULT"});
+  assert.deepEqual(absent.matches,[]);
+  assert.equal(absent.complete,true);
+  const cli=spawnSync(process.execPath,[path.join(root,"src/tool-result-read.mjs"),reference.handle,"--store",options.directory,"--scope-search","--find","needle-7439"],{encoding:"utf8",timeout:20000,windowsHide:true});
+  assert.equal(cli.status,0,cli.stderr);
+  assert.equal(JSON.parse(cli.stdout).matches[0].text,exact);
+  for(const args of [
+    ["--scope-search"],
+    ["--cursor","1"],
+    ["--scope-search","--find","x","--offset","1"],
+    ["--scope-search","--scope-search","--find","x"],
+  ]){
+    const bad=spawnSync(process.execPath,[path.join(root,"src/tool-result-read.mjs"),reference.handle,"--store",options.directory,...args],{encoding:"utf8",timeout:20000,windowsHide:true});
+    assert.notEqual(bad.status,0);
+  }
+});
+
+test("scope search bounds excerpts, detects index changes, and cannot treat corrupt evidence as absent", async t => {
+  const options=await fixture(t);const saved=[];
+  for(let i=0;i<4;i++)saved.push(await retainToolResult(`😀needle-${i}\r\n${"evidence\n".repeat(50)}`,{...options,callId:String(i)}));
+  const first=searchRetainedToolResults(saved[0].handle,{...options,find:"needle",limit:20});
+  assert.equal(first.matches.length,1);
+  assert.equal(first.complete,false);
+  assert.ok(first.matches[0].text.length<=21);
+  const next=searchRetainedToolResults(saved[0].handle,{...options,find:"needle",limit:20,cursor:first.nextCursor,index:first.index});
+  assert.notEqual(next.matches[0].handle,first.matches[0].handle);
+  assert.throws(()=>searchRetainedToolResults(saved[0].handle,{...options,find:"needle",cursor:first.nextCursor,index:"bad-index"}),{code:"search_changed"});
+  await retainToolResult("new entry",{...options,callId:"new-entry"});
+  assert.throws(()=>searchRetainedToolResults(saved[0].handle,{...options,find:"needle",cursor:first.nextCursor,index:first.index}),{code:"search_changed"});
+  writeFileSync(path.join(options.directory,`${saved[1].handle}.result`),"corrupt");
+  const unavailable=searchRetainedToolResults(saved[0].handle,{...options,find:"absent"});
+  assert.equal(unavailable.complete,false);
+  assert.ok(unavailable.unavailable>0);
+  assert.equal(JSON.stringify(unavailable).includes(saved[1].handle),false);
+  assert.throws(()=>searchRetainedToolResults(saved[1].handle,{...options,find:"needle"}),{code:"corrupt"});
+  assert.throws(()=>searchRetainedToolResults(saved[0].handle,{...options,find:"needle",now:Date.now()+20000}),{code:"expired"});
 });
 
 test("a real committed snapshot survives restart and reads exact Unicode/CRLF bytes in pages", async t => {

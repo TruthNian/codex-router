@@ -1,0 +1,1 @@
+- **Publish staged skills on Node versions with strict directory copy checks.** Copy entries into the exclusively claimed publication directory while keeping no-replace checks, marker validation and rollback protection.

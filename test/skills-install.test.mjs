@@ -96,6 +96,36 @@ test("install copies every pack skill with its SKILL.md and the marker", () => {
   }
 });
 
+test("skill publication supports strict no-replace copies into an exclusively claimed root", () => {
+  const home = tempCodexHome();
+  try {
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import assert from "node:assert/strict";
+      import fs from "node:fs";
+      import { syncBuiltinESMExports } from "node:module";
+      const copy = fs.cpSync;
+      // Node 24.22 rejects an existing directory at the root of a strict
+      // no-replace copy. Reproduce that contract on older supported runtimes.
+      fs.cpSync = function(source, target, options) {
+        if (options?.errorOnExist && options.force === false && fs.existsSync(target)) {
+          throw Object.assign(new Error("strict copy target already exists"), {code: "EEXIST"});
+        }
+        return copy(source, target, options);
+      };
+      syncBuiltinESMExports();
+      const { installSkills, installedSkillsFresh } = await import(${JSON.stringify(SKILLS_MODULE_URL)});
+      const home = ${JSON.stringify(home)};
+      const result = installSkills(home, {quiet: true});
+      assert.equal(result.installed, ${PACK.length});
+      assert.equal(result.skipped, 0);
+      assert.deepEqual(installedSkillsFresh(home), {fresh: true, stale: []});
+    `], { encoding: "utf8", timeout: 60_000, windowsHide: true });
+    assert.equal(child.status, 0, child.stderr || child.stdout);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("install is idempotent and refreshes managed skills", () => {
   const home = tempCodexHome();
   try {

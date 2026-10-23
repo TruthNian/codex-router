@@ -799,7 +799,14 @@ function publishStagedSkill(staged, target, publicationToken, { onPublicationCla
       flag: "wx",
     });
     onPublicationClaimed?.({ target });
-    cpSync(staged.content, target, { recursive: true, force: false, errorOnExist: true });
+    // The root is already exclusively claimed by mkdir above. Newer Node
+    // versions reject that existing directory when errorOnExist is true;
+    // copy its children instead, retaining no-replace checks for every entry.
+    for (const entry of readdirSync(staged.content)) {
+      cpSync(path.join(staged.content, entry), path.join(target, entry), {
+        recursive: true, force: false, errorOnExist: true,
+      });
+    }
     const stagedDigest = directoryDigest(staged.content);
     const targetDigest = directoryDigest(target, { ignoreRootEntries: [PUBLISH_MARKER] });
     if (!stagedDigest || stagedDigest !== targetDigest) {

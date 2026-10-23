@@ -296,6 +296,7 @@ import {
 import {
   nativeToolResultAgingEnabled,
   toolResultAgingEnabled,
+  toolResultAgingOptions,
 } from "./tool-result-aging-state.mjs";
 import { VERSION } from "./version.mjs";
 import {
@@ -4217,6 +4218,7 @@ async function prepareProviderInput(
     scope: recoveryScope,
     enabled: agingEnabled,
     denseShaping,
+    ...toolResultAgingOptions(route?.slug),
   });
   const bounded = boundImagePayload(aged.input, {
     ...imageLimits,

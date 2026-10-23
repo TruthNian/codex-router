@@ -17,10 +17,49 @@ const {
   setToolResultAgingEnabled,
   toolResultAgingEnabled,
   toolResultAgingSnapshot,
+  toolResultAgingOptions,
+  setToolResultAgingMinBytes,
+  setToolResultReadbackHint,
 } = await import("../src/tool-result-aging-state.mjs");
 
 const { RETENTION_DEFAULT_TTL_DAYS } = await import("../src/tool-result-retention.mjs");
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+test("per-model floors and readback hints are opt-in and survive unrelated settings", () => {
+  forgetState();
+  const model = "custom/z-ai/glm-5.3";
+  assert.deepEqual(toolResultAgingOptions(model), {minBytes: 32768, readbackHint: false});
+  setToolResultAgingMinBytes(model, 16384);
+  setToolResultReadbackHint(model, true);
+  setToolResultAgingEnabled(true);
+  setNativeToolResultAgingEnabled(false);
+  setRetentionTtlDays(5);
+  assert.deepEqual(toolResultAgingOptions(model), {minBytes: 16384, readbackHint: true, minSavingsBytes: 131072});
+  for (const other of [undefined, "gpt-6.1-sol", "custom/other"]) {
+    assert.deepEqual(toolResultAgingOptions(other), {minBytes: 32768, readbackHint: false});
+  }
+  assert.equal(readToolResultAgingSettings().retentionTtlDays, 5);
+  setToolResultAgingMinBytes(model, undefined);
+  assert.deepEqual(toolResultAgingOptions(model), {minBytes: 32768, readbackHint: true, minSavingsBytes: 131072});
+  setToolResultReadbackHint(model, false);
+  assert.equal("modelMinBytes" in readToolResultAgingSettings(), false);
+  assert.equal("readbackHintModels" in readToolResultAgingSettings(), false);
+  forgetState();
+});
+
+test("malformed model policies cannot lower an unrelated floor or enable hints", () => {
+  forgetState();
+  for (const bad of [null, [], "16384", {"custom/test": 1}, {"custom/test": "16384"}, {"custom/test": 16384.5}]) {
+    writeFileSync(TOOL_RESULT_AGING_STATE_PATH, JSON.stringify({version: 1, enabled: true, modelMinBytes: bad, readbackHintModels: "custom/test"}));
+    assert.deepEqual(toolResultAgingOptions("custom/test"), {minBytes: 32768, readbackHint: false});
+  }
+  for (const bad of [null, 0, -1, 8191, 32769, NaN, Infinity, 16384.5, "16384"]) {
+    assert.throws(() => setToolResultAgingMinBytes("custom/test", bad));
+  }
+  assert.throws(() => setToolResultReadbackHint("custom/test", "true"));
+  assert.throws(() => setToolResultAgingMinBytes("../outside\n", 16384));
+  forgetState();
+});
 
 function forgetState() {
   rmSync(TOOL_RESULT_AGING_STATE_PATH, { force: true });

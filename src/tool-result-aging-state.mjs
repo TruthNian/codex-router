@@ -13,6 +13,7 @@ import {
   retentionTtlMsFromDays,
 } from "./tool-result-retention.mjs";
 import { toolResultAgingTotals } from "./usage-events.mjs";
+import { TOOL_RESULT_AGING_MIN_BYTES } from "./tool-result-aging.mjs";
 
 export const TOOL_RESULT_AGING_STATE_PATH =
   process.env.MODEL_ROUTER_TOOL_RESULT_AGING_STATE ||
@@ -74,12 +75,73 @@ export function readToolResultAgingSettings() {
         // the default rather than as "keep forever" -- those installs never
         // had a choice to preserve.
         retentionTtlDays: readRetentionTtlDays(parsed.retentionTtlDays),
+        ...modelThresholds(parsed.modelMinBytes),
+        ...readbackHintSettings(parsed.readbackHintModels),
       };
     }
   } catch {
     // A malformed explicit choice must not silently change routed context.
   }
   return disabledSettings();
+}
+
+// Per-model opt-in only. Existing installations keep the 32KiB policy; an
+// invalid entry cannot lower the floor. Keep the frontier and recovery checks
+// in the shared aging pass, regardless of this size policy.
+function validModel(model) {
+  return typeof model === "string" && /^[a-z0-9][a-z0-9._/-]{0,199}$/u.test(model);
+}
+
+function validMinBytes(value) {
+  return Number.isSafeInteger(value) && value >= 8 * 1024 && value <= TOOL_RESULT_AGING_MIN_BYTES;
+}
+
+function modelThresholds(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const entries = Object.entries(value).filter(([model, bytes]) => validModel(model) && validMinBytes(bytes));
+  return entries.length ? { modelMinBytes: Object.fromEntries(entries) } : {};
+}
+
+function readbackHintSettings(value) {
+  const models = Array.isArray(value) ? [...new Set(value.filter(validModel))].sort() : [];
+  return models.length ? { readbackHintModels: models } : {};
+}
+
+export function toolResultAgingOptions(model) {
+  const settings = readToolResultAgingSettings();
+  return {
+    minBytes: settings.modelMinBytes && Object.hasOwn(settings.modelMinBytes, model)
+      ? settings.modelMinBytes[model] : TOOL_RESULT_AGING_MIN_BYTES,
+    readbackHint: settings.readbackHintModels?.includes(model) === true,
+    ...(settings.readbackHintModels?.includes(model) === true ? { minSavingsBytes: 128 * 1024 } : {}),
+  };
+}
+
+export function toolResultAgingMinBytes(model) {
+  return toolResultAgingOptions(model).minBytes;
+}
+
+export function setToolResultReadbackHint(model, enabled) {
+  if (!validModel(model) || typeof enabled !== "boolean") throw new Error("Readback hint requires a model slug and boolean.");
+  const current = readToolResultAgingSettings();
+  const models = new Set(current.readbackHintModels || []);
+  if (enabled) models.add(model);
+  else models.delete(model);
+  const { defaulted: _defaulted, readbackHintModels: _previous, ...rest } = current;
+  return writeSettings({ ...rest, ...readbackHintSettings([...models]) });
+}
+
+export function setToolResultAgingMinBytes(model, bytes) {
+  if (!validModel(model)) throw new Error("Aging threshold requires a valid model slug.");
+  if (bytes !== undefined && !validMinBytes(bytes)) {
+    throw new Error("Aging threshold must be an integer between 8192 and 32768 bytes.");
+  }
+  const current = readToolResultAgingSettings();
+  const entries = new Map(Object.entries(current.modelMinBytes || {}));
+  if (bytes === undefined) entries.delete(model);
+  else entries.set(model, bytes);
+  const { defaulted: _defaulted, modelMinBytes: _previous, ...rest } = current;
+  return writeSettings({ ...rest, ...modelThresholds(Object.fromEntries(entries)) });
 }
 
 function writeSettings(settings) {
@@ -94,6 +156,8 @@ export function setToolResultAgingEnabled(enabled) {
     enabled: enabled === true,
     nativeEnabled: current.nativeEnabled === true,
     retentionTtlDays: current.retentionTtlDays,
+    ...modelThresholds(current.modelMinBytes),
+    ...readbackHintSettings(current.readbackHintModels),
   });
 }
 
@@ -104,6 +168,8 @@ export function setNativeToolResultAgingEnabled(enabled) {
     enabled: current.enabled === true,
     nativeEnabled: enabled === true,
     retentionTtlDays: current.retentionTtlDays,
+    ...modelThresholds(current.modelMinBytes),
+    ...readbackHintSettings(current.readbackHintModels),
   });
 }
 
@@ -136,6 +202,8 @@ export function setRetentionTtlDays(days) {
     enabled: current.enabled === true,
     nativeEnabled: current.nativeEnabled === true,
     retentionTtlDays: requested,
+    ...modelThresholds(current.modelMinBytes),
+    ...readbackHintSettings(current.readbackHintModels),
   });
 }
 

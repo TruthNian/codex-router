@@ -279,7 +279,10 @@ test("full capacity, failed disk writes and ACL failures preserve the full resul
 });
 
 test("concurrent store contention fails open, then succeeds after release", async t => {
-  const options = await fixture(t);
+  // This checks lock ownership, not elapsed retention time. Real Windows ACL
+  // helpers can outlast the short fixture TTL under load; expiry is exercised
+  // separately with an explicitly advanced clock.
+  const options = { ...await fixture(t), now: Date.now() };
   const saved = await retainToolResult(full, options);
   const release = await acquireFileLock(options.directory, { realpath: false, lockfilePath: `${options.directory}.lock` });
   try {

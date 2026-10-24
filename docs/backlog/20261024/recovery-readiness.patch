@@ -1,0 +1,757 @@
+diff --git a/changelog.d/recovery-readiness-finalization.md b/changelog.d/recovery-readiness-finalization.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/recovery-readiness-finalization.md
+@@ -0,0 +1 @@
++- Reuse serialized readiness finalization after dependency recovery, retain current required-child and exact Antigravity activation checks, and propagate unconfirmed rollback failures to the owning service.
+diff --git a/src/gateway-supervisor.mjs b/src/gateway-supervisor.mjs
+--- a/src/gateway-supervisor.mjs
++++ b/src/gateway-supervisor.mjs
+@@ -23,4 +23,2 @@
+-//   1. **Only after the gateway has been healthy once.** A gateway that never
+-//      came up is a configuration or dependency failure, and retrying it hides
+-//      the message the operator needs. Startup failure is unchanged: it still
+-//      throws out of `main()` and takes the service down.
++//   1. **A bounded startup allowance.** Failed initial readiness is visible;
++//      recovery runs while independent native/direct routes keep serving.
+@@ -28,2 +26,3 @@
+-//      `windowMs`; past that the supervisor returns and the service exits so
+-//      the OS supervisor performs a genuinely clean restart. Without the
++//      `windowMs`; past that the supervisor returns an exhausted result. The
++//      service owner decides whether independent routes remain available.
++//      Without the
+@@ -131,0 +131,15 @@ function reason(error) {
++// Cancel both watchdog and restart waits when their owning epoch ends. A
++// stopped child must not leave a referenced 15-second watchdog timer behind.
++function supervisorSleep(ms, signal) {
++  if (signal?.aborted || !(ms > 0)) return Promise.resolve();
++  return new Promise((resolve) => {
++    const finish = () => {
++      clearTimeout(timer);
++      signal?.removeEventListener("abort", finish);
++      resolve();
++    };
++    const timer = setTimeout(finish, ms);
++    signal?.addEventListener("abort", finish, { once: true });
++  });
++}
++
+@@ -146,0 +161 @@ async function waitForExitOrUnhealthy(
++    signal,
+@@ -150,0 +166,3 @@ async function waitForExitOrUnhealthy(
++  const watchdogController = new AbortController();
++  const watchdogSignal = signal
++    ? AbortSignal.any([signal, watchdogController.signal]) : watchdogController.signal;
+@@ -155 +173 @@ async function waitForExitOrUnhealthy(
+-      await sleep(healthIntervalMs);
++      await sleep(healthIntervalMs, watchdogSignal);
+@@ -183,0 +202 @@ async function waitForExitOrUnhealthy(
++  watchdogController.abort();
+@@ -204 +223,3 @@ export async function superviseGateway({
+-  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
++  sleep = supervisorSleep,
++  signal,
++  onHealthy,
+@@ -230,0 +252 @@ export async function superviseGateway({
++          signal,
+@@ -260 +282 @@ export async function superviseGateway({
+-    await sleep(wait);
++    await sleep(wait, signal);
+@@ -274,0 +297 @@ export async function superviseGateway({
++    let healthy = false;
+@@ -293,0 +317 @@ export async function superviseGateway({
++      healthy = true;
+@@ -300,0 +325,4 @@ export async function superviseGateway({
++    // Application finalization can fail after an otherwise healthy restart
++    // (for example, an exact proof rollback was not confirmed). That is fatal
++    // to the service owner, not a reason to kill/retry this healthy dependency.
++    if (healthy && !isShuttingDown()) await onHealthy?.();
+diff --git a/src/start.mjs b/src/start.mjs
+--- a/src/start.mjs
++++ b/src/start.mjs
+@@ -318,9 +337,0 @@ function waitForHealth(label, url, headers = {}, timeoutMs = 30_000, expectedSer
+-// Each child answers SIGTERM by draining what is in flight for up to
+-// SHUTDOWN_DRAIN_MS and then ending those responses cleanly, so this backstop
+-// has to outlast that. It used to fire at three seconds flat, which killed a
+-// router still holding a streaming turn open -- and a SIGKILLed socket is an
+-// RST, which Codex reports as `error decoding response body` rather than as
+-// the restart it was. Derive the deadline from the drain so the two cannot
+-// drift apart; the margin covers the exit itself.
+-const SIGKILL_AFTER_MS = SHUTDOWN_DRAIN_MS + SHUTDOWN_FLUSH_MS + 2_000;
+-
+@@ -446,2 +435,2 @@ async function main() {
+-  const gatewayHealthy = (child) =>
+-    waitForHealth(
++  const gatewayHealthy = async (child) => {
++    await waitForHealth(
+@@ -454,0 +444,2 @@ async function main() {
++    markHealthy("gateway", child);
++  };
+@@ -496,0 +467,57 @@ async function main() {
++  let finalization = Promise.resolve();
++  let finalizationFailure;
++  let antigravityPromoted = false;
++  const finalizeHealthyGeneration = (healthTimeoutMs) => {
++    const next = finalization.then(async () => {
++      if (finalizationFailure) throw finalizationFailure;
++      if (shuttingDown) return false;
++      try {
++        await waitForHealth(frontend.label, loopback(PORTS.router, "/health"), {},
++          healthTimeoutMs, frontendService, router);
++      } catch (error) {
++        if (!shuttingDown) console.error(`[${frontendService}] dependency readiness unavailable: ${error.message}`);
++        return false;
++      }
++      if (shuttingDown) return false;
++      // Read the slots after the aggregate probe: another recovery may have
++      // replaced a child while it was in flight. Never omit a dead/missing
++      // required child to make the activation appear ready.
++      const current = [...currentChildren.values()];
++      if (current.some(({ child, healthy }) => !healthy || !child || child.exitCode !== null || child.signalCode !== null)) {
++        console.error(`[${frontendService}] dependency readiness lost its current child; activation remains pending.`);
++        return false;
++      }
++      if (!antigravityPromoted && antigravityStartup.pendingActivationGeneration) {
++        antigravityPromoted = await attemptAntigravityProbePromotionAfterReadiness({
++          generation: antigravityStartup.pendingActivationGeneration,
++          sessionGeneration: antigravityStartup.pendingSessionGeneration,
++          children: current.map(({ child }) => child),
++        });
++        if (!antigravityPromoted && !shuttingDown) {
++          console.error("[codex-router] Antigravity live-proof activation was superseded or startup lost a child; the route remains disabled.");
++        }
++      }
++      if (shuttingDown) return false;
++      const latest = [...currentChildren.values()];
++      if (latest.length !== current.length || latest.some((value, index) =>
++        value !== current[index] || !value.healthy || !value.child ||
++        value.child.exitCode !== null || value.child.signalCode !== null)) {
++        console.error(`[${frontendService}] dependency changed during activation; readiness must be confirmed again.`);
++        return false;
++      }
++      // Promotion is the last bootstrap write. Both initial readiness and
++      // later recovery retire startup allowances before catalog publication.
++      clearStartupTimeouts(process.env);
++      startupReady = true;
++      if (automaticStartup) {
++        try { clearStartupAttempts(); } catch { /* Operational cache only. */ }
++      }
++      await startNativeCatalogWatch();
++      return true;
++    });
++    finalization = next.catch((error) => { finalizationFailure = error; });
++    return next;
++  };
++  const ready = !gatewayStartupError && readiness.every((result) => result.status === "fulfilled")
++    ? await finalizeHealthyGeneration(STARTUP_CHILD_HEALTH_TIMEOUT_MS)
++    : false;
+@@ -498,2 +525,2 @@ async function main() {
+-  // Pending activation is the last supervisor bootstrap write. Retire startup
+-  // settings only after it settles, before publishers can perform runtime writes.
++  // A degraded initial attempt also retires its bootstrap environment. A
++  // later recovery uses runtime bounds and the captured exact proof generation.
+@@ -502,12 +528,0 @@ async function main() {
+-  // Keep the native catalog fresh while the service is alive, including while
+-  // Codex Desktop is closed, so its next startup reads newly released models.
+-  // The immediate pass also handles an already stale cache after service boot.
+-  import("./native-catalog-drift.mjs")
+-    .then(({ watchNativeCatalog }) => {
+-      if (shuttingDown) return;
+-      stopNativeCatalogWatch = watchNativeCatalog({ immediate: true });
+-    })
+-    .catch((error) => {
+-      console.error(`[codex-router] Native drift check failed: ${error.message}`);
+-    });
+-
+@@ -517,0 +533 @@ async function main() {
++    track("cursor-edge", cursorEdge);
+@@ -525,0 +542 @@ async function main() {
++    markHealthy("cursor-edge", cursorEdge);
+@@ -533,0 +551 @@ async function main() {
++  if (cursorTunnel) track("cursor-tunnel", cursorTunnel, true);
+@@ -535,9 +553,15 @@ async function main() {
+-  console.error(`[${frontendService}] ready (authenticated loopback endpoint)`);
+-  startupReady = true;
+-  // The service is serving, so the previous failures are over: clear the
+-  // back-off record rather than leaving it to delay the next legitimate start.
+-  if (automaticStartup) {
+-    try {
+-      clearStartupAttempts();
+-    } catch {
+-      // The operational cache must not interrupt a healthy stack.
++  console.error(ready
++    ? `[${frontendService}] ready (authenticated loopback endpoint)`
++    : `[${frontendService}] serving independent routes; selected dependencies are degraded.`);
++  startupReady = ready;
++  // A dependency may exhaust its bounded restart allowance without ending
++  // independent native/direct routes. Readiness stays degraded and publication
++  // fails closed; a manual service restart starts a new bounded recovery epoch.
++  const keepIndependentRoutes = async (supervision) => {
++    const result = await supervision;
++    // A canceled recovery can carry an old dependency exit status. During
++    // intentional shutdown only the frontend's actual exit settles main().
++    if (shuttingDown) return new Promise(() => {});
++    if (!shuttingDown && result.exhausted) {
++      console.error(`[${frontendService}] ${result.label} recovery exhausted; independent routes remain available.`);
++      return new Promise(() => {});
+@@ -545,6 +569,10 @@ async function main() {
+-  }
+-  // Only the gateway is supervised. The forwarders and the router are ours and
+-  // are restarted by rebuilding the whole service; the gateway is a third-party
+-  // Python process that can end itself on a single bad upstream response
+-  // (issue #261, a 429 raised out of LiteLLM's exception mapping), and taking
+-  // the router down with it turned one failed request into a dead session.
++    return result;
++  };
++  const supervisionOptions = {
++    waitForExit,
++    isShuttingDown: () => shuttingDown,
++    signal: shutdownController.signal,
++    onHealthy: () => finalizeHealthyGeneration(4_000),
++    log: (message) => console.error(`[${frontendService}] ${message}`),
++    ...gatewaySupervisorLimits(),
++  };
+@@ -552,16 +580,9 @@ async function main() {
+-    ...(kimiForwarder ? [waitForExit(kimiForwarder, "OAuth forwarder")] : []),
+-    waitForExit(api, "API forwarder"),
+-    ...(grokForwarder ? [waitForExit(grokForwarder, "Grok OAuth forwarder")] : []),
+-    ...(antigravityForwarder
+-      ? [waitForExit(antigravityForwarder, "Antigravity OAuth forwarder")]
+-      : []),
+-    // Only when it is actually running. A forwarder of ours that dies is a bug
+-    // report, and the rule above is that the service exits so the OS supervisor
+-    // rebuilds it -- leaving this one out of the race would instead strand a
+-    // Devin user on connection errors with nothing to notice them. An install
+-    // that never spawned it adds no entry, so this cannot end anyone else's
+-    // session.
+-    ...(devinForwarder ? [waitForExit(devinForwarder, "Devin CLI forwarder")] : []),
+-    ...(cursorEdge ? [waitForExit(cursorEdge, "Cursor public edge")] : []),
+-    ...(cursorTunnel ? [waitForExit(cursorTunnel, "Cursor named tunnel")] : []),
+-    ...(gateway ? [superviseGateway({
++    ...forwarders.map((forwarder) => keepIndependentRoutes(superviseGateway({
++      ...supervisionOptions,
++      label: forwarder.label,
++      child: forwarder.child,
++      start: forwarder.start,
++      waitForHealth: forwarder.waitForHealth,
++    }))),
++    ...(gateway ? [keepIndependentRoutes(superviseGateway({
++      ...supervisionOptions,
+@@ -571 +591,0 @@ async function main() {
+-      waitForExit,
+@@ -574,4 +594,3 @@ async function main() {
+-      isShuttingDown: () => shuttingDown,
+-      log: (message) => console.error(`[${frontendService}] ${message}`),
+-      ...gatewaySupervisorLimits(),
+-    })] : []),
++    }))] : []),
++    ...(cursorEdge ? [waitForExit(cursorEdge, "Cursor public edge")] : []),
++    ...(cursorTunnel ? [waitForExit(cursorTunnel, "Cursor named tunnel")] : []),
+diff --git a/test/gateway-supervisor.test.mjs b/test/gateway-supervisor.test.mjs
+--- a/test/gateway-supervisor.test.mjs
++++ b/test/gateway-supervisor.test.mjs
+@@ -1,0 +2 @@ import assert from "node:assert/strict";
++import { spawn } from "node:child_process";
+@@ -147,0 +149,19 @@ test("a replacement that never becomes healthy is stopped and counted", async ()
++test("a healthy replacement's fatal finalization error reaches its service owner without a restart", async () => {
++  const fatal = Object.assign(new Error("proof rollback was not confirmed"), {
++    code: "antigravity_activation_rollback_failed",
++  });
++  let finalizations = 0;
++  const supervisor = harness({ limits: { onHealthy: async () => {
++    finalizations += 1;
++    throw fatal;
++  } } });
++  const rejected = assert.rejects(supervisor.done, (error) => error === fatal);
++  supervisor.spawned[0].exit(1);
++  await rejected;
++  assert.equal(finalizations, 1);
++  assert.equal(supervisor.spawned.length, 2);
++  assert.deepEqual(supervisor.spawned[1].killed, [], "a healthy dependency must not be killed for a fatal application write");
++  assert.ok(!supervisor.logs.some((line) => line.includes("did not come back")));
++  supervisor.spawned[1].exit(0);
++});
++
+@@ -423,0 +444,69 @@ test("a replacement still starting after one budget is waited on, not killed", a
++
++test("the default 15-second watchdog wait cannot keep its finished supervisor process alive", { timeout: 10_000 }, async (t) => {
++  for (const ending of ["child exit", "shutdown abort", "child exit without watchdog cancellation"]) {
++    await t.test(ending, async (subtest) => {
++      const moduleUrl = new URL("../src/gateway-supervisor.mjs", import.meta.url).href;
++      const removeCancellation = ending === "child exit without watchdog cancellation";
++      const fixture = `
++        import { spawn } from "node:child_process";
++        import { registerHooks } from "node:module";
++        if (${removeCancellation}) registerHooks({ load(url, context, nextLoad) {
++          const result = nextLoad(url, context);
++          if (url !== ${JSON.stringify(moduleUrl)}) return result;
++          const source = Buffer.from(result.source).toString();
++          const changed = source.replace("watchdogController.abort();", "");
++          if (changed === source) throw new Error("The watchdog negative control did not apply.");
++          return { ...result, source: changed };
++        }});
++        const { superviseGateway } = await import(${JSON.stringify(moduleUrl)});
++        const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 100)"], {
++          stdio: "ignore", windowsHide: true
++        });
++        const controller = new AbortController();
++        let shuttingDown = false;
++        let healthChecks = 0;
++        const done = superviseGateway({
++          child, start: () => { throw new Error("A finished fixture must not restart."); },
++          waitForExit: (owned, label) => new Promise((resolve) =>
++            owned.once("exit", (code, signal) => resolve({ label, code, signal }))),
++          waitForHealth: async () => {}, healthCheck: async () => { healthChecks += 1; },
++          isShuttingDown: () => shuttingDown, signal: controller.signal,
++          maxRestarts: 0, log: () => {}
++        });
++        if (${JSON.stringify(ending)} === "shutdown abort") setTimeout(() => {
++          shuttingDown = true; controller.abort(); child.kill("SIGTERM");
++        }, 50);
++        await done;
++        console.log(JSON.stringify({ settled: true, healthChecks }));
++      `;
++      const child = spawn(process.execPath, ["--input-type=module", "-e", fixture], {
++        env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
++      });
++      const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
++      subtest.after(async () => {
++        if (child.exitCode === null && child.signalCode === null) { child.kill("SIGKILL"); await exited; }
++      });
++      let output = "";
++      let errors = "";
++      let settled;
++      const observedSettlement = new Promise((resolve) => { settled = resolve; });
++      child.stdout.on("data", (chunk) => { output += chunk; if (output.includes('"settled":true')) settled(); });
++      child.stderr.on("data", (chunk) => { errors += chunk; });
++      const bounded = async (promise, message) => {
++        let timer;
++        try { return await Promise.race([promise, new Promise((_, reject) => {
++          timer = setTimeout(() => reject(new Error(`${message}: ${errors}`)), 2_000);
++        })]); } finally { clearTimeout(timer); }
++      };
++      await bounded(observedSettlement, "supervisor did not settle");
++      if (removeCancellation) {
++        const exitedNaturally = await Promise.race([exited.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 500))]);
++        assert.equal(exitedNaturally, false, "removing epoch cancellation must retain the default watchdog's referenced timer");
++      } else {
++        const result = await bounded(exited, "the finished supervisor leaked its referenced 15-second watchdog sleep");
++        assert.deepEqual(result, { code: 0, signal: null }, errors);
++      }
++      assert.deepEqual(JSON.parse(output.trim()), { settled: true, healthChecks: 0 });
++    });
++  }
++});
+diff --git a/test/startup-recovery-finalization.test.mjs b/test/startup-recovery-finalization.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/startup-recovery-finalization.test.mjs
+@@ -0,0 +1,292 @@
++import assert from "node:assert/strict";
++import { spawn } from "node:child_process";
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import test from "node:test";
++import { fileURLToPath } from "node:url";
++import { userModelEntry } from "../src/user-models.mjs";
++
++const root = fileURLToPath(new URL("..", import.meta.url));
++
++// Load the real entry point, supervisor, child shutdown and exact-promotion
++// helper in a fresh process. Replace OS spawn/identity/health and publication I/O:
++// the real start() closures, recovery callbacks and finalization are exercised.
++const entry = String.raw`
++  import { registerHooks } from "node:module";
++  import { EventEmitter } from "node:events";
++  import { pathToFileURL } from "node:url";
++  import path from "node:path";
++  const mode = process.env.RECOVERY_FIXTURE_MODE;
++  const root = process.cwd();
++  const startUrl = pathToFileURL(path.join(root, "src/start.mjs")).href;
++  const exact = await import(pathToFileURL(path.join(root, "src/antigravity-probe-activation.mjs")).href);
++  const trace = { promotions: [], promoteWrites: 0, rollbackWrites: 0, watches: 0,
++    backoffClears: 0, aggregateProbes: 0, activeProof: false, handles: [], maxConcurrent: 0 };
++  const current = new Map();
++  const counts = new Map();
++  let concurrent = 0;
++  let releaseHealth;
++  let storedGeneration = "captured-proof-generation";
++  class Child extends EventEmitter {
++    constructor(service, index) {
++      super(); this.service = service; this.index = index; this.exitCode = null; this.signalCode = null;
++      this.connected = true; this.pid = 990000 + trace.handles.length;
++      trace.handles.push(this); current.set(service, this);
++    }
++    exit(code, signal = null) {
++      if (this.exitCode !== null || this.signalCode !== null) return;
++      this.exitCode = signal ? null : code; this.signalCode = signal;
++      this.connected = false; this.emit("exit", code, signal); this.emit("close", code, signal);
++    }
++    kill(signal) { this.exit(0, signal); return true; }
++    send(message, callback) { queueMicrotask(() => { callback?.(); this.exit(0); }); return true; }
++  }
++  const fixture = {
++    spawn(command, args, options) {
++      const name = path.basename(args[0] || "");
++      const service = args[0] === "--config" ? "gateway" : name === "router.mjs" ? "router"
++        : name === "api-forwarder.mjs" ? "api" : name === "antigravity-oauth-forwarder.mjs" ? "antigravity" : name;
++      const index = counts.get(service) || 0; counts.set(service, index + 1);
++      const child = new Child(service, index);
++      if (Object.keys(options.env).some((key) => /STARTUP_HEALTH_TIMEOUT_MS|GATEWAY_HEALTH_TIMEOUT_MS/.test(key))) {
++        throw new Error("startup allowances leaked to a runtime child");
++      }
++      return child;
++    },
++    antigravityOAuthStartupState() {
++      return { pendingActivationGeneration: "captured-proof-generation", pendingSessionGeneration: "captured-session-generation" };
++    },
++    async pollHealth({ child, url }) {
++      if (new URL(url).pathname === "/health/live") return;
++      if (child.service === "router") {
++        trace.aggregateProbes += 1;
++        if (mode === "shutdown" && trace.aggregateProbes === 1) {
++          process.send({ phase: "shutdown-gate" });
++          await new Promise((resolve) => { releaseHealth = resolve; });
++        }
++        // Deliberately stale aggregate success in the dead-required-child
++        // negative control: individual current-child evidence must still win.
++        if (["dead-required", "missing-gateway"].includes(mode)) queueMicrotask(() => process.send({ phase: "blocked" }));
++        return;
++      }
++      const initiallyFails = child.service === "antigravity" && mode === "dead-required" || child.index === 0 && (
++        child.service === "api" && mode !== "initial" && mode !== "gateway"
++        || child.service === "antigravity" && ["concurrent", "dead-required"].includes(mode)
++        || child.service === "gateway" && mode === "gateway"
++      );
++      if (initiallyFails) {
++        child.exit(1); throw new Error(child.service + " exited before becoming healthy.");
++      }
++      if (mode === "superseded" && child.service === "api" && child.index === 1) storedGeneration = "newer-proof-generation";
++      if (mode === "rollback-safe" && child.service === "api" && child.index === 2) {
++        process.send({ phase: "safe-rollback-observed" });
++        await new Promise((resolve) => { releaseHealth = resolve; });
++      }
++      return;
++    },
++    async promote(options) {
++      concurrent += 1; trace.maxConcurrent = Math.max(trace.maxConcurrent, concurrent);
++      trace.promotions.push({ generation: options.generation, sessionGeneration: options.sessionGeneration,
++        bootstrap: process.env.CODEX_ROUTER_STARTUP_HEALTH_TIMEOUT_MS,
++        children: options.children.map((child) => ({ service: child.service, index: child.index, code: child.exitCode })) });
++      try {
++        return await exact.attemptAntigravityProbePromotionAfterReadiness({ ...options,
++          promote: async (generation, sessionGeneration) => {
++            if (generation !== storedGeneration || sessionGeneration !== "captured-session-generation") return false;
++            trace.promoteWrites += 1; trace.activeProof = true;
++            await new Promise((resolve) => setTimeout(resolve, 20));
++            if (["rollback-fatal", "rollback-safe"].includes(mode)) current.get("api").exit(1);
++            return true;
++          },
++          rollback: async (generation, sessionGeneration) => {
++            if (generation !== "captured-proof-generation" || sessionGeneration !== "captured-session-generation") throw new Error("wrong rollback generation");
++            trace.rollbackWrites += 1;
++            if (mode === "rollback-safe") { trace.activeProof = false; return true; }
++            return false;
++          },
++        });
++      } finally { concurrent -= 1; }
++    },
++    clearBackoff() {
++      if (process.env.CODEX_ROUTER_STARTUP_HEALTH_TIMEOUT_MS !== undefined) throw new Error("bootstrap allowance remained during runtime publication");
++      trace.backoffClears += 1;
++    },
++    watch() {
++      if (process.env.CODEX_ROUTER_STARTUP_HEALTH_TIMEOUT_MS !== undefined) throw new Error("bootstrap allowance remained during runtime publication");
++      trace.watches += 1; process.send({ phase: "finalized" }); return () => {};
++    },
++  };
++  globalThis.recoveryFixture = fixture;
++  process.on("message", (message) => {
++    if (message.type === "model-router:shutdown") releaseHealth?.();
++  });
++  registerHooks({ load(url, context, nextLoad) {
++    const result = nextLoad(url, context);
++    if (url.endsWith("/native-catalog-drift.mjs")) {
++      return { ...result, source: "export const watchNativeCatalog = () => globalThis.recoveryFixture.watch();" };
++    }
++    if (url.endsWith("/native-catalog-events.mjs")) {
++      return { ...result, source: "export const subscribeNativeCatalogEvents = () => () => {};" };
++    }
++    if (url !== startUrl) return result;
++    let source = Buffer.from(result.source).toString();
++    for (const [before, after] of [
++      ['import { spawn } from "node:child_process";', 'const { spawn } = globalThis.recoveryFixture;'],
++      ['import { waitForHealth as pollHealth } from "./health-probe.mjs";', 'const { pollHealth } = globalThis.recoveryFixture;'],
++      ['import { antigravityOAuthStartupState } from "./antigravity-oauth-status.mjs";', 'const { antigravityOAuthStartupState } = globalThis.recoveryFixture;'],
++      ['import { attemptAntigravityProbePromotionAfterReadiness } from "./antigravity-probe-activation.mjs";', 'const attemptAntigravityProbePromotionAfterReadiness = globalThis.recoveryFixture.promote;'],
++    ]) {
++      if (!source.includes(before)) throw new Error("fixture source boundary disappeared: " + before);
++      source = source.replace(before, after);
++    }
++    source = source.replaceAll("clearStartupAttempts();", "globalThis.recoveryFixture.clearBackoff();");
++    // This controlled entry uses --eval, not the OS-managed start.mjs command
++    // line. Process-record identity has separate real OS tests; no fabricated
++    // managed PID record should be written by this lifecycle fixture.
++    if (!source.includes("if (shouldRecordServiceProcess()) {")) throw new Error("fixture identity boundary disappeared");
++    source = source.replace("if (shouldRecordServiceProcess()) {", "if (false) {");
++    return { ...result, source };
++  }});
++  await import(startUrl);
++  trace.bootstrapRetired = process.env.CODEX_ROUTER_STARTUP_HEALTH_TIMEOUT_MS === undefined;
++  trace.handles = trace.handles.map(({ service, index, exitCode }) => ({ service, index, exitCode }));
++  process.stdout.write(JSON.stringify(trace) + "\n");
++`;
++
++async function run(mode) {
++  const directory = mkdtempSync(path.join(os.tmpdir(), "startup-finalization-"));
++  const state = path.join(directory, "state");
++  const home = path.join(directory, "codex");
++  mkdirSync(state, { recursive: true });
++  mkdirSync(home, { recursive: true });
++  writeFileSync(path.join(state, "internal-secret"), "synthetic-finalization-internal-secret-long\n");
++  writeFileSync(path.join(state, "caller-secret"), "synthetic-finalization-caller-capability-long\n");
++  writeFileSync(path.join(state, "enabled-providers.json"), JSON.stringify({ version: 1, providers: [] }));
++  writeFileSync(path.join(state, "generic-providers.json"), JSON.stringify({ version: 1, providers: [{
++    id: "recovery-api", displayName: "Synthetic recovery provider", baseUrl: "http://127.0.0.1:9/v1",
++    adapter: ["gateway", "missing-gateway"].includes(mode) ? "openai-chat" : "openai-responses", headers: { "X-Tenant": "synthetic" }, allowPrivate: true, enabled: true,
++  }] }));
++  writeFileSync(path.join(state, "user-models.json"), JSON.stringify({ version: 1,
++    models: [userModelEntry({ providerId: "recovery-api", upstreamId: "synthetic-model", priority: 100 })] }));
++  const env = { ...process.env };
++  for (const name of Object.keys(env)) {
++    if (/^(MODEL_ROUTER_|CODEX_ROUTER_|ROUTER_PLANE_)/.test(name) || /(?:API_KEY|TOKEN|SECRET)$/i.test(name)) delete env[name];
++  }
++  Object.assign(env, {
++    CODEX_HOME: home, HOME: directory, USERPROFILE: directory, APPDATA: path.join(directory, "AppData", "Roaming"), LOCALAPPDATA: path.join(directory, "AppData", "Local"),
++    MODEL_ROUTER_STATE_DIR: state, CODEX_ROUTER_STATE_DIR: state, MODEL_ROUTER_TARGET: "codex",
++    CODEX_ROUTER_SHOW_ALL_MODELS: "0", CODEX_ROUTER_NO_DISCOVERY: "1", CODEX_ROUTER_SERVICE_PLATFORM: "test-fixture",
++    MODEL_ROUTER_LITELLM_BIN: mode === "missing-gateway" ? path.join(directory, "absent-litellm") : process.execPath, CODEX_NATIVE_BASE_URL: "http://127.0.0.1:9/unused-native",
++    CODEX_ROUTER_GATEWAY_RESTART_BACKOFF_MS: "1", CODEX_ROUTER_STARTUP_HEALTH_TIMEOUT_MS: "2000",
++    MODEL_ROUTER_SHUTDOWN_DRAIN_MS: "10", MODEL_ROUTER_SHUTDOWN_FLUSH_MS: "10", RECOVERY_FIXTURE_MODE: mode,
++    NODE_USE_ENV_PROXY: "0",
++  });
++  const child = spawn(process.execPath, ["--input-type=module", "--eval", entry], {
++    cwd: root, env, stdio: ["ignore", "pipe", "pipe", "ipc"], windowsHide: true,
++  });
++  let output = "";
++  let errors = "";
++  child.stdout.on("data", (chunk) => { output += chunk; });
++  child.stderr.on("data", (chunk) => { errors += chunk; });
++  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
++  let shutdownSent = false;
++  child.on("message", () => {
++    if (child.connected && !shutdownSent) { shutdownSent = true; child.send({ type: "model-router:shutdown" }); }
++  });
++  let timer;
++  try {
++    const exit = await Promise.race([exited, new Promise((_, reject) => {
++      timer = setTimeout(() => reject(new Error("owned finalization fixture stalled: " + errors)), 8_000);
++    })]);
++    const trace = JSON.parse(output.trim().split("\n").at(-1));
++    return { ...exit, trace, errors };
++  } finally {
++    clearTimeout(timer);
++    if (child.exitCode === null && child.signalCode === null) { child.kill("SIGKILL"); await exited; }
++    const resolved = path.resolve(directory);
++    assert.ok(resolved.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`) && path.basename(resolved).startsWith("startup-finalization-"));
++    rmSync(resolved, { recursive: true, force: true });
++  }
++}
++
++for (const mode of ["initial", "recovery", "concurrent", "gateway"]) {
++  test(`${mode} readiness finalizes the captured proof with current dependency handles`, async () => {
++    const result = await run(mode);
++    assert.equal(result.code, 0, result.errors);
++    assert.equal(result.trace.promotions.length, 1, result.errors);
++    assert.equal(result.trace.promoteWrites, 1);
++    assert.equal(result.trace.activeProof, true);
++    assert.equal(result.trace.maxConcurrent, 1);
++    assert.equal(result.trace.watches, 1);
++    assert.equal(result.trace.bootstrapRetired, true);
++    const promotion = result.trace.promotions[0];
++    assert.equal(promotion.generation, "captured-proof-generation");
++    assert.equal(promotion.sessionGeneration, "captured-session-generation");
++    assert.ok(promotion.children.every((child) => child.code === null));
++    if (mode !== "initial") assert.equal(promotion.bootstrap, undefined, "recovery must use the retired runtime environment");
++    if (["recovery", "concurrent"].includes(mode)) assert.equal(promotion.children.find((child) => child.service === "api").index, 1);
++    if (mode === "concurrent") assert.equal(promotion.children.find((child) => child.service === "antigravity").index, 1);
++    if (mode === "gateway") assert.equal(promotion.children.find((child) => child.service === "gateway").index, 1);
++    assert.ok(result.trace.handles.every((child) => child.exitCode !== null), "all historical/current handles remain owned for shutdown");
++  });
++}
++
++test("an exited required child defeats stale aggregate health instead of being omitted", async () => {
++  const result = await run("dead-required");
++  assert.equal(result.code, 0, result.errors);
++  assert.equal(result.trace.promotions.length, 0);
++  assert.equal(result.trace.watches, 0);
++  assert.equal(result.trace.bootstrapRetired, true);
++  assert.match(result.errors, /dependency readiness lost its current child/);
++});
++
++test("a required gateway that was never spawned cannot be omitted during another service's recovery", async () => {
++  const result = await run("missing-gateway");
++  assert.equal(result.code, 0, result.errors);
++  assert.equal(result.trace.promotions.length, 0);
++  assert.equal(result.trace.watches, 0);
++  assert.equal(result.trace.bootstrapRetired, true);
++  assert.match(result.errors, /gateway unavailable: LiteLLM is not installed/);
++  assert.match(result.errors, /dependency readiness lost its current child/);
++});
++
++test("a newer proof does not replace the captured activation generation during recovery", async () => {
++  const result = await run("superseded");
++  assert.equal(result.code, 0, result.errors);
++  assert.equal(result.trace.promotions[0].generation, "captured-proof-generation");
++  assert.equal(result.trace.promoteWrites, 0);
++  assert.equal(result.trace.activeProof, false);
++  assert.match(result.errors, /activation was superseded/);
++});
++
++test("a recovery promotion whose exact rollback remains unconfirmed terminates the service", async () => {
++  const result = await run("rollback-fatal");
++  assert.equal(result.code, 1, result.errors);
++  assert.equal(result.trace.promoteWrites, 1);
++  assert.equal(result.trace.rollbackWrites, 2, "the real promotion helper retains its one exact rollback retry");
++  assert.equal(result.trace.watches, 0);
++  assert.equal(result.trace.backoffClears, 0);
++  assert.match(result.errors, /startup failed: Antigravity live-proof activation rollback was not confirmed/);
++  assert.doesNotMatch(result.errors, /did not come back: Antigravity/);
++});
++
++test("a successful exact rollback after a child death cannot finalize stale readiness or publish", async () => {
++  const result = await run("rollback-safe");
++  assert.equal(result.code, 0, result.errors);
++  assert.equal(result.trace.promoteWrites, 1);
++  assert.equal(result.trace.rollbackWrites, 1);
++  assert.equal(result.trace.activeProof, false);
++  assert.equal(result.trace.watches, 0);
++  assert.equal(result.trace.backoffClears, 0);
++  assert.match(result.errors, /dependency changed during activation/);
++});
++
++test("shutdown during recovered aggregate readiness cannot promote, clear backoff, or publish", async () => {
++  const result = await run("shutdown");
++  assert.equal(result.code, 0, result.errors);
++  assert.equal(result.trace.promotions.length, 0);
++  assert.equal(result.trace.watches, 0);
++  assert.equal(result.trace.backoffClears, 0);
++  assert.equal(result.trace.bootstrapRetired, true);
++});
+diff --git a/test/startup-retirement.test.mjs b/test/startup-retirement.test.mjs
+--- a/test/startup-retirement.test.mjs
++++ b/test/startup-retirement.test.mjs
+@@ -1,0 +2 @@ import assert from "node:assert/strict";
++import { EventEmitter } from "node:events";
+@@ -7,0 +9 @@ import { clearStartupTimeouts, startupTimeoutMs } from "../src/startup-timeout.m
++import { stopServiceChildren } from "../src/service-shutdown.mjs";
+@@ -13 +15 @@ import { clearStartupTimeouts, startupTimeoutMs } from "../src/startup-timeout.m
+-const source = readFileSync(new URL("../src/start.mjs", import.meta.url), "utf8");
++const source = readFileSync(new URL("../src/start.mjs", import.meta.url), "utf8").replace(/\r\n?/g, "\n");
+@@ -18 +20,8 @@ const boundary = source.slice(begin, end);
+-assert.ok(boundary.includes('import("./native-catalog-drift.mjs")'));
++assert.ok(boundary.includes("const finalizeHealthyGeneration ="));
++assert.ok(boundary.includes("await startNativeCatalogWatch()"));
++const publisherBegin = source.indexOf("async function startNativeCatalogWatch() {");
++const publisherEnd = source.indexOf("\n}\n", publisherBegin) + 3;
++assert.ok(publisherBegin >= 0 && publisherEnd > publisherBegin);
++const publisher = source.slice(publisherBegin, publisherEnd);
++assert.ok(publisher.includes('import("./native-catalog-drift.mjs")'));
++assert.ok(publisher.includes('import("./native-catalog-events.mjs")'));
+@@ -28 +37,2 @@ const completeStartup = new AsyncFunction("context", `
+-    children, console, path, loadPublisher } = context;
++    children, console, path, loadPublisher, loadEvents, stopServiceChildren,
++    clearStartupAttempts } = context;
+@@ -29,0 +40,2 @@ const completeStartup = new AsyncFunction("context", `
++  let startupReady = false;
++  const automaticStartup = true;
+@@ -31,2 +43,9 @@ const completeStartup = new AsyncFunction("context", `
+-  const SIGKILL_AFTER_MS = 1;
+-  const setTimeout = () => ({ unref() {} });
++  let frontendChild, shutdownPromise;
++  const shutdownController = new AbortController();
++  let nativeCatalogWatchStarted = false;
++  const requiredServices = new Set();
++  const executionPlan = { needsGateway: false };
++  const gatewayStartupError = undefined;
++  const SHUTDOWN_DRAIN_MS = 1, SHUTDOWN_FLUSH_MS = 1;
++  ${publisher.replace('import("./native-catalog-drift.mjs")', "loadPublisher()")
++    .replace('import("./native-catalog-events.mjs")', "loadEvents()")}
+@@ -35 +54,2 @@ const completeStartup = new AsyncFunction("context", `
+-  ${boundary.replace('import("./native-catalog-drift.mjs")', "loadPublisher()")}
++  ${boundary}
++  return { ready, startupReady };
+@@ -42 +62,2 @@ const SESSION_GENERATION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+-function scenario({ pending = true, promotion = true, failure, shutdownDuringLoad = false } = {}) {
++function scenario({ pending = true, promotion = true, failure, healthFailure,
++  shutdownDuringHealth = false, shutdownDuringLoad = false } = {}) {
+@@ -46,2 +67,2 @@ function scenario({ pending = true, promotion = true, failure, shutdownDuringLoa
+-  const child = { exitCode: null, signalCode: null };
+-  child.kill = (signal) => { child.signalCode = signal; };
++  const child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null });
++  child.kill = (signal) => { child.signalCode = signal; child.emit("exit", null, signal); return true; };
+@@ -53,2 +74,8 @@ function scenario({ pending = true, promotion = true, failure, shutdownDuringLoa
+-    waitForHealth: async () => { events.push("frontend healthy"); },
+-    loopback: () => "http://127.0.0.1/unused-health",
++    waitForHealth: async (_label, url) => {
++      events.push(url.endsWith("/health/live") ? "frontend live" : "frontend healthy");
++      if (url.endsWith("/health")) {
++        if (shutdownDuringHealth) context.stopSupervisor();
++        if (healthFailure) throw healthFailure;
++      }
++    },
++    loopback: (_port, suffix = "") => `http://127.0.0.1${suffix}`,
+@@ -58 +85,3 @@ function scenario({ pending = true, promotion = true, failure, shutdownDuringLoa
+-      events.push("startup retired");
++      // Both the successful finalizer and unconditional initial cleanup invoke
++      // the real idempotent helper. Record the actual transition only once.
++      if (Object.hasOwn(environment, PRIVATE_TIMEOUT)) events.push("startup retired");
+@@ -60,0 +90,4 @@ function scenario({ pending = true, promotion = true, failure, shutdownDuringLoa
++    clearStartupAttempts: () => {
++      assert.deepEqual(env, { KEEP_SETTING: "unchanged" });
++      events.push("cooldown cleared");
++    },
+@@ -82,0 +116 @@ function scenario({ pending = true, promotion = true, failure, shutdownDuringLoa
++    stopServiceChildren,
+@@ -84,0 +119 @@ function scenario({ pending = true, promotion = true, failure, shutdownDuringLoa
++    loadEvents: async () => ({ subscribeNativeCatalogEvents: () => () => {} }),
+@@ -123,2 +158,2 @@ test("pending activation retains its startup ACL allowance until persistence fin
+-    "frontend healthy", "activation started", "activation persisted",
+-    "startup retired", "publisher loaded", "watcher started", "catalog published",
++    "frontend live", "frontend healthy", "activation started", "activation persisted",
++    "startup retired", "cooldown cleared", "publisher loaded", "watcher started", "catalog published",
+@@ -135,2 +170,2 @@ test("superseded activation still retires startup settings before background pub
+-    "frontend healthy", "activation started", "activation superseded",
+-    "startup retired", "publisher loaded", "watcher started", "catalog published",
++    "frontend live", "frontend healthy", "activation started", "activation superseded",
++    "startup retired", "cooldown cleared", "publisher loaded", "watcher started", "catalog published",
+@@ -147 +182 @@ test("a fatal activation failure cannot start background publishers", async () =
+-  assert.deepEqual(fixture.events, ["frontend healthy", "activation started"]);
++  assert.deepEqual(fixture.events, ["frontend live", "frontend healthy", "activation started"]);
+@@ -156 +191 @@ test("startup without pending activation retires settings before publication", a
+-    "frontend healthy", "startup retired", "publisher loaded", "watcher started", "catalog published",
++    "frontend live", "frontend healthy", "startup retired", "cooldown cleared", "publisher loaded", "watcher started", "catalog published",
+@@ -176 +211 @@ test("shutdown while the publisher loads cannot start background maintenance", a
+-    "frontend healthy", "startup retired", "publisher loaded",
++    "frontend live", "frontend healthy", "startup retired", "cooldown cleared", "publisher loaded",
+@@ -179,0 +215,19 @@ test("shutdown while the publisher loads cannot start background maintenance", a
++
++test("degraded initial readiness retires startup settings without activating or publishing", async () => {
++  const fixture = scenario({ healthFailure: new Error("selected dependency unavailable") });
++  assert.deepEqual(await fixture.complete(), { ready: false, startupReady: false });
++  await settlePublishers();
++  assert.deepEqual(fixture.events, ["frontend live", "frontend healthy", "startup retired"]);
++  assert.deepEqual(fixture.env, { KEEP_SETTING: "unchanged" });
++  assert.equal(fixture.errors.length, 1);
++  assert.match(fixture.errors[0], /dependency readiness unavailable: selected dependency unavailable/);
++});
++
++test("shutdown during aggregate readiness retires settings without activation or publication", async () => {
++  const fixture = scenario({ shutdownDuringHealth: true });
++  assert.deepEqual(await fixture.complete(), { ready: false, startupReady: false });
++  await settlePublishers();
++  assert.deepEqual(fixture.events, ["frontend live", "frontend healthy", "startup retired"]);
++  assert.deepEqual(fixture.env, { KEEP_SETTING: "unchanged" });
++  assert.deepEqual(fixture.errors, []);
++});

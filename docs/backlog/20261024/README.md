@@ -14,7 +14,7 @@ this inventory, in addition to the existing tool-history PRs #4–#6.
 | Topic | Backup PR | Dependencies to recheck |
 |---|---|---|
 | Routed failover delivery evidence | [#8](https://github.com/TruthNian/codex-router/pull/8) | generation-redirect |
-| Reject API and vision generation redirects | [#9](https://github.com/TruthNian/codex-router/pull/9) | none recorded |
+| Reject API and vision generation redirects | [#9 (closed)](https://github.com/TruthNian/codex-router/pull/9) | none recorded |
 | Vision retry delivery and completion semantics | [#10](https://github.com/TruthNian/codex-router/pull/10) | routed-delivery, generation-redirect |
 | Use direct Responses routes while retaining compatibility | [#11](https://github.com/TruthNian/codex-router/pull/11) | none recorded |
 | Start services from the selected execution plan | [#12](https://github.com/TruthNian/codex-router/pull/12) | direct-responses |
@@ -96,5 +96,5 @@ Keep this inventory available until every item has an explicit disposition.
 | Topic | Upstream PR | Exact published head | Status |
 |---|---|---|---|
 | catalog-fixture-isolation | [#1064](https://github.com/duolahypercho/codex-router/pull/1064) | `b9e54fc6b201e68ab5212b279162434561dc8ee7` | ci_passed_waiting_merge |
-| generation-redirect | [#1065](https://github.com/duolahypercho/codex-router/pull/1065) | `3acbe3e752fd15bb1efd8c0c2e7ca1e972cd3c2b` | ci_running |
+| generation-redirect | [#1065](https://github.com/duolahypercho/codex-router/pull/1065) | `3acbe3e752fd15bb1efd8c0c2e7ca1e972cd3c2b` | ci_passed_waiting_merge |
 | cache-version-metadata | [#1063](https://github.com/duolahypercho/codex-router/pull/1063) | `955645840771efbb0e689d395d753e9168143d19` | ci_passed_waiting_merge |

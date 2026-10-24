@@ -1,0 +1,904 @@
+diff --git a/changelog.d/native-catalog-events.md b/changelog.d/native-catalog-events.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/native-catalog-events.md
+@@ -0,0 +1 @@
++- Refresh the native model catalog after an account or installed Codex runtime changes, coalesce notifications, preserve catalogs on uncertain reads, and use a daily fallback instead of five-minute background polling. Account invalidation and service startup bypass stale cache validators without persisting account identities.
+diff --git a/changelog.d/native-watch-startup-reconciliation.md b/changelog.d/native-watch-startup-reconciliation.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/native-watch-startup-reconciliation.md
+@@ -0,0 +1 @@
++- Recheck native account and binary identities once after filesystem-watch registration so a change during macOS event-stream initialization is not lost. Unchanged identities do not refresh the model catalog, subsequent checks remain event-driven, and real-watch tests wait for an observed OS event before testing replacement.
+diff --git a/src/native-account-catalog.mjs b/src/native-account-catalog.mjs
+--- a/src/native-account-catalog.mjs
++++ b/src/native-account-catalog.mjs
+@@ -159,0 +160 @@ async function refreshNativeAccountCatalogUnlocked({
++  conditional = true,
+@@ -173 +174 @@ async function refreshNativeAccountCatalogUnlocked({
+-  if (!force && cacheIsFresh(current.catalog, clientVersion, now)) {
++  if (!force && conditional && cacheIsFresh(current.catalog, clientVersion, now)) {
+@@ -199 +200 @@ async function refreshNativeAccountCatalogUnlocked({
+-  const etag = safeCurrent && current.catalog.client_version === clientVersion
++  const etag = conditional && safeCurrent && current.catalog.client_version === clientVersion
+@@ -251 +252,3 @@ async function refreshNativeAccountCatalogUnlocked({
+-      safeCurrent
++      conditional
++      && safeCurrent
++      && current.catalog.client_version === clientVersion
+diff --git a/src/native-catalog-drift.mjs b/src/native-catalog-drift.mjs
+--- a/src/native-catalog-drift.mjs
++++ b/src/native-catalog-drift.mjs
+@@ -124,0 +125,2 @@ export async function republishOnNativeDrift({
++  forceAccountRefresh = false,
++  accountChanged = false,
+@@ -129 +131,4 @@ export async function republishOnNativeDrift({
+-  const accountRefresh = await refreshAccountCatalog();
++  const accountRefresh = await refreshAccountCatalog({
++    force: forceAccountRefresh || accountChanged,
++    conditional: !accountChanged,
++  });
+@@ -155 +160,3 @@ export async function republishOnNativeDrift({
+-    // Dynamic import to avoid startup dependency
++    // Read the registry in a fresh child after acquiring the overlay lock, and
++    // verify the running Router has adopted it before changing any client.
++    // An explicit injected publisher remains the fixture/tooling boundary.
+@@ -157,2 +164,2 @@ export async function republishOnNativeDrift({
+-      await import("./target-integration.mjs")
+-    ).refreshTargetPickerIfInstalled;
++      await import("./model-overlay-publication.mjs")
++    ).publishAdoptedModelOverlayFresh;
+@@ -179,0 +187,4 @@ export function watchNativeCatalog({
++  subscribeEvents,
++  schedule = setTimeout,
++  cancel = clearTimeout,
++  debounceMs = 500,
+@@ -183 +194,3 @@ export function watchNativeCatalog({
+-  const refresh = async () => {
++  let pendingEvent;
++  let eventTimer;
++  const refresh = async (options = {}) => {
+@@ -187 +200 @@ export function watchNativeCatalog({
+-      await republish();
++      await republish(options);
+@@ -191,0 +205 @@ export function watchNativeCatalog({
++      if (pendingEvent && !stopped) queueEvent();
+@@ -194 +208,17 @@ export function watchNativeCatalog({
+-  const timer = interval(refresh, nativeCatalogPollIntervalMs(environment));
++  const queueEvent = (event) => {
++    if (stopped) return;
++    if (event) pendingEvent = {
++      forceAccountRefresh: Boolean(pendingEvent?.forceAccountRefresh || event.forceAccountRefresh),
++      accountChanged: Boolean(pendingEvent?.accountChanged || event.accountChanged),
++    };
++    if (running || eventTimer !== undefined || !pendingEvent) return;
++    eventTimer = schedule(() => {
++      eventTimer = undefined;
++      if (running || stopped) return;
++      const options = pendingEvent;
++      pendingEvent = undefined;
++      void refresh(options);
++    }, debounceMs);
++    eventTimer.unref?.();
++  };
++  const timer = interval(() => refresh(), nativeCatalogPollIntervalMs(environment));
+@@ -197 +227,4 @@ export function watchNativeCatalog({
+-  if (immediate) void refresh();
++  // Cache metadata carries no account identity. Revalidate unconditionally on
++  // boot so a fresh previous-account cache cannot survive a service restart.
++  if (immediate) void refresh({ forceAccountRefresh: true, accountChanged: true });
++  const stopEvents = subscribeEvents?.(queueEvent);
+@@ -200,0 +234,3 @@ export function watchNativeCatalog({
++    if (eventTimer !== undefined) cancel(eventTimer);
++    pendingEvent = undefined;
++    stopEvents?.();
+diff --git a/src/native-catalog-events.mjs b/src/native-catalog-events.mjs
+new file mode 100644
+--- /dev/null
++++ b/src/native-catalog-events.mjs
+@@ -0,0 +1,190 @@
++import { createHash } from "node:crypto";
++import { existsSync, watch as watchDirectory } from "node:fs";
++import path from "node:path";
++
++import { CODEX_AUTH_PATH, nativeAccountCatalogHeaders } from "./codex-native-session.mjs";
++import { codexBinaryFingerprint, findCodexBinary } from "./codex-binary.mjs";
++import { discoveryDisabled } from "./discovery-mode.mjs";
++
++// Compare identities only in memory. Neither account IDs nor credentials are
++// written to a cache, returned in an event, or logged. A rotating bearer is not
++// an account identity, and a missing/unreadable session is not proof of logout.
++export async function nativeCatalogAccountIdentity({
++  headersProvider = nativeAccountCatalogHeaders,
++  discoveryOff = discoveryDisabled,
++} = {}) {
++  if (discoveryOff()) return undefined;
++  try {
++    const headers = await headersProvider();
++    const account = headers?.["chatgpt-account-id"];
++    if (typeof account !== "string" || !account || account.length > 4096) return undefined;
++    return createHash("sha256").update(account).digest("hex");
++  } catch {
++    return undefined;
++  }
++}
++
++export function nativeCatalogBinaryRoots({
++  platform = process.platform,
++  environment = process.env,
++} = {}) {
++  if (platform === "win32") {
++    return environment.LOCALAPPDATA
++      ? [path.join(environment.LOCALAPPDATA, "OpenAI", "Codex", "bin")]
++      : [];
++  }
++  return platform === "darwin"
++    ? ["/Applications/Codex.app/Contents/Resources", "/Applications/ChatGPT.app/Contents/Resources"]
++    : ["/opt/codex-desktop/resources"];
++}
++
++function nearestExistingDirectory(directory, exists) {
++  let candidate = directory;
++  while (!exists(candidate)) {
++    const parent = path.dirname(candidate);
++    if (parent === candidate) return undefined;
++    candidate = parent;
++  }
++  // Do not turn a missing application installation into a whole-volume watch.
++  return path.dirname(candidate) === candidate ? undefined : candidate;
++}
++
++/**
++ * Observe account identity and installed binary changes. Parent-directory
++ * watches survive atomic file replacement; a Windows recursive bin-root watch
++ * also notices a newly installed version-hashed runtime. Models caches,
++ * generated catalogs and staged route selections are deliberately not watched:
++ * our own publication must not start a refresh loop or bypass reconciliation.
++ */
++export function subscribeNativeCatalogEvents(listener, {
++  authPath = CODEX_AUTH_PATH,
++  readAccountIdentity = nativeCatalogAccountIdentity,
++  readBinaryIdentity = codexBinaryFingerprint,
++  resolveBinary = findCodexBinary,
++  binaryRoots = nativeCatalogBinaryRoots(),
++  platform = process.platform,
++  discoveryOff = discoveryDisabled,
++  watch = watchDirectory,
++  exists = existsSync,
++  schedule = setTimeout,
++  cancel = clearTimeout,
++  debounceMs = 500,
++} = {}) {
++  if (discoveryOff()) return () => {};
++  let stopped = false;
++  let timer;
++  let checking = false;
++  let checkAgain = false;
++  let account;
++  let binary;
++  let initialized = false;
++  const watchers = new Map();
++
++  const queueCheck = () => {
++    if (stopped || discoveryOff()) return;
++    if (checking) { checkAgain = true; return; }
++    if (timer !== undefined) cancel(timer);
++    timer = schedule(() => {
++      timer = undefined;
++      void check();
++    }, debounceMs);
++    timer.unref?.();
++  };
++
++  function rearm() {
++    if (stopped || discoveryOff()) return;
++    const targets = [{ target: path.resolve(authPath), directory: false }];
++    try {
++      const resolved = resolveBinary();
++      if (resolved) targets.push({ target: path.resolve(resolved), directory: false });
++    } catch { /* A temporarily missing runtime preserves the previous identity. */ }
++    targets.push(...binaryRoots.map((target) => ({ target: path.resolve(target), directory: true })));
++    const desired = new Map();
++    for (const { target, directory } of targets) {
++      const requested = directory ? target : path.dirname(target);
++      const parent = nearestExistingDirectory(requested, exists);
++      if (!parent) continue;
++      const recursive = directory && parent === requested && ["win32", "darwin"].includes(platform);
++      const key = `${parent}\0${recursive}`;
++      const names = desired.get(key)?.names || new Set();
++      // An absent directory is watched through its first missing ancestor.
++      const relative = path.relative(parent, target);
++      names.add(directory && parent === requested ? "*" : relative.split(path.sep)[0]);
++      desired.set(key, { parent, recursive, names });
++    }
++    for (const [key, record] of watchers) {
++      if (!desired.has(key)) { record.handle.close(); watchers.delete(key); }
++    }
++    for (const [key, spec] of desired) {
++      const existing = watchers.get(key);
++      if (existing) { existing.names = spec.names; continue; }
++      try {
++        const record = { ...spec, handle: undefined };
++        record.handle = watch(spec.parent, { persistent: false, recursive: spec.recursive }, (_event, filename) => {
++          const name = filename === null || filename === undefined ? undefined : String(filename).split(/[\\/]/)[0];
++          if (!name || record.names.has("*") || record.names.has(name)) queueCheck();
++        });
++        record.handle.on?.("error", () => {
++          record.handle.close();
++          if (watchers.get(key) === record) watchers.delete(key);
++          queueCheck();
++        });
++        watchers.set(key, record);
++      } catch {
++        // Filesystem notifications are an optimization. The daily bounded
++        // fallback remains responsible when the OS cannot create a watch.
++      }
++    }
++  }
++
++  async function check() {
++    if (stopped || discoveryOff()) return;
++    if (checking) { checkAgain = true; return; }
++    checking = true;
++    const initialCheck = !initialized;
++    try {
++      if (!initialized) {
++        try { binary = readBinaryIdentity(); } catch { /* Unknown is not replacement. */ }
++      }
++      let nextAccount;
++      try { nextAccount = await readAccountIdentity(); } catch { /* Unknown is not logout. */ }
++      if (stopped || discoveryOff()) return;
++      let nextBinary;
++      try { nextBinary = readBinaryIdentity(); } catch { /* Unknown is not replacement. */ }
++      if (initialized || checkAgain) {
++        if (nextAccount !== undefined && nextAccount !== account) {
++          listener({ source: "account", forceAccountRefresh: true, accountChanged: true });
++        }
++        if (nextBinary !== undefined && nextBinary !== binary) {
++          listener({ source: "binary", forceAccountRefresh: true });
++        }
++      }
++      if (nextAccount !== undefined) account = nextAccount;
++      if (nextBinary !== undefined) binary = nextBinary;
++      initialized = true;
++      rearm();
++    } catch {
++      // A transient identity read cannot withdraw the previous safe catalog.
++      initialized = true;
++      rearm();
++    } finally {
++      checking = false;
++      if (checkAgain && !stopped) { checkAgain = false; queueCheck(); }
++      // macOS starts FSEventStream on a separate thread after fs.watch returns.
++      // Reconcile that one registration gap without another catalog request
++      // for unchanged identities or a recurring filesystem/model poll.
++      else if (initialCheck && !stopped) queueCheck();
++    }
++  }
++
++  rearm();
++  void check();
++  return () => {
++    stopped = true;
++    if (timer !== undefined) cancel(timer);
++    timer = undefined;
++    checkAgain = false;
++    for (const { handle } of watchers.values()) handle.close();
++    watchers.clear();
++  };
++}
+diff --git a/src/native-catalog-settings.mjs b/src/native-catalog-settings.mjs
+--- a/src/native-catalog-settings.mjs
++++ b/src/native-catalog-settings.mjs
+@@ -1,3 +1,4 @@
+-// Polling cadence is independent of account-cache freshness. Keep the shipped
+-// five-minute cadence unless the operator explicitly chooses a slower one.
+-export const DEFAULT_NATIVE_CATALOG_POLL_INTERVAL_MS = 5 * 60_000;
++// Identity changes refresh immediately. Remote entitlement changes need a
++// bounded fallback because they need not produce any local filesystem event.
++export const DEFAULT_NATIVE_CATALOG_POLL_INTERVAL_MS = 24 * 60 * 60_000;
++export const MIN_NATIVE_CATALOG_POLL_INTERVAL_MS = 5 * 60_000;
+@@ -14 +15 @@ export function nativeCatalogPollIntervalMs(environment = process.env) {
+-    milliseconds >= DEFAULT_NATIVE_CATALOG_POLL_INTERVAL_MS &&
++    milliseconds >= MIN_NATIVE_CATALOG_POLL_INTERVAL_MS &&
+diff --git a/src/router.mjs b/src/router.mjs
+--- a/src/router.mjs
++++ b/src/router.mjs
+@@ -1687,6 +1713 @@ async function healthPayload() {
+-  const degraded = [
+-    ["oauth", oauth],
+-    ["api", api],
+-    ["grokOauth", grokOauth],
+-    ["gateway", gateway],
+-  ]
++  const degraded = Object.entries(dependencies)
+diff --git a/src/start.mjs b/src/start.mjs
+--- a/src/start.mjs
++++ b/src/start.mjs
+@@ -270,0 +273,17 @@ let stopNativeCatalogWatch = () => {};
++let nativeCatalogWatchStarted = false;
++
++async function startNativeCatalogWatch() {
++  if (shuttingDown || nativeCatalogWatchStarted) return;
++  nativeCatalogWatchStarted = true;
++  try {
++    const [{ watchNativeCatalog }, { subscribeNativeCatalogEvents }] = await Promise.all([
++      import("./native-catalog-drift.mjs"), import("./native-catalog-events.mjs"),
++    ]);
++    if (!shuttingDown) stopNativeCatalogWatch = watchNativeCatalog({
++      immediate: true, subscribeEvents: subscribeNativeCatalogEvents,
++    });
++  } catch (error) {
++    nativeCatalogWatchStarted = false;
++    console.error(`[codex-router] Native drift check failed: ${error.message}`);
++  }
++}
+diff --git a/test/native-account-catalog.test.mjs b/test/native-account-catalog.test.mjs
+--- a/test/native-account-catalog.test.mjs
++++ b/test/native-account-catalog.test.mjs
+@@ -18,0 +19,50 @@ const noLock = (operation) => operation();
++test("account invalidation bypasses fresh caches and removes previous-account ETag validators", () =>
++  withCache(async (cachePath) => {
++    const models = [{ slug: "gpt-shared-across-accounts" }];
++    writeFileSync(cachePath, JSON.stringify(fixtureCache(models, { fetched_at: "2026-09-06T00:00:00.000Z" })));
++    let sent;
++    const result = await refreshNativeAccountCatalog({
++      cachePath, conditional: false, version: "0.153.2", now: Date.parse("2026-09-06T00:00:01.000Z"),
++      headersProvider, discoveryOff: () => false, lock: noLock,
++      fetchImpl: async (_url, init) => {
++        sent = init.headers;
++        return new Response(JSON.stringify({ models }), { status: 200 });
++      },
++    });
++    assert.equal(sent["if-none-match"], undefined);
++    assert.equal(result.status, "revalidated");
++    const written = JSON.parse(readFileSync(cachePath, "utf8"));
++    assert.deepEqual(written.models, models);
++    assert.equal(written.etag, undefined, "previous account validator must not survive a successful unconditional refresh");
++    assert.equal(written.fetched_at, "2026-09-06T00:00:01.000Z");
++  }));
++
++test("an invalidated account cannot bless an unsolicited 304 or overwrite cache on failure", () =>
++  withCache(async (cachePath) => {
++    const contents = JSON.stringify(fixtureCache([{ slug: "gpt-safe" }]));
++    writeFileSync(cachePath, contents);
++    for (const fetchImpl of [
++      async () => new Response(null, { status: 304 }),
++      async () => { throw new Error("offline"); },
++    ]) {
++      const result = await refreshNativeAccountCatalog({
++        cachePath, conditional: false, version: "0.153.2", headersProvider,
++        discoveryOff: () => false, lock: noLock, fetchImpl,
++      });
++      assert.equal(result.status, "failed");
++      assert.equal(readFileSync(cachePath, "utf8"), contents);
++    }
++  }));
++
++test("an installed-client version change persists its metadata even when models are identical", () =>
++  withCache(async (cachePath) => {
++    const models = [{ slug: "gpt-stable" }];
++    writeFileSync(cachePath, JSON.stringify(fixtureCache(models, { client_version: "0.152.0" })));
++    const result = await refreshNativeAccountCatalog({
++      cachePath, version: "0.153.2", headersProvider, discoveryOff: () => false, lock: noLock,
++      fetchImpl: async () => new Response(JSON.stringify({ models }), { status: 200 }),
++    });
++    assert.equal(result.status, "revalidated");
++    assert.equal(JSON.parse(readFileSync(cachePath, "utf8")).client_version, "0.153.2");
++  }));
++
+diff --git a/test/native-catalog-drift-missing-capture.test.mjs b/test/native-catalog-drift-missing-capture.test.mjs
+--- a/test/native-catalog-drift-missing-capture.test.mjs
++++ b/test/native-catalog-drift-missing-capture.test.mjs
+@@ -20,0 +21,3 @@ const { CONFIG_PATH, NATIVE_CATALOG_PATH } = await import("../src/paths.mjs");
++assert.equal(CONFIG_PATH, path.join(codexHome, "config.toml"));
++assert.equal(NATIVE_CATALOG_PATH, path.join(stateDir, "native-models.json"));
++process.env.CODEX_ROUTER_NO_DISCOVERY = "0";
+diff --git a/test/native-catalog-drift.test.mjs b/test/native-catalog-drift.test.mjs
+--- a/test/native-catalog-drift.test.mjs
++++ b/test/native-catalog-drift.test.mjs
+@@ -1,0 +2 @@ import assert from "node:assert/strict";
++import { spawnSync } from "node:child_process";
+@@ -6,0 +8 @@ import test from "node:test";
++import { fileURLToPath, pathToFileURL } from "node:url";
+@@ -19,0 +22 @@ test("drift detection triggers republish with new arbitrary native in merged out
++  const originalNoDiscovery = process.env.CODEX_ROUTER_NO_DISCOVERY;
+@@ -31,0 +35,7 @@ test("drift detection triggers republish with new arbitrary native in merged out
++    // Module imports cache path constants. Fail before any write if another
++    // test imported this module before the isolated environment was set.
++    assert.equal(CONFIG_PATH, path.join(codexHome, "config.toml"));
++    assert.equal(NATIVE_CATALOG_PATH, path.join(stateDir, "native-models.json"));
++    assert.equal(MERGED_CATALOG_PATH, path.join(stateDir, "merged-models.json"));
++    process.env.CODEX_ROUTER_NO_DISCOVERY = "0";
++
+@@ -122,2 +132,2 @@ test("drift detection triggers republish with new arbitrary native in merged out
+-    // This should refresh the account cache, detect drift, and run the full
+-    // publish path in that order.
++    // Exercise the catalog writer through the explicit fixture publisher.
++    // The default production publisher separately verifies service adoption.
+@@ -131,0 +142 @@ test("drift detection triggers republish with new arbitrary native in merged out
++      refreshTargetPicker: async () => (await import("../src/target-integration.mjs")).refreshTargetPickerIfInstalled(),
+@@ -133 +144 @@ test("drift detection triggers republish with new arbitrary native in merged out
+-    
++
+@@ -140 +151 @@ test("drift detection triggers republish with new arbitrary native in merged out
+-    
++
+@@ -157 +168,3 @@ test("drift detection triggers republish with new arbitrary native in merged out
+-    
++    if (originalNoDiscovery !== undefined) process.env.CODEX_ROUTER_NO_DISCOVERY = originalNoDiscovery;
++    else delete process.env.CODEX_ROUTER_NO_DISCOVERY;
++
+@@ -247,0 +261,44 @@ test("routed agent startup drift detection fails closed on inactive or uncertain
++
++test("account invalidation reaches the fixed catalog updater without stale validators", async () => {
++  const { republishOnNativeDrift } = await import("../src/native-catalog-drift.mjs");
++  let received;
++  const result = await republishOnNativeDrift({
++    accountChanged: true,
++    refreshAccountCatalog: async (options) => { received = options; return { status: "failed" }; },
++    nativeDriftDetected: () => false,
++    routedAgentDriftDetected: () => false,
++    refreshTargetPicker: () => { throw new Error("failed discovery must preserve the current publication"); },
++  });
++  assert.deepEqual(received, { force: true, conditional: false });
++  assert.equal(result, false);
++});
++
++test("the drift fixture rejects cached foreign paths before its first write", () => {
++  const directory = mkdtempSync(path.join(os.tmpdir(), "native-drift-isolation-"));
++  try {
++    const home = path.join(directory, "prior-home");
++    const state = path.join(directory, "prior-state");
++    mkdirSync(home);
++    mkdirSync(state);
++    const config = path.join(home, "config.toml");
++    const capture = path.join(state, "native-models.json");
++    writeFileSync(config, "preserve the previous config");
++    writeFileSync(capture, "preserve the previous capture");
++    const preload = path.join(directory, "preload.mjs");
++    writeFileSync(preload, `import ${JSON.stringify(new URL("../src/paths.mjs", import.meta.url).href)};\n`);
++    const childEnvironment = { ...process.env, CODEX_HOME: home, MODEL_ROUTER_STATE_DIR: state, MODEL_ROUTER_TARGET: "codex" };
++    delete childEnvironment.NODE_TEST_CONTEXT;
++    const result = spawnSync(process.execPath, [
++      "--import", pathToFileURL(preload).href, "--test", "--test-name-pattern=^drift detection triggers republish",
++      fileURLToPath(import.meta.url),
++    ], {
++      encoding: "utf8", windowsHide: true, timeout: 30_000,
++      env: childEnvironment,
++    });
++    assert.equal(result.error, undefined);
++    assert.equal(result.status, 1, "a cached path from another home must fail the fixture isolation guard");
++    assert.match(result.stdout + result.stderr, /ERR_ASSERTION/);
++    assert.equal(readFileSync(config, "utf8"), "preserve the previous config");
++    assert.equal(readFileSync(capture, "utf8"), "preserve the previous capture");
++  } finally { rmSync(directory, { recursive: true, force: true }); }
++});
+diff --git a/test/native-catalog-events.test.mjs b/test/native-catalog-events.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/native-catalog-events.test.mjs
+@@ -0,0 +1,302 @@
++import assert from "node:assert/strict";
++import { mkdirSync, mkdtempSync, renameSync, rmSync, watch, writeFileSync } from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import test from "node:test";
++
++import { codexBinaryFingerprint } from "../src/codex-binary.mjs";
++import { nativeCatalogAccountIdentity, subscribeNativeCatalogEvents } from "../src/native-catalog-events.mjs";
++
++const settle = () => new Promise((resolve) => setImmediate(resolve));
++
++function fixture(t) {
++  const root = mkdtempSync(path.join(os.tmpdir(), "native-catalog-events-"));
++  const authPath = path.join(root, "auth.json");
++  const binary = path.join(root, "codex.exe");
++  writeFileSync(binary, "synthetic runtime");
++  t.after(() => rmSync(root, { recursive: true, force: true }));
++  const watched = [];
++  let scheduled;
++  const options = {
++    authPath,
++    resolveBinary: () => binary,
++    readBinaryIdentity: () => codexBinaryFingerprint(binary),
++    binaryRoots: [],
++    discoveryOff: () => false,
++    watch(directory, flags, callback) {
++      const record = { directory, flags, callback, closed: false };
++      watched.push(record);
++      return { close() { record.closed = true; }, on() {} };
++    },
++    schedule(callback) { scheduled = callback; return 1; },
++    cancel() { scheduled = undefined; },
++  };
++  return { root, authPath, binary, watched, options, async flush() {
++    const callback = scheduled;
++    scheduled = undefined;
++    callback?.();
++    await settle();
++  } };
++}
++
++test("native account identity is stable across token rotation and never returns credentials or account IDs", async () => {
++  const source = (token) => ({ authorization: `Bearer ${token}`, "chatgpt-account-id": "private-account-identity" });
++  const first = await nativeCatalogAccountIdentity({ discoveryOff: () => false, headersProvider: async () => source("first-secret") });
++  const rotated = await nativeCatalogAccountIdentity({ discoveryOff: () => false, headersProvider: async () => source("second-secret") });
++  assert.match(first, /^[a-f0-9]{64}$/);
++  assert.equal(first, rotated);
++  assert.doesNotMatch(first, /secret|private-account/);
++  assert.equal(await nativeCatalogAccountIdentity({ discoveryOff: () => false, headersProvider: async () => ({ authorization: "Bearer unknown-account" }) }), undefined);
++  assert.equal(await nativeCatalogAccountIdentity({ discoveryOff: () => true, headersProvider: () => { throw new Error("credential read"); } }), undefined);
++});
++
++test("watch startup catches a changed identity without a filesystem notification and does not poll", async (t) => {
++  const f = fixture(t);
++  let account = "before";
++  let reads = 0;
++  const events = [];
++  const stop = subscribeNativeCatalogEvents((event) => events.push(event), {
++    ...f.options, readAccountIdentity: async () => { reads += 1; return account; },
++  });
++  t.after(stop);
++  await settle();
++  account = "after";
++  await f.flush();
++  assert.deepEqual(events, [{ source: "account", forceAccountRefresh: true, accountChanged: true }]);
++  assert.equal(reads, 2);
++  await f.flush();
++  assert.equal(reads, 2, "the startup check must not become a recurring poll");
++});
++
++test("unchanged startup identities do not refresh, and stopping cancels the catch-up", async (t) => {
++  const f = fixture(t);
++  let reads = 0;
++  const events = [];
++  const stop = subscribeNativeCatalogEvents((event) => events.push(event), {
++    ...f.options, readAccountIdentity: async () => { reads += 1; return "stable"; },
++  });
++  t.after(stop);
++  await settle();
++  await f.flush();
++  assert.equal(reads, 2);
++  assert.deepEqual(events, []);
++  await f.flush();
++  assert.equal(reads, 2);
++  const second = fixture(t);
++  const secondStop = subscribeNativeCatalogEvents((event) => events.push(event), {
++    ...second.options, readAccountIdentity: async () => { reads += 1; return "stable"; },
++  });
++  t.after(secondStop);
++  await settle();
++  const beforeStop = reads;
++  secondStop();
++  await second.flush();
++  assert.equal(reads, beforeStop);
++  assert.deepEqual(events, []);
++});
++
++test("watch startup also reconciles a binary replaced before notifications begin", async (t) => {
++  const f = fixture(t);
++  let binary = "before-build";
++  const events = [];
++  const stop = subscribeNativeCatalogEvents((event) => events.push(event), {
++    ...f.options, readAccountIdentity: async () => "stable-account", readBinaryIdentity: () => binary,
++  });
++  t.after(stop);
++  await settle();
++  binary = "after-build";
++  await f.flush();
++  assert.deepEqual(events, [{ source: "binary", forceAccountRefresh: true }]);
++  await f.flush();
++  assert.equal(events.length, 1);
++});
++
++test("account changes refresh once; token rotation and temporarily unavailable auth preserve identity", async (t) => {
++  const f = fixture(t);
++  let account = "fingerprint-a";
++  const events = [];
++  const stop = subscribeNativeCatalogEvents((event) => events.push(event), { ...f.options, readAccountIdentity: async () => account });
++  t.after(stop);
++  await settle();
++  const record = f.watched.find((watch) => !watch.closed);
++  const notify = () => record.callback("rename", "auth.json");
++  notify(); await f.flush();
++  account = undefined;
++  notify(); await f.flush();
++  account = "fingerprint-a";
++  notify(); await f.flush();
++  assert.deepEqual(events, []);
++  account = "fingerprint-b";
++  notify(); notify(); await f.flush();
++  assert.deepEqual(events, [{ source: "account", forceAccountRefresh: true, accountChanged: true }]);
++  assert.doesNotMatch(JSON.stringify(events), /fingerprint/);
++  stop();
++  account = "fingerprint-c";
++  notify(); await f.flush();
++  assert.equal(events.length, 1);
++});
++
++test("a new Windows hash directory changes the binary identity and rearms its file-parent watch", async (t) => {
++  const f = fixture(t);
++  const binRoot = path.join(f.root, "bin");
++  mkdirSync(path.join(binRoot, "old"), { recursive: true });
++  let current = path.join(binRoot, "old", "codex.exe");
++  writeFileSync(current, "old");
++  const events = [];
++  const stop = subscribeNativeCatalogEvents((event) => events.push(event), {
++    ...f.options, platform: "win32", binaryRoots: [binRoot],
++    resolveBinary: () => current,
++    readBinaryIdentity: () => codexBinaryFingerprint(current),
++    readAccountIdentity: async () => "stable-account",
++  });
++  t.after(stop);
++  await settle();
++  assert.ok(f.watched.some((record) => record.directory === binRoot && record.flags.recursive));
++  const oldParent = f.watched.find((record) => record.directory === path.dirname(current));
++  mkdirSync(path.join(binRoot, "new"));
++  current = path.join(binRoot, "new", "codex.exe");
++  writeFileSync(current, "new runtime");
++  f.watched.find((record) => record.directory === binRoot).callback("rename", path.join("new", "codex.exe"));
++  await f.flush();
++  assert.deepEqual(events, [{ source: "binary", forceAccountRefresh: true }]);
++  assert.equal(oldParent.closed, true);
++  assert.ok(f.watched.some((record) => record.directory === path.dirname(current) && !record.closed));
++});
++
++test("missing directories are followed from their parent and publication files cannot trigger refresh loops", async (t) => {
++  const f = fixture(t);
++  const authDirectory = path.join(f.root, "new-home");
++  let reads = 0;
++  let account;
++  const events = [];
++  const stop = subscribeNativeCatalogEvents((event) => events.push(event), {
++    ...f.options, authPath: path.join(authDirectory, "auth.json"),
++    readAccountIdentity: async () => { reads += 1; return account; },
++  });
++  t.after(stop);
++  await settle();
++  const parent = f.watched.find((record) => record.directory === f.root && !record.closed);
++  await f.flush();
++  const initialReads = reads;
++  parent.callback("rename", "models_cache.json");
++  parent.callback("rename", "native-models.json");
++  parent.callback("rename", "config.toml");
++  await f.flush();
++  assert.equal(reads, initialReads);
++  mkdirSync(authDirectory);
++  account = "newly-signed-in";
++  parent.callback("rename", "new-home");
++  await f.flush();
++  assert.deepEqual(events, [{ source: "account", forceAccountRefresh: true, accountChanged: true }]);
++  assert.ok(f.watched.some((record) => record.directory === authDirectory && !record.closed));
++});
++
++test("disabled discovery creates no watchers and reads no account or runtime", () => {
++  const forbidden = () => { throw new Error("account-derived operation"); };
++  const stop = subscribeNativeCatalogEvents(forbidden, {
++    discoveryOff: () => true, readAccountIdentity: forbidden, readBinaryIdentity: forbidden,
++    resolveBinary: forbidden, exists: forbidden, watch: forbidden,
++  });
++  stop();
++});
++
++test("notifications during initial identity lookup are coalesced and cannot hide a concurrent sign-in", async (t) => {
++  const f = fixture(t);
++  let release;
++  let reads = 0;
++  const events = [];
++  const stop = subscribeNativeCatalogEvents((event) => events.push(event), {
++    ...f.options,
++    readAccountIdentity() {
++      reads += 1;
++      return reads === 1 ? new Promise((resolve) => { release = resolve; }) : "new-account";
++    },
++  });
++  t.after(stop);
++  const notify = f.watched.find((record) => !record.closed).callback;
++  notify("rename", "auth.json");
++  notify("change", "auth.json");
++  assert.equal(reads, 1);
++  release("new-account");
++  await settle();
++  assert.deepEqual(events, [{ source: "account", forceAccountRefresh: true, accountChanged: true }]);
++  await f.flush();
++  assert.equal(reads, 2);
++  assert.equal(events.length, 1);
++});
++
++test("unknown account reads do not block binary updates, and stop suppresses an in-flight identity result", async (t) => {
++  const f = fixture(t);
++  let identity = "before";
++  let release;
++  let currentBinary = "before-build";
++  const events = [];
++  const stop = subscribeNativeCatalogEvents((event) => events.push(event), {
++    ...f.options,
++    readBinaryIdentity: () => currentBinary,
++    readAccountIdentity() {
++      if (identity === "error") throw new Error("credential read failed with private content");
++      if (identity === "pending") return new Promise((resolve) => { release = resolve; });
++      return identity;
++    },
++  });
++  t.after(stop);
++  await settle();
++  const notify = f.watched.find((record) => !record.closed).callback;
++  identity = "error";
++  currentBinary = "after-build";
++  notify("change", "codex.exe");
++  await f.flush();
++  assert.deepEqual(events, [{ source: "binary", forceAccountRefresh: true }]);
++  identity = "pending";
++  notify("rename", "auth.json");
++  await f.flush();
++  stop();
++  release("after");
++  await settle();
++  assert.equal(events.length, 1);
++  assert.ok(f.watched.every((record) => record.closed));
++});
++
++test("real parent-directory watch observes atomic auth-file replacement", { timeout: 10_000 }, async (t) => {
++  const f = fixture(t);
++  let account = "before";
++  writeFileSync(f.authPath, "synthetic account fixture");
++  let observed;
++  let watcherReady = false;
++  let reads = 0;
++  let initialized;
++  const startupChecked = new Promise((resolve) => { initialized = resolve; });
++  const probeName = "zz-watch-ready-probe";
++  const event = new Promise((resolve) => { observed = resolve; });
++  const stop = subscribeNativeCatalogEvents(observed, {
++    authPath: f.authPath, binaryRoots: [], resolveBinary: () => undefined,
++    readBinaryIdentity: () => undefined, readAccountIdentity: async () => {
++      reads += 1;
++      if (reads >= 2) initialized();
++      return account;
++    },
++    discoveryOff: () => false, debounceMs: 20,
++    watch(directory, flags, callback) {
++      return watch(directory, flags, (kind, filename) => {
++        if (String(filename).split(/[\\/]/).at(-1) === probeName) watcherReady = true;
++        callback(kind, filename);
++      });
++    },
++  });
++  t.after(stop);
++  await settle();
++  const readyDeadline = Date.now() + 2_000;
++  while (!watcherReady && Date.now() < readyDeadline) {
++    writeFileSync(path.join(f.root, probeName), "synthetic watch readiness");
++    await new Promise((resolve) => setTimeout(resolve, 25));
++  }
++  assert.equal(watcherReady, true, "the OS must deliver a probe event before the replacement assertion");
++  await startupChecked;
++  await settle();
++  const replacement = `${f.authPath}.replacement`;
++  writeFileSync(replacement, "replacement fixture");
++  account = "after";
++  renameSync(replacement, f.authPath);
++  assert.deepEqual(await event, { source: "account", forceAccountRefresh: true, accountChanged: true });
++});
+diff --git a/test/native-catalog-settings.test.mjs b/test/native-catalog-settings.test.mjs
+--- a/test/native-catalog-settings.test.mjs
++++ b/test/native-catalog-settings.test.mjs
+@@ -10,2 +10,2 @@ const name = "CODEX_ROUTER_NATIVE_CATALOG_POLL_INTERVAL_MS";
+-test("native catalog cadence defaults to five minutes and accepts slower timer-safe values", () => {
+-  assert.equal(nativeCatalogPollIntervalMs({}), 300_000);
++test("native catalog cadence defaults to daily and accepts explicit timer-safe values", () => {
++  assert.equal(nativeCatalogPollIntervalMs({}), 86_400_000);
+@@ -20 +20 @@ test("invalid or overflowing intervals retain the default instead of scheduling
+-    assert.equal(nativeCatalogPollIntervalMs({ [name]: value }), 300_000, value);
++    assert.equal(nativeCatalogPollIntervalMs({ [name]: value }), 86_400_000, value);
+@@ -27 +27 @@ test("service environment persists only an explicit normalized native polling ov
+-  assert.deepEqual(serviceNativeCatalogEnvironment({ [name]: "invalid;value" }), { [name]: "300000" });
++  assert.deepEqual(serviceNativeCatalogEnvironment({ [name]: "invalid;value" }), { [name]: "86400000" });
+diff --git a/test/native-catalog-watch.test.mjs b/test/native-catalog-watch.test.mjs
+--- a/test/native-catalog-watch.test.mjs
++++ b/test/native-catalog-watch.test.mjs
+@@ -17 +17 @@ test("native catalog watcher refreshes periodically without overlapping passes",
+-      assert.equal(delay, NATIVE_ACCOUNT_CATALOG_TTL_MS);
++      assert.equal(delay, 86_400_000);
+@@ -155,0 +156,100 @@ test("the background watcher does not keep a finished process alive", () => {
++
++test("startup invalidates previous-account validators, events merge during flight, and stop disposes them", async () => {
++  let event;
++  let scheduled;
++  let release;
++  let disposed = false;
++  let cleared = false;
++  const options = [];
++  const stop = watchNativeCatalog({
++    immediate: true,
++    interval() { return 1; },
++    clear() {},
++    subscribeEvents(listener) { event = listener; return () => { disposed = true; }; },
++    schedule(callback, delay) { assert.equal(delay, 500); scheduled = callback; return 2; },
++    cancel(timer) { assert.equal(timer, 2); cleared = true; },
++    republish(value) {
++      options.push(value);
++      return new Promise((resolve) => { release = resolve; });
++    },
++  });
++  try {
++    assert.deepEqual(options, [{ forceAccountRefresh: true, accountChanged: true }]);
++    event({ source: "binary", forceAccountRefresh: true });
++    event({ source: "account", forceAccountRefresh: true, accountChanged: true });
++    assert.equal(scheduled, undefined, "in-flight notifications cannot overlap the startup pass");
++    release(false);
++    await Promise.resolve();
++    scheduled();
++    assert.deepEqual(options, [
++      { forceAccountRefresh: true, accountChanged: true },
++      { forceAccountRefresh: true, accountChanged: true },
++    ], "both events produce one subsequent unconditional refresh");
++    event({ source: "binary", forceAccountRefresh: true });
++    release(false);
++    await Promise.resolve();
++    stop();
++    scheduled();
++    assert.equal(options.length, 2);
++    assert.equal(disposed, true);
++    assert.equal(cleared, true);
++  } finally { stop(); release?.(false); }
++});
++
++test("an interval racing a debounced event does not lose its account invalidation", async () => {
++  let event;
++  let tick;
++  let queued;
++  let release;
++  const calls = [];
++  const stop = watchNativeCatalog({
++    interval(callback) { tick = callback; return 1; },
++    clear() {},
++    subscribeEvents(listener) { event = listener; return () => {}; },
++    schedule(callback) { queued = callback; return 2; },
++    cancel() {},
++    republish(options) { calls.push(options); return new Promise((resolve) => { release = resolve; }); },
++  });
++  try {
++    event({ source: "account", accountChanged: true });
++    const pending = tick();
++    queued();
++    assert.deepEqual(calls, [{}]);
++    release(false);
++    await pending;
++    queued();
++    assert.deepEqual(calls, [{}, { forceAccountRefresh: false, accountChanged: true }]);
++    release(false);
++  } finally { stop(); release?.(false); }
++});
++
++test("event-triggered refresh failure does not strand a queued account change", async () => {
++  let event;
++  let queued;
++  let release;
++  const calls = [];
++  const messages = [];
++  const stop = watchNativeCatalog({
++    interval() { return 1; }, clear() {},
++    subscribeEvents(listener) { event = listener; return () => {}; },
++    schedule(callback) { queued = callback; return 2; }, cancel() {},
++    log(message) { messages.push(message); },
++    republish(options) {
++      calls.push(options);
++      if (calls.length === 1) return new Promise((_resolve, reject) => { release = reject; });
++      return Promise.resolve(false);
++    },
++  });
++  try {
++    event({ source: "binary", forceAccountRefresh: true });
++    queued();
++    event({ source: "account", accountChanged: true });
++    release(new Error("offline"));
++    await Promise.resolve();
++    await Promise.resolve();
++    queued();
++    assert.equal(calls.length, 2);
++    assert.equal(calls[1].accountChanged, true);
++    assert.deepEqual(messages, ["[codex-router] Native catalog refresh failed: offline"]);
++  } finally { stop(); }
++});

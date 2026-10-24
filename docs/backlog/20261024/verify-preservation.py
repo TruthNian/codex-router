@@ -3,7 +3,7 @@ import hashlib, json, os, re, subprocess, tempfile
 from pathlib import Path
 
 HERE=Path(__file__).resolve().parent
-REPO=HERE.parents[2] if (HERE/'README.md').exists() else HERE.parent/'router-upstream-integration-20261024'
+REPO=HERE.parents[2] if HERE.parent.name=='backlog' and HERE.parent.parent.name=='docs' else HERE.parent/'router-upstream-integration-20261024'
 manifest=json.loads((HERE/'inventory.json').read_text(encoding='utf-8'))
 PREFIX='docs/backlog/20261024/'
 def git(*args,input=None,env=None):

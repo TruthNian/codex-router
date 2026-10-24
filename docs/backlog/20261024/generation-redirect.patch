@@ -1,0 +1,54 @@
+diff --git a/changelog.d/generation-redirect-boundary.md b/changelog.d/generation-redirect-boundary.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/generation-redirect-boundary.md
+@@ -0,0 +1 @@
++- Reject generation redirects without following or relaying their Location: a later refused redirect connection cannot prove that the first origin never received the POST. Native, API and vision generation paths return a local failure and require the configured final endpoint.
+diff --git a/src/api-forwarder.mjs b/src/api-forwarder.mjs
+--- a/src/api-forwarder.mjs
++++ b/src/api-forwarder.mjs
+@@ -1,0 +2 @@ import { compatibilityLayerError } from "./compatibility-layer-state.mjs";
++import { rejectGenerationRedirect } from "./generation-redirect.mjs";
+@@ -1667,0 +1669 @@ async function relayUpstreamResponse(
++  await rejectGenerationRedirect(upstream);
+@@ -2158 +2163 @@ async function handleRequest(request, response) {
+-          redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "follow",
++          redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "manual",
+@@ -2160 +2165 @@ async function handleRequest(request, response) {
+-        let attemptResponse = await sendAttempt();
++        let attemptResponse = await rejectGenerationRedirect(await sendAttempt());
+@@ -2176 +2181 @@ async function handleRequest(request, response) {
+-          attemptResponse = await sendAttempt();
++          attemptResponse = await rejectGenerationRedirect(await sendAttempt());
+@@ -2289 +2294 @@ async function handleRequest(request, response) {
+-      redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "follow",
++      redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "manual",
+@@ -2290,0 +2296 @@ async function handleRequest(request, response) {
++    await rejectGenerationRedirect(upstream);
+@@ -2335,0 +2342 @@ async function handleRequest(request, response) {
++      redirect: "manual",
+@@ -2336,0 +2344 @@ async function handleRequest(request, response) {
++    await rejectGenerationRedirect(upstream);
+@@ -2400,2 +2409,3 @@ const server = http.createServer((request, response) => {
+-        error: error.code === "compatibility_layer_disabled"
+-          ? compatibilityLayerError("the requested route").error : transport || {
++        error: error.code === "compatibility_layer_disabled" ? compatibilityLayerError("the requested route").error : transport || (error?.code === "upstream_redirect_refused" ? {
++          type: "provider_redirect_refused", message: error.message,
++        } : {
+@@ -2404 +2414 @@ const server = http.createServer((request, response) => {
+-        },
++        }),
+diff --git a/src/router.mjs b/src/router.mjs
+--- a/src/router.mjs
++++ b/src/router.mjs
+@@ -429,6 +441,4 @@ function isGrokOauthRoute(route) {
+-function fetchForRoute(route, url, init) {
+-  // A followed generation redirect destroys evidence about the original POST.
+-  // Native transport must reject it before a later connect failure can look unsent.
+-  if (!route && String(init?.method).toUpperCase() === "POST") {
+-    return fetch(url, { ...init, redirect: "manual" }).then(rejectGenerationRedirect);
+-  }
++async function fetchForRoute(route, url, init) {
++  // A redirected POST can have executed at its first origin before the next
++  // connection fails. Do not let fetch hide that delivery behind a new error.
++  if (String(init?.method).toUpperCase() === "POST") init = { ...init, redirect: "manual" };

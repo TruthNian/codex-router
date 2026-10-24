@@ -1,0 +1,2564 @@
+diff --git a/apps/control-center/test/renderer.test.mjs b/apps/control-center/test/renderer.test.mjs
+--- a/apps/control-center/test/renderer.test.mjs
++++ b/apps/control-center/test/renderer.test.mjs
+@@ -1682,0 +1683 @@ test(`${language} covers every page, dialogs, raw values, English round trips an
++  let page;
+@@ -1684 +1685 @@ test(`${language} covers every page, dialogs, raw values, English round trips an
+-    const page = await browser.newPage({ viewport: { width: 1280, height: 840 }, locale: "en-US" });
++    page = await browser.newPage({ viewport: { width: 1280, height: 840 }, locale: "en-US" });
+@@ -1741,0 +1743,11 @@ test(`${language} covers every page, dialogs, raw values, English round trips an
++  } catch (error) {
++    if (page) {
++      const state = await page.evaluate(() => ({
++        language: document.documentElement.lang,
++        headings: [...document.querySelectorAll("h1")].map(node => node.textContent),
++        selected: [...document.querySelectorAll("select")].map(node => ({ label: node.getAttribute("aria-label"), value: node.value })),
++        storedLanguage: localStorage.getItem("codex-router-language"),
++      })).catch(() => null);
++      console.error("Localized UI failure state:", JSON.stringify({ expectedLanguage: language, state, errors }));
++    }
++    throw error;
+diff --git a/test/antigravity-cli-onboarding.test.mjs b/test/antigravity-cli-onboarding.test.mjs
+--- a/test/antigravity-cli-onboarding.test.mjs
++++ b/test/antigravity-cli-onboarding.test.mjs
+@@ -247 +247,2 @@ test("desktop onboarding keeps the Antigravity probe explicit on every platform"
+-  assert.match(startup, /\.\.\.\(antigravityForwarder/);
++  assert.match(startup, /\["antigravity", "Antigravity OAuth forwarder"/);
++  assert.match(startup, /\.filter\(\(\[service\]\) => requiredServices\.has\(service\)\)/);
+@@ -262 +263 @@ test("desktop onboarding keeps the Antigravity probe explicit on every platform"
+-  assert.match(providers, /restartRouterServiceIfInstalled\(operation\)/);
++  assert.match(providers, /restartRouterServiceIfInstalled\(nextOperation\)/);
+diff --git a/test/chutes-provider.test.mjs b/test/chutes-provider.test.mjs
+--- a/test/chutes-provider.test.mjs
++++ b/test/chutes-provider.test.mjs
+@@ -5 +4,0 @@ import {
+-  mkdtempSync,
+@@ -10 +8,0 @@ import {
+-import os from "node:os";
+@@ -14,0 +13,3 @@ import { fileURLToPath } from "node:url";
++import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
++import { startProviderControlRuntime, runProviderFixtureNode } from "./fixtures/provider-control-runtime.mjs";
++
+@@ -19 +20,2 @@ function isolatedEnvironment(testRoot, extra = {}) {
+-    ...process.env,
++    ...setupFixtureEnvironment(testRoot, path.join(testRoot, "state")),
++    MODEL_ROUTER_TARGET: "codex",
+@@ -65 +67 @@ test("both installer frontends pass provider selection to setup, which accepts C
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "chutes-installer-test-"));
++  const testRoot = setupFixtureRoot("chutes-installer-test-");
+@@ -89,2 +91,3 @@ test("both installer frontends pass provider selection to setup, which accepts C
+-test("providers enable accepts a configured Chutes key and points catalog-only users at curation", () => {
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "chutes-enable-test-"));
++test("providers enable accepts a configured Chutes key and points catalog-only users at curation", async () => {
++  const testRoot = setupFixtureRoot("chutes-enable-test-");
++  const runtime = await startProviderControlRuntime(testRoot);
+@@ -98 +101 @@ test("providers enable accepts a configured Chutes key and points catalog-only u
+-    const result = runNode(
++    const result = await runProviderFixtureNode(
+@@ -100 +103 @@ test("providers enable accepts a configured Chutes key and points catalog-only u
+-      isolatedEnvironment(testRoot),
++      isolatedEnvironment(testRoot, runtime.environment),
+@@ -108,0 +112,6 @@ test("providers enable accepts a configured Chutes key and points catalog-only u
++    const phases = runtime.events().map((event) => event.phase);
++    for (const phase of ["dependencies", "prepare", "service-restart", "health-adoption", "publish"]) assert.equal(phases.includes(phase), true, phase);
++    assert.equal(phases.indexOf("prepare") < phases.indexOf("service-restart"), true);
++    assert.equal(phases.indexOf("service-restart") < phases.indexOf("health-adoption"), true);
++    assert.equal(phases.indexOf("health-adoption") < phases.indexOf("publish"), true);
++    assert.equal(runtime.events().filter((event) => event.phase === "health-adoption").every((event) => /^[a-f0-9]{64}$/.test(event.fingerprint)), true);
+@@ -109,0 +119 @@ test("providers enable accepts a configured Chutes key and points catalog-only u
++    await runtime.close();
+@@ -115 +125 @@ test("doctor recognizes a persistent Chutes key and warns when no models are cur
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "chutes-doctor-test-"));
++  const testRoot = setupFixtureRoot("chutes-doctor-test-");
+@@ -134,0 +145,24 @@ test("doctor recognizes a persistent Chutes key and warns when no models are cur
++test("Chutes enable refuses a service with another fingerprint and restores its exact selection", async () => {
++  const testRoot = setupFixtureRoot("chutes-adoption-failure-");
++  const runtime = await startProviderControlRuntime(testRoot);
++  try {
++    writeChutesCredential(testRoot);
++    const selection = path.join(testRoot, "state", "enabled-providers.json");
++    const original = '{ "version": 1, "providers": [] }\n';
++    writeFileSync(selection, original);
++    const result = await runProviderFixtureNode(["src/providers.mjs", "enable", "chutes"], isolatedEnvironment(testRoot, {
++      ...runtime.environment, FIXTURE_PROVIDER_REJECT_ADOPTION: "1",
++    }));
++    assert.equal(result.status, 1);
++    assert.match(result.stderr, /running router has not adopted/);
++    assert.equal(readFileSync(selection, "utf8"), original);
++    const events = runtime.events();
++    assert.equal(events.filter((event) => event.phase === "publish").length, 1, "only restored selection may reach real target publication");
++    assert.equal(events.some((event) => event.phase === "health-adoption" && event.fingerprint === "0".repeat(64)), true);
++    assert.equal(events.at(-1).phase, "publish");
++  } finally {
++    await runtime.close();
++    rmSync(testRoot, { recursive: true, force: true });
++  }
++});
++
+@@ -136 +170 @@ test("Chutes public-catalog fixtures drive discovery, deterministic curation, an
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "chutes-curation-test-"));
++  const testRoot = setupFixtureRoot("chutes-curation-test-");
+diff --git a/test/commandcode-forwarder.test.mjs b/test/commandcode-forwarder.test.mjs
+--- a/test/commandcode-forwarder.test.mjs
++++ b/test/commandcode-forwarder.test.mjs
+@@ -0,0 +1 @@
++import "./fixtures/isolated-runtime-environment.mjs";
+@@ -9,0 +11,2 @@ import { openPort } from "./port-pool.mjs";
++import { setupFixtureEnvironment } from "./fixtures/setup-environment.mjs";
++import { stageProviderControlRuntime } from "./fixtures/provider-control-runtime.mjs";
+@@ -93,0 +97,9 @@ async function waitForFile(target, child, errors) {
++function assertEnvironmentPoolStaging(stateDir) {
++  const phases = readFileSync(path.join(stateDir, "runtime-events.jsonl"), "utf8")
++    .trim().split("\n").map((line) => JSON.parse(line).phase);
++  assert.equal(phases.includes("service-status"), true);
++  for (const phase of ["dependencies", "prepare", "publish", "service-restart"]) {
++    assert.equal(phases.includes(phase), false, `environment pool registration must stage without ${phase}`);
++  }
++}
++
+@@ -105 +117 @@ test("a plan-refused Command Code account is served through the CLI route", asyn
+-      ...process.env,
++      ...setupFixtureEnvironment(stateDir, stateDir),
+@@ -199 +211 @@ test("a 403 that is not the plan refusal is relayed, not routed around", async (
+-      ...process.env,
++      ...setupFixtureEnvironment(stateDir, stateDir),
+@@ -261 +273,2 @@ test("pooled Command Code failover uses the winning key for its plan route", asy
+-        ...process.env,
++        ...setupFixtureEnvironment(stateDir, stateDir),
++        ...stageProviderControlRuntime(stateDir),
+@@ -266,0 +280 @@ test("pooled Command Code failover uses the winning key for its plan route", asy
++        MODEL_ROUTER_PORT: String(routerPort),
+@@ -270 +284,2 @@ test("pooled Command Code failover uses the winning key for its plan route", asy
+-      stdio: "ignore",
++      encoding: "utf8",
++      stdio: ["ignore", "pipe", "pipe"],
+@@ -272,0 +288 @@ test("pooled Command Code failover uses the winning key for its plan route", asy
++  assertEnvironmentPoolStaging(stateDir);
+@@ -309 +325 @@ test("pooled Command Code failover uses the winning key for its plan route", asy
+-      ...process.env,
++      ...setupFixtureEnvironment(stateDir, stateDir),
+@@ -388 +404,2 @@ test("an intermediate pooled plan limit stays per-key until the winning response
+-        ...process.env,
++        ...setupFixtureEnvironment(stateDir, stateDir),
++        ...stageProviderControlRuntime(stateDir),
+@@ -393,0 +411 @@ test("an intermediate pooled plan limit stays per-key until the winning response
++        MODEL_ROUTER_PORT: String(routerPort),
+@@ -397 +415,2 @@ test("an intermediate pooled plan limit stays per-key until the winning response
+-      stdio: "ignore",
++      encoding: "utf8",
++      stdio: ["ignore", "pipe", "pipe"],
+@@ -399,0 +419 @@ test("an intermediate pooled plan limit stays per-key until the winning response
++  assertEnvironmentPoolStaging(stateDir);
+@@ -466 +486 @@ test("an intermediate pooled plan limit stays per-key until the winning response
+-      ...process.env,
++      ...setupFixtureEnvironment(stateDir, stateDir),
+@@ -549 +569,2 @@ test("pooled Command Code recheck success is cached against the exact winning ke
+-        ...process.env,
++        ...setupFixtureEnvironment(stateDir, stateDir),
++        ...stageProviderControlRuntime(stateDir),
+@@ -554,0 +576 @@ test("pooled Command Code recheck success is cached against the exact winning ke
++        MODEL_ROUTER_PORT: String(routerPort),
+@@ -558 +580,2 @@ test("pooled Command Code recheck success is cached against the exact winning ke
+-      stdio: "ignore",
++      encoding: "utf8",
++      stdio: ["ignore", "pipe", "pipe"],
+@@ -560,0 +584 @@ test("pooled Command Code recheck success is cached against the exact winning ke
++  assertEnvironmentPoolStaging(stateDir);
+@@ -606 +630 @@ test("pooled Command Code recheck success is cached against the exact winning ke
+-      ...process.env,
++      ...setupFixtureEnvironment(stateDir, stateDir),
+@@ -695 +719 @@ test("the Command Code Flash route clamps Codex's efforts onto the model's ladde
+-      ...process.env,
++      ...setupFixtureEnvironment(stateDir, stateDir),
+diff --git a/test/control-center-electron.test.mjs b/test/control-center-electron.test.mjs
+--- a/test/control-center-electron.test.mjs
++++ b/test/control-center-electron.test.mjs
+@@ -2258 +2258 @@ test("catalog-backed mutations preserve complete forward and rollback restart ep
+-  assert.match(source, /const CATALOG_MUTATION_TIMEOUT_MS = 1_320_000/);
++  assert.match(source, /const CATALOG_MUTATION_TIMEOUT_MS = 45 \* 60_000 \+ 20_000/);
+diff --git a/test/control.test.mjs b/test/control.test.mjs
+--- a/test/control.test.mjs
++++ b/test/control.test.mjs
+@@ -607 +607,2 @@ test("set-apply keeps provider mutation, publication, and rollback in one transa
+-  assert.match(atomic, /applyProviderSelectionForTargets\(TARGETS, \{ activate \}\)/);
++  assert.match(atomic, /restart: true/);
++  assert.match(atomic, /applyProviderSelectionForTargets\(TARGETS, \{ activate, \.\.\.operation \}\)/);
+diff --git a/test/devin-forwarder-gating.test.mjs b/test/devin-forwarder-gating.test.mjs
+--- a/test/devin-forwarder-gating.test.mjs
++++ b/test/devin-forwarder-gating.test.mjs
+@@ -3,0 +4 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import http from "node:http";
+@@ -10,0 +12 @@ import { userModelEntry } from "../src/user-models.mjs";
++import { callerBaseUrl } from "../src/caller-auth.mjs";
+@@ -12,0 +15,3 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++const INTERNAL_KEY = "devin-gate-internal-key-with-sufficient-length";
++const CALLER_KEY = "devin-gate-caller-key-with-sufficient-length";
++const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+@@ -14,12 +19,4 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+-// Devin ships catalog-only, so an unconfigured install has no `devin-cli` model
+-// and start.mjs must not spend a process or a port on its forwarder. The gate
+-// is the curated model rather than the stored credential, because a curated
+-// model is exactly what puts a `DEVIN_CLI_FORWARD_BASE_URL` route in the
+-// gateway config -- gate and route are computed from the same MODELS array on
+-// the same boot, so a live route can never point at a port nobody bound.
+-//
+-// Every case here drives the real start.mjs. `MODEL_ROUTER_LITELLM_BIN` points
+-// at node, which exits immediately when handed LiteLLM's arguments, so startup
+-// always fails at the gateway -- the stage *after* the forwarders. That makes
+-// "reached the gateway" a positive assertion that the forwarder stage
+-// completed, and it is the same trick startup-cleanup.test.mjs uses.
++// Drive the real supervisor and selected forwarders. Node deliberately fails
++// LiteLLM's command line on selected Devin routes. The Router must still serve
++// an independent native turn, while /health reports the missing dependencies.
++// A native-only generation needs no gateway process at all.
+@@ -27,37 +23,0 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+-// See startup-cleanup.test.mjs: progress, not elapsed time, separates a slow
+-// machine from a stuck one, so the watchdog fires only on silence.
+-const STARTUP_STALL_MS = 30_000;
+-
+-function waitForStartupExit(child, readErrors) {
+-  const started = Date.now();
+-  return new Promise((resolve, reject) => {
+-    let lastOutput = started;
+-    const onProgress = () => {
+-      lastOutput = Date.now();
+-    };
+-    child.stderr.on("data", onProgress);
+-    const finish = () => {
+-      clearInterval(watchdog);
+-      child.stderr.off("data", onProgress);
+-    };
+-    const watchdog = setInterval(() => {
+-      const idleMs = Date.now() - lastOutput;
+-      if (idleMs < STARTUP_STALL_MS) return;
+-      finish();
+-      reject(
+-        new Error(
+-          `startup stalled: no output for ${idleMs} ms after waiting ${Date.now() - started} ms in total; stderr so far:\n${readErrors()}`,
+-        ),
+-      );
+-    }, 250);
+-    child.once("exit", (code, signal) => {
+-      finish();
+-      resolve({ code, signal });
+-    });
+-  });
+-}
+-
+-// Holds a port for the duration of a test so a forwarder that tries to bind it
+-// fails with EADDRINUSE. Occupying the port is how "nothing was spawned" is
+-// proved positively: an unspawned forwarder cannot collide with the squatter,
+-// so startup walks past it to the gateway.
+@@ -65,7 +25 @@ async function squat(port) {
+-  const server = net.createServer();
+-  // Hang up on anything that connects. A squatter that accepted and held the
+-  // socket would leave the health probe waiting for a response that never came
+-  // and would keep `server.close()` from ever completing; destroying the socket
+-  // makes a probe of this port fail the way a dead listener does, which is what
+-  // the port being unavailable is meant to look like.
+-  server.on("connection", (socket) => socket.destroy());
++  const server = net.createServer((socket) => socket.destroy());
+@@ -73,12 +27 @@ async function squat(port) {
+-    // Named, because this bind failing is a failure of the *fixture*, not of
+-    // the gate under test, and the two read identically in CI otherwise: both
+-    // arrive as `EADDRINUSE 127.0.0.1:<port>` with nothing saying which end
+-    // wanted the port.
+-    server.once("error", (error) =>
+-      reject(
+-        new Error(
+-          `the test could not hold 127.0.0.1:${port} for the Devin forwarder to collide with: ${error.code || error.message}`,
+-          { cause: error },
+-        ),
+-      ),
+-    );
++    server.once("error", reject);
+@@ -87,8 +30,29 @@ async function squat(port) {
+-  return {
+-    listening: () => server.listening,
+-    close: () =>
+-      new Promise((resolve) => {
+-        server.close(resolve);
+-        server.unref();
+-      }),
+-  };
++  return { server, close: () => new Promise((resolve) => server.close(resolve)) };
++}
++
++async function eventually(read, accepts, child, errors) {
++  const deadline = Date.now() + 10_000;
++  let value;
++  while (Date.now() < deadline) {
++    assert.equal(child.exitCode, null, `owned supervisor exited early: ${errors()}`);
++    try {
++      value = await read();
++      if (accepts(value)) return value;
++    } catch { /* The owned listener may still be starting. */ }
++    await delay(25);
++  }
++  throw new Error(`owned stack did not settle: ${JSON.stringify(value)} ${errors()}`);
++}
++
++async function controlledStop(child, exited) {
++  if (child.exitCode !== null || child.signalCode !== null) return exited;
++  child.send({ type: "model-router:shutdown" });
++  let timer;
++  try {
++    return await Promise.race([
++      exited,
++      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("owned supervisor did not drain after IPC shutdown")), 5_000); }),
++    ]);
++  } finally {
++    clearTimeout(timer);
++  }
+@@ -98 +62 @@ async function runStartup({ curatedDevinModel = false, occupyDevinPort = false }
+-  const ports = await Promise.all(Array.from({ length: 6 }, () => freePort()));
++  const ports = await Promise.all(Array.from({ length: 7 }, () => freePort()));
+@@ -100,4 +64,4 @@ async function runStartup({ curatedDevinModel = false, occupyDevinPort = false }
+-  const [routerPort, gatewayPort, oauthPort, apiPort, grokOauthPort, devinPort] = ports;
+-
+-  const rootDir = mkdtempSync(path.join(os.tmpdir(), "model-router-devin-gate-"));
+-  const stateDir = path.join(rootDir, "state");
++  const [routerPort, gatewayPort, oauthPort, apiPort, grokOauthPort, devinPort, antigravityPort] = ports;
++  const directory = mkdtempSync(path.join(os.tmpdir(), "model-router-devin-gate-"));
++  const stateDir = path.join(directory, "state");
++  const codexHome = path.join(directory, "codex");
+@@ -105,2 +69,16 @@ async function runStartup({ curatedDevinModel = false, occupyDevinPort = false }
+-  writeFileSync(path.join(stateDir, "internal-secret"), "devin-gate-internal-key-with-sufficient-length\n", {
+-    mode: 0o600,
++  mkdirSync(codexHome, { recursive: true, mode: 0o700 });
++  writeFileSync(path.join(stateDir, "internal-secret"), `${INTERNAL_KEY}\n`, { mode: 0o600 });
++  writeFileSync(path.join(stateDir, "caller-secret"), `${CALLER_KEY}\n`, { mode: 0o600 });
++  writeFileSync(path.join(stateDir, "enabled-providers.json"), JSON.stringify({ version: 1,
++    providers: curatedDevinModel ? ["devin-cli"] : [] }), { mode: 0o600 });
++  writeFileSync(path.join(stateDir, "user-models.json"), JSON.stringify({ version: 1,
++    models: curatedDevinModel ? [userModelEntry({ providerId: "devin-cli", upstreamId: "gate-test-model", priority: 900 })] : [] }), { mode: 0o600 });
++
++  const nativeRequests = [];
++  const native = http.createServer(async (request, response) => {
++    const chunks = [];
++    for await (const chunk of request) chunks.push(chunk);
++    nativeRequests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks).toString()) });
++    response.writeHead(200, { "content-type": "application/json" });
++    response.end(JSON.stringify({ id: "resp_independent_native", object: "response", status: "completed",
++      model: "gpt-6.1-sol", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "INDEPENDENT_NATIVE_OK" }] }] }));
+@@ -108,22 +86,2 @@ async function runStartup({ curatedDevinModel = false, occupyDevinPort = false }
+-  writeFileSync(path.join(stateDir, "caller-secret"), "devin-gate-caller-key-with-sufficient-length\n", {
+-    mode: 0o600,
+-  });
+-  if (curatedDevinModel) {
+-    // Built through the same helper `bin/curate-models` uses, so this stays a
+-    // real curated entry rather than a hand-written shape that could drift.
+-    writeFileSync(
+-      path.join(stateDir, "user-models.json"),
+-      JSON.stringify(
+-        {
+-          version: 1,
+-          models: [
+-            userModelEntry({ providerId: "devin-cli", upstreamId: "gate-test-model", priority: 900 }),
+-          ],
+-        },
+-        null,
+-        2,
+-      ),
+-      { mode: 0o600 },
+-    );
+-  }
+-
++  await new Promise((resolve) => native.listen(0, "127.0.0.1", resolve));
++  const nativePort = native.address().port;
+@@ -131 +89,20 @@ async function runStartup({ curatedDevinModel = false, occupyDevinPort = false }
+-
++  const env = { ...process.env };
++  for (const name of Object.keys(env)) {
++    if (/^(MODEL_ROUTER_|CODEX_ROUTER_|ROUTER_PLANE_)/.test(name) || /(?:API_KEY|TOKEN|SECRET)$/i.test(name)) delete env[name];
++  }
++  Object.assign(env, {
++    CODEX_HOME: codexHome, HOME: directory, USERPROFILE: directory,
++    APPDATA: path.join(directory, "AppData", "Roaming"), LOCALAPPDATA: path.join(directory, "AppData", "Local"),
++    MODEL_ROUTER_TARGET: "codex", MODEL_ROUTER_STATE_DIR: stateDir, CODEX_ROUTER_STATE_DIR: stateDir,
++    MODEL_ROUTER_PORT: String(routerPort), MODEL_ROUTER_GATEWAY_PORT: String(gatewayPort),
++    MODEL_ROUTER_OAUTH_PORT: String(oauthPort), MODEL_ROUTER_API_PORT: String(apiPort),
++    MODEL_ROUTER_GROK_OAUTH_PORT: String(grokOauthPort), MODEL_ROUTER_DEVIN_CLI_PORT: String(devinPort),
++    MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: String(antigravityPort), MODEL_ROUTER_LOCAL_BASE_URL: "http://127.0.0.1:9/v1",
++    // Native forwarding is deliberately disabled by --no-discovery, even for
++    // an explicit local base. Enable it only inside these synthetic homes;
++    // all transport/health ports and the sole upstream are fixture-owned.
++    CODEX_ROUTER_SHOW_ALL_MODELS: "0", CODEX_ROUTER_NO_DISCOVERY: "0", CODEX_ROUTER_SERVICE_PLATFORM: "test-fixture",
++    CODEX_NATIVE_BASE_URL: `http://127.0.0.1:${nativePort}/native`, MODEL_ROUTER_NATIVE_TRANSPORT: "http",
++    MODEL_ROUTER_LITELLM_BIN: process.execPath, CODEX_ROUTER_GATEWAY_RESTARTS: "0",
++    MODEL_ROUTER_SHUTDOWN_DRAIN_MS: "100", MODEL_ROUTER_SHUTDOWN_FLUSH_MS: "100", NODE_USE_ENV_PROXY: "0",
++  });
+@@ -133,14 +110 @@ async function runStartup({ curatedDevinModel = false, occupyDevinPort = false }
+-    cwd: root,
+-    env: {
+-      ...process.env,
+-      MODEL_ROUTER_TARGET: "codex",
+-      MODEL_ROUTER_STATE_DIR: stateDir,
+-      MODEL_ROUTER_PORT: String(routerPort),
+-      MODEL_ROUTER_GATEWAY_PORT: String(gatewayPort),
+-      MODEL_ROUTER_OAUTH_PORT: String(oauthPort),
+-      MODEL_ROUTER_API_PORT: String(apiPort),
+-      MODEL_ROUTER_GROK_OAUTH_PORT: String(grokOauthPort),
+-      MODEL_ROUTER_DEVIN_CLI_PORT: String(devinPort),
+-      MODEL_ROUTER_LITELLM_BIN: process.execPath,
+-    },
+-    stdio: ["ignore", "ignore", "pipe"],
++    cwd: root, env, stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true,
+@@ -150,4 +114,2 @@ async function runStartup({ curatedDevinModel = false, occupyDevinPort = false }
+-  child.stderr.on("data", (chunk) => {
+-    errors += chunk;
+-  });
+-
++  child.stderr.on("data", (chunk) => { errors += chunk; });
++  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+@@ -155,4 +117,36 @@ async function runStartup({ curatedDevinModel = false, occupyDevinPort = false }
+-    const exit = await waitForStartupExit(child, () => errors);
+-    // Read the squatter before the teardown below closes it: the caller runs
+-    // after this function returns, by which point it is gone either way.
+-    return { exit, errors, devinPort, squatterHeldPort: squatter ? squatter.listening() : undefined };
++    const health = await eventually(async () => {
++      const response = await fetch(`${callerBaseUrl(routerPort, CALLER_KEY)}/health`, { signal: AbortSignal.timeout(500) });
++      return { status: response.status, body: await response.json() };
++    }, (value) => value.body.executionPlan && (curatedDevinModel
++      ? value.status === 503 && value.body.degraded.includes("gateway") && value.body.devinCli.reachable === !occupyDevinPort
++      : value.status === 200), child, () => errors);
++    await eventually(async () => errors, (value) => curatedDevinModel
++      ? value.includes("serving independent routes") : value.includes("ready (authenticated loopback endpoint)"), child, () => errors);
++    let devinHealth;
++    if (curatedDevinModel && !occupyDevinPort) {
++      const response = await fetch(`http://127.0.0.1:${devinPort}/health`, {
++        headers: { Authorization: `Bearer ${INTERNAL_KEY}` }, signal: AbortSignal.timeout(500),
++      });
++      assert.equal(response.status, 200);
++      devinHealth = await response.json();
++      assert.equal(devinHealth.service, "codex-router-devin-cli-forwarder");
++    }
++    const independent = await fetch(`${callerBaseUrl(routerPort, CALLER_KEY)}/responses`, {
++      method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer synthetic-native-credential" },
++      body: JSON.stringify({ model: "gpt-6.1-sol", input: "show independent route availability", stream: false }),
++      signal: AbortSignal.timeout(2_000),
++    });
++    assert.equal(independent.status, 200, errors);
++    assert.match(await independent.text(), /INDEPENDENT_NATIVE_OK/);
++    assert.equal(nativeRequests.length, 1);
++    assert.equal(nativeRequests[0].url, "/native/responses");
++    assert.equal(nativeRequests[0].body.model, "gpt-6.1-sol");
++    assert.equal(child.exitCode, null, "degraded dependencies must leave the owned supervisor serving");
++    const squatterHeldPort = squatter?.server.listening;
++    const exit = await controlledStop(child, exited);
++    assert.deepEqual(exit, { code: 0, signal: null }, errors);
++    await assert.rejects(fetch(`http://127.0.0.1:${routerPort}/health/live`, { signal: AbortSignal.timeout(500) }), "owned Router must release its listener after shutdown");
++    if (curatedDevinModel && !occupyDevinPort) {
++      await assert.rejects(fetch(`http://127.0.0.1:${devinPort}/health`, { signal: AbortSignal.timeout(500) }), "owned Devin child must release its listener after shutdown");
++    }
++    return { exit, errors, health, devinHealth, squatterHeldPort };
+@@ -160,6 +154,3 @@ async function runStartup({ curatedDevinModel = false, occupyDevinPort = false }
+-    // start.mjs writes into `stateDir` and re-creates it on the way (every
+-    // state writer here does `mkdirSync` with `recursive` before it appends),
+-    // so removing the tree while it is still winding down races its own
+-    // teardown: `rmSync` unlinks the children, the child re-creates one, and
+-    // the final `rmdir` fails with ENOTEMPTY. Wait for it to be gone first.
+-    await stopChild(child);
++    if (child.exitCode === null && child.signalCode === null) {
++      try { await controlledStop(child, exited); } catch { child.kill("SIGKILL"); await exited; }
++    }
+@@ -167,22 +158,5 @@ async function runStartup({ curatedDevinModel = false, occupyDevinPort = false }
+-    rmSync(rootDir, { recursive: true, force: true });
+-  }
+-}
+-
+-// SIGTERM is not a signal on Windows: Node emulates it with TerminateProcess,
+-// so a process that is already exiting on its own may never be reachable. Fall
+-// back to SIGKILL rather than waiting out a run.
+-async function stopChild(child) {
+-  if (child.exitCode !== null || child.signalCode !== null) return;
+-  child.kill("SIGTERM");
+-  const exited = new Promise((resolve) => child.once("exit", resolve));
+-  let hardStop;
+-  await Promise.race([
+-    exited,
+-    new Promise((resolve) => {
+-      hardStop = setTimeout(resolve, 5_000);
+-    }),
+-  ]);
+-  clearTimeout(hardStop);
+-  if (child.exitCode === null && child.signalCode === null) {
+-    child.kill("SIGKILL");
+-    await exited;
++    native.closeAllConnections();
++    await new Promise((resolve) => native.close(resolve));
++    const resolved = path.resolve(directory);
++    assert.ok(resolved.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`) && path.basename(resolved).startsWith("model-router-devin-gate-"));
++    rmSync(resolved, { recursive: true, force: true });
+@@ -192,31 +166,8 @@ async function stopChild(child) {
+-test(
+-  "an install with no curated Devin model spawns no forwarder and binds no port",
+-  { timeout: 120_000 },
+-  async () => {
+-    // The Devin port is held by this test. A forwarder that was spawned would
+-    // die on EADDRINUSE and abort startup by name, so reaching the gateway
+-    // failure instead is proof that nothing was spawned and nothing was bound.
+-    const { exit, errors, squatterHeldPort } = await runStartup({ occupyDevinPort: true });
+-
+-    assert.doesNotMatch(errors, /\[devin-cli\]/, errors);
+-    assert.doesNotMatch(errors, /Devin CLI forwarder/, errors);
+-    assert.match(errors, /startup failed: LiteLLM gateway exited before becoming healthy\./, errors);
+-    assert.equal(exit.code, 1, errors);
+-    assert.equal(squatterHeldPort, true, "something took the Devin port from this test");
+-  },
+-);
+-
+-test(
+-  "a curated Devin model spawns the forwarder and waits on its health",
+-  { timeout: 120_000 },
+-  async () => {
+-    const { exit, errors } = await runStartup({ curatedDevinModel: true });
+-
+-    // The forwarder announces itself on stderr when its listener is up, and
+-    // startup only reaches the gateway once every forwarder health wait has
+-    // resolved -- so both halves of "spawned and waited on" are asserted.
+-    assert.match(errors, /\[devin-cli\] listening/, errors);
+-    assert.match(errors, /startup failed: LiteLLM gateway exited before becoming healthy\./, errors);
+-    assert.equal(exit.code, 1, errors);
+-  },
+-);
++test("an install with no curated Devin model spawns no forwarder and binds no port", { timeout: 20_000 }, async () => {
++  const { health, errors, squatterHeldPort } = await runStartup({ occupyDevinPort: true });
++  assert.deepEqual(health.body.executionPlan.services, []);
++  assert.deepEqual(health.body.degraded, []);
++  assert.equal(health.body.devinCli.enabled, false);
++  assert.doesNotMatch(errors, /\[devin-cli\]|Devin CLI forwarder|LiteLLM gateway/);
++  assert.equal(squatterHeldPort, true, "the unselected route must not take the held Devin port");
++});
+@@ -224,8 +175,8 @@ test(
+-test(
+-  "a curated Devin model that cannot bind its port still fails startup by name",
+-  { timeout: 120_000 },
+-  async () => {
+-    // Gating must not turn a real failure into a silent skip: when the provider
+-    // is routed, an unbindable forwarder aborts startup naming itself, exactly
+-    // as it did when the spawn was unconditional.
+-    const { exit, errors } = await runStartup({ curatedDevinModel: true, occupyDevinPort: true });
++test("a curated Devin model spawns the forwarder and waits on its health", { timeout: 20_000 }, async () => {
++  const { health, errors } = await runStartup({ curatedDevinModel: true });
++  assert.deepEqual(health.body.executionPlan.services, ["devin", "gateway"]);
++  assert.deepEqual(health.body.degraded, ["gateway"]);
++  assert.equal(health.body.devinCli.reachable, true);
++  assert.match(errors, /\[devin-cli\] listening/);
++  assert.match(errors, /dependency unavailable: LiteLLM gateway exited before becoming healthy\./);
++});
+@@ -233,5 +184,9 @@ test(
+-    assert.match(errors, /startup failed: Devin CLI forwarder exited before becoming healthy\./, errors);
+-    assert.doesNotMatch(errors, /LiteLLM gateway exited before becoming healthy/, errors);
+-    assert.equal(exit.code, 1, errors);
+-  },
+-);
++test("a selected Devin bind failure names its degraded dependency while native routes stay available", { timeout: 20_000 }, async () => {
++  const { health, errors, squatterHeldPort } = await runStartup({ curatedDevinModel: true, occupyDevinPort: true });
++  assert.deepEqual(health.body.executionPlan.services, ["devin", "gateway"]);
++  assert.deepEqual(health.body.degraded, ["devinCli", "gateway"]);
++  assert.equal(health.body.devinCli.reachable, false);
++  assert.match(errors, /\[devin-cli\] cannot listen: .*already in use/);
++  assert.match(errors, /dependency unavailable: Devin CLI forwarder exited before becoming healthy\./);
++  assert.equal(squatterHeldPort, true);
++});
+@@ -239,4 +194,4 @@ test(
+-test("neither secret is echoed while the gate is being decided", { timeout: 120_000 }, async () => {
+-  const { errors } = await runStartup({ curatedDevinModel: true });
+-  assert.doesNotMatch(errors, /devin-gate-internal-key-with-sufficient-length/);
+-  assert.doesNotMatch(errors, /devin-gate-caller-key-with-sufficient-length/);
++test("neither secret is echoed while the gate is being decided", { timeout: 20_000 }, async () => {
++  const { errors, health } = await runStartup({ curatedDevinModel: true });
++  assert.doesNotMatch(errors, new RegExp(`${INTERNAL_KEY}|${CALLER_KEY}`));
++  assert.doesNotMatch(JSON.stringify(health), new RegExp(`${INTERNAL_KEY}|${CALLER_KEY}`));
+diff --git a/test/fixtures/isolated-runtime-environment.mjs b/test/fixtures/isolated-runtime-environment.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/fixtures/isolated-runtime-environment.mjs
+@@ -0,0 +1,98 @@
++import assert from "node:assert/strict";
++import childProcess from "node:child_process";
++import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
++import { syncBuiltinESMExports } from "node:module";
++import os from "node:os";
++import path from "node:path";
++
++// Import this before any src module: paths.mjs captures its environment at
++// evaluation time. A bare CI invocation must be as isolated as a local runner.
++// Children preload only the Keychain boundary, preserving their own fixtures.
++const keychainOnly = new URL(import.meta.url).searchParams.has("keychain-only");
++const temporaryDirectory = path.resolve(os.tmpdir());
++const keychainGuard = Symbol.for("codex-router.test.isolated-keychain");
++if (!childProcess[keychainGuard]) {
++  const originalExecFileSync = childProcess.execFileSync;
++  childProcess.execFileSync = function (file, args, ...options) {
++    if (file === "/usr/bin/security" || file === "security") {
++      const error = new Error("The isolated runtime fixture cannot access the host Keychain.");
++      error.status = args?.[0] === "find-generic-password" ? 44 : 1;
++      throw error;
++    }
++    return originalExecFileSync.call(this, file, args, ...options);
++  };
++  childProcess[keychainGuard] = true;
++  syncBuiltinESMExports();
++}
++
++export const isolatedRuntimeRoot = keychainOnly
++  ? undefined
++  : mkdtempSync(path.join(temporaryDirectory, "codex-router-isolated-runtime-"));
++export const isolatedRuntimeHome = keychainOnly
++  ? undefined
++  : path.join(isolatedRuntimeRoot, "codex");
++export const isolatedRuntimeStateDir = keychainOnly
++  ? undefined
++  : path.join(isolatedRuntimeRoot, "state");
++
++if (!keychainOnly) {
++  process.once("exit", () => {
++    assert.equal(path.isAbsolute(isolatedRuntimeRoot), true);
++    assert.equal(path.dirname(isolatedRuntimeRoot), temporaryDirectory);
++    assert.ok(path.basename(isolatedRuntimeRoot).startsWith("codex-router-isolated-runtime-"));
++    rmSync(isolatedRuntimeRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
++  });
++  const environment = {
++    HOME: isolatedRuntimeRoot,
++    USERPROFILE: isolatedRuntimeRoot,
++    APPDATA: path.join(isolatedRuntimeRoot, "appdata"),
++    LOCALAPPDATA: path.join(isolatedRuntimeRoot, "localappdata"),
++    CODEX_HOME: isolatedRuntimeHome,
++    CODEX_ROUTER_STATE_DIR: isolatedRuntimeStateDir,
++    XDG_CONFIG_HOME: path.join(isolatedRuntimeRoot, ".config"),
++    XDG_DATA_HOME: path.join(isolatedRuntimeRoot, ".local", "share"),
++    KIMI_CODE_HOME: path.join(isolatedRuntimeRoot, "kimi-code"),
++    GROK_HOME: path.join(isolatedRuntimeRoot, "grok"),
++    GROK_AUTH_PATH: path.join(isolatedRuntimeRoot, "grok", "auth.json"),
++    DEVIN_CREDENTIALS_PATH: path.join(isolatedRuntimeRoot, "devin", "credentials.toml"),
++    CLOUDSDK_CONFIG: path.join(isolatedRuntimeRoot, "gcloud"),
++    GOOGLE_APPLICATION_CREDENTIALS: path.join(isolatedRuntimeRoot, "gcloud", "application-default.json"),
++    GCLOUD_BIN: path.join(isolatedRuntimeRoot, "missing-gcloud"),
++    DSH_HOME: path.join(isolatedRuntimeRoot, "dsh"),
++    GEMINI_CLI_HOME: isolatedRuntimeRoot,
++    CURSOR_HOME: path.join(isolatedRuntimeRoot, "cursor"),
++    PI_CODING_AGENT_DIR: path.join(isolatedRuntimeRoot, "pi"),
++    HERMES_HOME: path.join(isolatedRuntimeRoot, "hermes"),
++    CLAUDE_CONFIG_DIR: path.join(isolatedRuntimeRoot, "claude"),
++  };
++  for (const value of Object.values(environment)) {
++    const relative = path.relative(isolatedRuntimeRoot, value);
++    assert.equal(path.isAbsolute(value), true);
++    assert.equal(relative.startsWith("..") || path.isAbsolute(relative), false);
++  }
++  for (const directory of [isolatedRuntimeHome, isolatedRuntimeStateDir, environment.APPDATA, environment.LOCALAPPDATA]) {
++    mkdirSync(directory, { recursive: true });
++  }
++  // A high-priority alias would mask legacy fixtures that deliberately replace
++  // only CODEX_ROUTER_STATE_DIR. Other inherited file overrides must not escape
++  // the synthetic home or keep referring to the caller's real installation.
++  for (const name of [
++    "MODEL_ROUTER_STATE_DIR", "KIMI_CODEX_STATE_DIR",
++    "MODEL_ROUTER_DSH_SETTINGS", "MODEL_ROUTER_DSH_CREDENTIALS",
++    "MODEL_ROUTER_GEMINI_ENV", "MODEL_ROUTER_CURSOR_STATE_DB", "MODEL_ROUTER_CURSOR_LAUNCHER",
++    "MODEL_ROUTER_OPENCODE_CONFIG", "OPENCODE_CONFIG", "MODEL_ROUTER_PI_MODELS", "MODEL_ROUTER_OMP_MODELS",
++    "MODEL_ROUTER_COMMANDCODE_PROVIDERS", "MODEL_ROUTER_HERMES_CONFIG", "MODEL_ROUTER_CLAUDE_LAUNCHER",
++    "MODEL_ROUTER_API_KEY_POOL_PATH", "MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE",
++    "MODEL_ROUTER_PROVIDER_CREDENTIAL_MIGRATIONS", "MODEL_ROUTER_CHATGPT_ACCOUNT_POOL",
++    "MODEL_ROUTER_CHATGPT_ACCOUNT_HOMES", "MODEL_ROUTER_GENERIC_PROVIDERS",
++    "MODEL_ROUTER_SEARCH_SIDECARS", "MODEL_ROUTER_USER_MODELS", "MODEL_ROUTER_VERTEX_STATE_PATH",
++    "MODEL_ROUTER_LAUNCH_AGENTS_DIR", "CODEX_ROUTER_LAUNCH_AGENTS_DIR",
++  ]) delete process.env[name];
++  for (const name of Object.keys(process.env)) {
++    if (/(?:_API_KEY|_API_TOKEN)$/.test(name)) delete process.env[name];
++  }
++  Object.assign(process.env, environment);
++  const preload = new URL(import.meta.url);
++  preload.search = "?keychain-only=1";
++  process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS || ""} --import=${JSON.stringify(preload.href)}`.trim();
++}
+diff --git a/test/fixtures/provider-control-runtime.mjs b/test/fixtures/provider-control-runtime.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/fixtures/provider-control-runtime.mjs
+@@ -0,0 +1,144 @@
++import { spawn } from "node:child_process";
++import { createServer } from "node:http";
++import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
++import path from "node:path";
++
++// Execute real control mutation/rollback and process-tree code, substituting
++// only runtime installation and model publication subprocesses. No service or
++// package manager command can escape this synthetic runtime fixture.
++export function stageProviderControlRuntime(directory, { mode = "stub" } = {}) {
++  if (!["stub", "boundary"].includes(mode)) throw new Error("Unknown provider runtime fixture mode");
++  const runtime = path.join(directory, "runtime");
++  mkdirSync(runtime, { recursive: true });
++  const driver = path.join(runtime, "driver.mjs");
++  const wrapper = path.join(runtime, process.platform === "win32" ? "node.cmd" : "node");
++  writeFileSync(driver, `
++    import fs from "node:fs";
++    import path from "node:path";
++    import {spawnSync} from "node:child_process";
++    const [script,...args]=process.argv.slice(2);
++    const name=path.basename(script||"");
++    const state=process.env.MODEL_ROUTER_STATE_DIR;
++    const root=process.env.FIXTURE_PROVIDER_RUNTIME_ROOT;
++    const boundary=process.env.FIXTURE_PROVIDER_RUNTIME_MODE==="boundary";
++    if(!root||!state)throw new Error("Unbound runtime fixture");
++    for(const field of ["HOME","USERPROFILE","APPDATA","LOCALAPPDATA","CODEX_HOME","MODEL_ROUTER_STATE_DIR","CODEX_ROUTER_STATE_DIR"]){
++      const value=process.env[field];
++      if(!value||!path.isAbsolute(value)||path.relative(root,value).startsWith(".."))throw new Error("Unbound runtime fixture root: "+field);
++    }
++    if(state!==process.env.CODEX_ROUTER_STATE_DIR)throw new Error("Unbound runtime fixture state aliases");
++    const log=path.join(root,"runtime-events.jsonl");
++    function event(phase){
++      fs.appendFileSync(log,JSON.stringify({phase,time:Date.now(),deadline:Number(process.env.CODEX_ROUTER_OPERATION_DEADLINE_MS)})+"\\n");
++    }
++    function fail(phase){
++      const marker=path.join(root,"failed-"+phase);
++      if(process.env.FIXTURE_PROVIDER_FAIL_PHASE===phase&&!fs.existsSync(marker)){
++        fs.writeFileSync(marker,"failed");process.stderr.write("Synthetic "+phase+" failure\\n");process.exit(17);
++      }
++    }
++    if(name==="runtime-dependency-preparation.mjs"){
++      event("dependencies");fail("dependencies");
++      if(boundary){
++        const {prepareRuntimeDependencies}=await import((await import("node:url")).pathToFileURL(script).href);
++        // Package provisioning is the external boundary. Execute the real
++        // freshly loaded route requirement calculation with fixture deps ready.
++        process.stdout.write(JSON.stringify(await prepareRuntimeDependencies({stepStatus:()=>"skip"})));
++      }else process.stdout.write(JSON.stringify({prepared:true,installed:false,needsGateway:true}));
++    }else if(name==="model-overlay-publication.mjs"){
++      const phase=args[0]==="--prepare-in-fresh-process"?"prepare":"publish";
++      event(phase);fail(phase);
++      if(boundary){
++        const result=spawnSync(${JSON.stringify(process.execPath)},[script,...args],{encoding:"utf8",env:process.env});
++        if(result.stdout)process.stdout.write(result.stdout);
++        if(result.stderr)process.stderr.write(result.stderr);
++        if(result.status===0&&phase==="prepare"){
++          const fingerprint=JSON.parse(result.stdout).expectedFingerprint;
++          if(!/^[a-f0-9]{64}$/.test(fingerprint))throw new Error("Real prepare returned no fingerprint");
++          fs.writeFileSync(path.join(root,"prepared-fingerprint"),fingerprint);
++        }
++        process.exit(result.status??1);
++      }else process.stdout.write(JSON.stringify(phase==="prepare"?{expectedFingerprint:"a".repeat(64)}:{targetsRefreshed:[]}));
++    }else if(name==="service.mjs"){
++      event("service-"+args[0]);
++      if(boundary){
++        if(args[0]==="restart"){
++          let fingerprint=fs.readFileSync(path.join(root,"prepared-fingerprint"),"utf8");
++          const rejected=path.join(root,"adoption-rejected");
++          if(process.env.FIXTURE_PROVIDER_REJECT_ADOPTION==="1"&&!fs.existsSync(rejected)){
++            fs.writeFileSync(rejected,"rejected");fingerprint="0".repeat(64);
++          }
++          fs.writeFileSync(path.join(root,"active-fingerprint"),fingerprint);
++        }
++        process.stdout.write(JSON.stringify(args[0]==="restart"?{state:"running"}:{installed:true,loaded:true,state:"running",platform:"darwin"})+"\\n");
++      }else{
++        const installed=process.env.FIXTURE_PROVIDER_MANAGED_SERVICE==="1";
++        process.stdout.write(JSON.stringify({installed,loaded:false,state:"stopped",platform:"darwin"}));
++      }
++    }else{
++      if(name==="control.mjs")event("control");
++      const result=spawnSync(${JSON.stringify(process.execPath)},[script,...args],{stdio:"inherit",env:process.env});
++      process.exit(result.status??1);
++    }
++  `);
++  if (process.platform === "win32") {
++    writeFileSync(wrapper, `@echo off\r\n"${process.execPath}" "${driver}" %*\r\nexit /b %errorlevel%\r\n`);
++  } else {
++    const quote = (value) => `'${value.replace(/'/g, `'"'"'`)}'`;
++    writeFileSync(wrapper, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(driver)} "$@"\n`, { mode: 0o755 });
++  }
++  return { CODEX_ROUTER_NODE_BIN: wrapper, FIXTURE_PROVIDER_RUNTIME_ROOT: directory,
++    ...(mode === "boundary" ? { FIXTURE_PROVIDER_RUNTIME_MODE: mode } : {}) };
++}
++
++// Real preparation, fingerprint verification, gateway writes and target
++// publication stay intact. Only package readiness and the OS managed service
++// are substituted; health is an actual loopback listener, never a no-op verifier.
++export async function startProviderControlRuntime(directory) {
++  const environment = stageProviderControlRuntime(directory, { mode: "boundary" });
++  const server = createServer((request, response) => {
++    if (request.method !== "GET" || request.url !== "/health") {
++      response.writeHead(404);
++      response.end();
++      return;
++    }
++    const active = path.join(directory, "active-fingerprint");
++    const fingerprint = existsSync(active) ? readFileSync(active, "utf8") : undefined;
++    appendFileSync(path.join(directory, "runtime-events.jsonl"), JSON.stringify({
++      phase: "health-adoption", fingerprint, time: Date.now(),
++    }) + "\n");
++    response.writeHead(fingerprint ? 200 : 503, { "content-type": "application/json" });
++    response.end(JSON.stringify({ ok: Boolean(fingerprint), service: "codex-router",
++      degraded: fingerprint ? [] : ["fixture service has not adopted routes"],
++      ...(fingerprint ? { executionPlan: { fingerprint } } : {}),
++    }));
++  });
++  await new Promise((resolve, reject) => {
++    server.once("error", reject);
++    server.listen(0, "127.0.0.1", resolve);
++  });
++  const port = String(server.address().port);
++  return {
++    environment: { ...environment, MODEL_ROUTER_PORT: port, CODEX_ROUTER_PORT: port,
++      CODEX_ROUTER_CALLER_KEY: "fixture-caller-capability-with-sufficient-length",
++      CODEX_ROUTER_INTERNAL_KEY: "fixture-internal-capability-with-sufficient-length",
++      KIMI_INTERNAL_KEY: "fixture-internal-capability-with-sufficient-length" },
++    events: () => {
++      const log = path.join(directory, "runtime-events.jsonl");
++      return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map(JSON.parse) : [];
++    },
++    close: () => new Promise((resolve) => server.close(resolve)),
++  };
++}
++
++export function runProviderFixtureNode(args, environment, { cwd = path.resolve(import.meta.dirname, "../..") } = {}) {
++  return new Promise((resolve, reject) => {
++    const child = spawn(process.execPath, args, { cwd, env: environment, stdio: ["ignore", "pipe", "pipe"] });
++    let stdout = "";
++    let stderr = "";
++    child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
++    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
++    child.once("error", reject);
++    child.once("close", (status, signal) => resolve({ status, signal, stdout, stderr }));
++  });
++}
+diff --git a/test/fixtures/setup-environment.mjs b/test/fixtures/setup-environment.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/fixtures/setup-environment.mjs
+@@ -0,0 +1,49 @@
++import assert from "node:assert/strict";
++import { mkdirSync, mkdtempSync } from "node:fs";
++import os from "node:os";
++import path from "node:path";
++const keychainFixture = new URL("./setup-keychain-isolation.mjs", import.meta.url).href;
++
++export function setupFixtureRoot(prefix) {
++  const parent = process.env.CODEX_HOME || os.tmpdir();
++  assert.equal(path.isAbsolute(parent), true);
++  mkdirSync(parent, { recursive: true });
++  const root = mkdtempSync(path.join(parent, prefix));
++  assert.equal(path.relative(parent, root).startsWith(".."), false);
++  return root;
++}
++
++// Setup's discovery tests opt in only after every credential/client root and
++// both state aliases are bound to their own fresh synthetic fixture.
++export function setupFixtureEnvironment(root, state, codex = path.join(root, "codex")) {
++  const environment = {
++    ...process.env,
++    HOME: root, USERPROFILE: root,
++    APPDATA: path.join(root, "appdata"), LOCALAPPDATA: path.join(root, "localappdata"),
++    CODEX_HOME: codex,
++    MODEL_ROUTER_STATE_DIR: state, CODEX_ROUTER_STATE_DIR: state,
++    KIMI_CODE_HOME: path.join(root, "kimi-code"),
++    GROK_HOME: path.join(root, "grok"), GROK_AUTH_PATH: path.join(root, "grok", "auth.json"),
++    DEVIN_CREDENTIALS_PATH: path.join(root, "devin", "credentials.toml"),
++    XDG_CONFIG_HOME: path.join(root, ".config"), XDG_DATA_HOME: path.join(root, ".local", "share"),
++    CLOUDSDK_CONFIG: path.join(root, "gcloud"),
++    GOOGLE_APPLICATION_CREDENTIALS: path.join(root, "gcloud", "application-default.json"),
++    MODEL_ROUTER_API_KEY_POOL_PATH: path.join(state, "provider-api-key-pool.json"),
++    MODEL_ROUTER_GENERIC_PROVIDERS: path.join(state, "generic-providers.json"),
++    MODEL_ROUTER_VERTEX_STATE_PATH: path.join(state, "vertex-settings.json"),
++    MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(root, "LaunchAgents"),
++    CODEX_ROUTER_LAUNCH_AGENTS_DIR: path.join(root, "LaunchAgents"),
++    CODEX_ROUTER_SERVICE_PLATFORM: process.platform,
++    CODEX_ROUTER_SETUP_FIXTURE_ROOT: root,
++  };
++  for (const name of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CODEX_HOME", "MODEL_ROUTER_STATE_DIR", "CODEX_ROUTER_STATE_DIR", "KIMI_CODE_HOME", "GROK_HOME", "GROK_AUTH_PATH", "DEVIN_CREDENTIALS_PATH", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "CLOUDSDK_CONFIG", "GOOGLE_APPLICATION_CREDENTIALS", "MODEL_ROUTER_API_KEY_POOL_PATH", "MODEL_ROUTER_GENERIC_PROVIDERS", "MODEL_ROUTER_VERTEX_STATE_PATH", "MODEL_ROUTER_LAUNCH_AGENTS_DIR", "CODEX_ROUTER_LAUNCH_AGENTS_DIR"]) {
++    assert.equal(path.isAbsolute(environment[name]), true);
++    assert.equal(path.relative(root, environment[name]).startsWith(".."), false);
++  }
++  for (const name of Object.keys(environment)) {
++    if (/(?:_API_KEY|_API_TOKEN)$/.test(name)) environment[name] = "";
++  }
++  environment.CODEX_ROUTER_NO_DISCOVERY = "0";
++  environment.NODE_OPTIONS = `${environment.NODE_OPTIONS || ""} --import=${JSON.stringify(keychainFixture)}`.trim();
++  return environment;
++}
+diff --git a/test/fixtures/setup-keychain-isolation.mjs b/test/fixtures/setup-keychain-isolation.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/fixtures/setup-keychain-isolation.mjs
+@@ -0,0 +1,25 @@
++import assert from "node:assert/strict";
++import childProcess from "node:child_process";
++import { syncBuiltinESMExports } from "node:module";
++import path from "node:path";
++
++// HOME cannot isolate the global macOS Keychain. Load this only for setup's
++// synthetic subprocesses and retain all other subprocess behavior unchanged.
++const root = process.env.CODEX_ROUTER_SETUP_FIXTURE_ROOT;
++assert.equal(typeof root, "string");
++assert.equal(path.isAbsolute(root), true);
++for (const name of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CODEX_HOME", "MODEL_ROUTER_STATE_DIR", "CODEX_ROUTER_STATE_DIR", "KIMI_CODE_HOME", "GROK_HOME", "GROK_AUTH_PATH", "DEVIN_CREDENTIALS_PATH", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "CLOUDSDK_CONFIG", "GOOGLE_APPLICATION_CREDENTIALS", "MODEL_ROUTER_API_KEY_POOL_PATH", "MODEL_ROUTER_GENERIC_PROVIDERS", "MODEL_ROUTER_VERTEX_STATE_PATH"]) {
++  assert.equal(path.isAbsolute(process.env[name]), true);
++  assert.equal(path.relative(root, process.env[name]).startsWith(".."), false);
++}
++assert.equal(process.env.MODEL_ROUTER_STATE_DIR, process.env.CODEX_ROUTER_STATE_DIR);
++const execFileSync = childProcess.execFileSync;
++childProcess.execFileSync = function (file, args, ...options) {
++  if (file === "/usr/bin/security" && args?.[0] === "find-generic-password") {
++    const absent = new Error("No credential in the synthetic fixture Keychain.");
++    absent.status = 44;
++    throw absent;
++  }
++  return execFileSync.call(this, file, args, ...options);
++};
++syncBuiltinESMExports();
+diff --git a/test/gateway-restart.test.mjs b/test/gateway-restart.test.mjs
+--- a/test/gateway-restart.test.mjs
++++ b/test/gateway-restart.test.mjs
+@@ -3,0 +4 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
++import net from "node:net";
+@@ -12,0 +14,60 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++function isolatedEnvironment(directory, stateDir) {
++  const runtimeNames = new Set(["PATH", "SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "TEMP", "TMP",
++    "PSModulePath", "SystemDrive", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
++    .map((name) => name.toLowerCase()));
++  const runtime = Object.fromEntries(Object.entries(process.env).filter(([name]) => runtimeNames.has(name.toLowerCase())));
++  const user = path.join(directory, "user");
++  const home = path.join(directory, "codex");
++  for (const folder of [user, home, path.join(user, "AppData", "Roaming"), path.join(user, "AppData", "Local")]) {
++    mkdirSync(folder, { recursive: true, mode: 0o700 });
++  }
++  const registry = path.join(directory, "registry.json");
++  writeFileSync(registry, JSON.stringify({ version: 1, providers: [{ id: "custom", displayName: "Fixture custom",
++    kind: "openai-compatible", ownedBy: "fixture", perModelEndpoint: true, authMode: "per-model" }],
++    models: [{ slug: "custom/gateway-fixture", gatewayModel: "gateway-fixture", upstreamModel: "gateway-fixture",
++      provider: "custom", listed: false, endpoint: { protocol: "openai", keyless: true,
++        baseUrl: "http://127.0.0.1:9999/v1" } }] }));
++  writeFileSync(path.join(stateDir, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["custom"] }));
++  return { ...runtime, HOME: user, USERPROFILE: user, CODEX_HOME: home,
++    APPDATA: path.join(user, "AppData", "Roaming"), LOCALAPPDATA: path.join(user, "AppData", "Local"),
++    KIMI_CODE_HOME: path.join(directory, "kimi"), MODEL_ROUTER_STATE_DIR: stateDir, CODEX_ROUTER_STATE_DIR: stateDir,
++    MODEL_ROUTER_REGISTRY: registry, MODEL_ROUTER_USER_MODELS: path.join(stateDir, "user-models.json"),
++    MODEL_ROUTER_GENERIC_PROVIDERS: path.join(stateDir, "generic-providers.json"),
++    CODEX_ROUTER_SOURCE_ROOT: root, CODEX_ROUTER_NO_DISCOVERY: "0", NO_DISCOVERY: "0",
++    MODEL_ROUTER_SHOW_ALL_MODELS: "0", CODEX_ROUTER_SHOW_ALL_MODELS: "0",
++    CODEX_ROUTER_SERVICE_PLATFORM: "test-fixture", CODEX_ROUTER_NATIVE_SESSION_FALLBACK: "0" };
++}
++
++async function stopSupervisor(child, errors) {
++  if (child.exitCode !== null || child.signalCode !== null) return;
++  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
++  child.send({ type: "model-router:shutdown" });
++  let timer;
++  try {
++    const result = await Promise.race([exited, new Promise((_resolve, reject) => {
++      timer = setTimeout(() => reject(new Error(`supervisor did not finish IPC shutdown:\n${errors()}`)), 15_000);
++    })]);
++    assert.equal(result.signal, null, errors());
++    assert.equal(result.code, 0, errors());
++  } finally {
++    clearTimeout(timer);
++    if (child.exitCode === null && child.connected) child.disconnect();
++  }
++}
++
++async function waitForClosedPort(port) {
++  const deadline = Date.now() + 10_000;
++  while (Date.now() < deadline) {
++    const closed = await new Promise((resolve) => {
++      const socket = net.connect(port, "127.0.0.1");
++      const finish = (result) => { socket.destroy(); resolve(result); };
++      socket.setTimeout(2_000, () => finish(false));
++      socket.once("connect", () => finish(false));
++      socket.once("error", () => finish(true));
++    });
++    if (closed) return;
++    await new Promise((resolve) => setTimeout(resolve, 50));
++  }
++  assert.fail(`owned fixture listener still owns port ${port} after supervisor shutdown`);
++}
++
+@@ -150 +211 @@ test("a ready stack activates its exact pending proof and survives a gateway res
+-      ...process.env,
++      ...isolatedEnvironment(rootDir, stateDir),
+@@ -162,2 +222,0 @@ test("a ready stack activates its exact pending proof and survives a gateway res
+-      CODEX_ROUTER_HOME: rootDir,
+-      CODEX_HOME: rootDir,
+@@ -165 +224 @@ test("a ready stack activates its exact pending proof and survives a gateway res
+-    stdio: ["ignore", "ignore", "pipe"],
++    stdio: ["ignore", "ignore", "pipe", "ipc"],
+@@ -211,10 +270,10 @@ test("a ready stack activates its exact pending proof and survives a gateway res
+-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+-    await new Promise((resolve) => setTimeout(resolve, 500));
+-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+-    // On Windows the service holds the cmd.exe hop, not the gateway behind it,
+-    // and killing the hop orphans the stand-in -- which would keep the port and
+-    // a lock on the temp directory. Ask it to leave through its own door; by now
+-    // nothing is left to restart it. Harmless and already-dead on POSIX.
+-    await get(`http://127.0.0.1:${gatewayPort}/quit`);
+-    await new Promise((resolve) => setTimeout(resolve, 200));
+-    rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
++    try {
++      await stopSupervisor(child, () => errors);
++    } finally {
++      // The owned batch shim cannot forward Node IPC to its gateway child.
++      // Stop only this fixture's known endpoint after supervisor restart has
++      // ended, including when the bounded root-exit assertion failed.
++      await get(`http://127.0.0.1:${gatewayPort}/quit`);
++      await Promise.all([routerPort, gatewayPort, apiPort, antigravityPort].map(waitForClosedPort));
++      rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
++    }
+diff --git a/test/gemini-trailing-turns.test.mjs b/test/gemini-trailing-turns.test.mjs
+--- a/test/gemini-trailing-turns.test.mjs
++++ b/test/gemini-trailing-turns.test.mjs
+@@ -49,0 +50,10 @@ function run(script, env) {
++      CODEX_ROUTER_GATEWAY_BASE_URL: "http://127.0.0.1:9/unused-gateway/v1",
++      CODEX_ROUTER_API_BASE_URL: env.CODEX_ROUTER_GATEWAY_BASE_URL || "http://127.0.0.1:9/unused-api/v1",
++      CODEX_NATIVE_BASE_URL: "http://127.0.0.1:9/unused-native",
++      CODEX_ROUTER_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      CODEX_ROUTER_API_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      CODEX_ROUTER_GROK_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      CODEX_ROUTER_GATEWAY_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: "9",
++      MODEL_ROUTER_DEVIN_CLI_PORT: "9",
++      MODEL_ROUTER_LOCAL_BASE_URL: "http://127.0.0.1:9/v1",
+@@ -277 +287 @@ test("router trims only official and explicitly opted-in trailing Responses mode
+-    `${JSON.stringify({ version: 1, providers: [] })}\n`,
++    `${JSON.stringify({ version: 1, providers: ["gemini-api", "openrouter"] })}\n`,
+@@ -322,4 +332,3 @@ test("router trims only official and explicitly opted-in trailing Responses mode
+-    writeFileSync(
+-      path.join(stateDir, "enabled-providers.json"),
+-      `${JSON.stringify({ version: 1, providers: ["gemini-api", "openrouter"] })}\n`,
+-    );
++    // The runtime adopts one registry/selection generation at startup. The
++    // providers above are already enabled in that generation; an external
++    // file edit alone must not advertise unloaded routes or dependencies.
+diff --git a/test/generic-providers.test.mjs b/test/generic-providers.test.mjs
+--- a/test/generic-providers.test.mjs
++++ b/test/generic-providers.test.mjs
+@@ -3 +3 @@ import { spawnSync } from "node:child_process";
+-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
++import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+@@ -6 +5,0 @@ import { once } from "node:events";
+-import os from "node:os";
+@@ -11 +10,6 @@ import { fileURLToPath } from "node:url";
+-const testRoot = mkdtempSync(path.join(os.tmpdir(), "generic-provider-test-"));
++import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
++import { startProviderControlRuntime, runProviderFixtureNode } from "./fixtures/provider-control-runtime.mjs";
++
++const testRoot = setupFixtureRoot("generic-provider-test-");
++Object.assign(process.env, setupFixtureEnvironment(testRoot, path.join(testRoot, "state")));
++process.env.MODEL_ROUTER_TARGET = "codex";
+@@ -510 +514,3 @@ test("public APIs confine a generic credential to its permitted endpoint", async
+-test("providers CLI exposes generic CRUD with sanitized JSON", () => {
++test("providers CLI exposes generic CRUD with sanitized JSON", async (t) => {
++  const runtime = await startProviderControlRuntime(testRoot);
++  t.after(() => runtime.close());
+@@ -512 +518,3 @@ test("providers CLI exposes generic CRUD with sanitized JSON", () => {
+-    ...process.env,
++    ...setupFixtureEnvironment(testRoot, path.join(testRoot, "state-cli"), path.join(testRoot, "codex-cli")),
++    ...runtime.environment,
++    MODEL_ROUTER_TARGET: "codex",
+@@ -560,4 +568,12 @@ test("providers CLI exposes generic CRUD with sanitized JSON", () => {
+-  const remove = spawnSync(
+-    process.execPath,
+-    ["src/providers.mjs", "generic", "remove", "cli-test", "--json"],
+-    { cwd: root, env, encoding: "utf8" },
++  const protectedFiles = [path.join(env.CODEX_ROUTER_STATE_DIR, "generic-providers.json"), env.MODEL_ROUTER_USER_MODELS, env.MODEL_ROUTER_MODEL_PICKER_STATE];
++  const original = protectedFiles.map((file) => readFileSync(file));
++  const failed = await runProviderFixtureNode(["src/providers.mjs", "generic", "remove", "cli-test", "--json"], {
++    ...env, FIXTURE_PROVIDER_FAIL_PHASE: "publish",
++  });
++  assert.equal(failed.status, 1);
++  assert.match(failed.stderr, /Synthetic publish failure/);
++  assert.deepEqual(protectedFiles.map((file) => readFileSync(file)), original);
++  assert.equal(runtime.events().filter((event) => event.phase === "publish").length, 2, "failed candidate must be followed by real restored publication");
++
++  const remove = await runProviderFixtureNode(
++    ["src/providers.mjs", "generic", "remove", "cli-test", "--json"], env,
+@@ -566,0 +583,5 @@ test("providers CLI exposes generic CRUD with sanitized JSON", () => {
++  const phases = runtime.events().map((event) => event.phase);
++  for (const phase of ["dependencies", "prepare", "service-restart", "health-adoption", "publish"]) assert.equal(phases.includes(phase), true, phase);
++  assert.equal(phases.indexOf("prepare") < phases.indexOf("service-restart"), true);
++  assert.equal(phases.indexOf("service-restart") < phases.indexOf("health-adoption"), true);
++  assert.equal(phases.indexOf("health-adoption") < phases.indexOf("publish"), true);
+diff --git a/test/generic-runtime-registry.test.mjs b/test/generic-runtime-registry.test.mjs
+--- a/test/generic-runtime-registry.test.mjs
++++ b/test/generic-runtime-registry.test.mjs
+@@ -20 +20,12 @@ function environment(directory, providersFile, userModelsFile) {
+-  return {
++  // Discovery is the behavior under test. Bound every path before enabling it,
++  // and use a keyless checked-in fixture so scanning configured providers cannot
++  // consult an operator's system keychain or another CLI's OAuth credential.
++  assert.ok(existsSync(directory), "fixture root must exist before child launch");
++  const registryFile = path.join(directory, "checked-in-registry.json");
++  writeFileSync(registryFile, JSON.stringify({ version: 1,
++    providers: [{ id: "deepseek", displayName: "Fixture DeepSeek", ownedBy: "fixture",
++      kind: "openai-compatible", protocol: "openai", keyless: true,
++      baseUrl: "http://127.0.0.1:9999/v1" }],
++    models: [userModelEntry({ providerId: "deepseek", upstreamId: "fixture-model", priority: 1 })],
++  }));
++  const env = {
+@@ -22,0 +34 @@ function environment(directory, providersFile, userModelsFile) {
++    USERPROFILE: directory,
+@@ -23,0 +36 @@ function environment(directory, providersFile, userModelsFile) {
++    MODEL_ROUTER_STATE_DIR: path.join(directory, "state"),
+@@ -24,0 +38,3 @@ function environment(directory, providersFile, userModelsFile) {
++    MODEL_ROUTER_REGISTRY: registryFile,
++    CODEX_ROUTER_SOURCE_ROOT: root,
++    CODEX_ROUTER_NO_DISCOVERY: "0",
+@@ -30,0 +47,8 @@ function environment(directory, providersFile, userModelsFile) {
++  for (const key of ["CODEX_HOME", "MODEL_ROUTER_STATE_DIR", "CODEX_ROUTER_STATE_DIR",
++    "MODEL_ROUTER_REGISTRY", "MODEL_ROUTER_GENERIC_PROVIDERS", "MODEL_ROUTER_USER_MODELS",
++    "MODEL_ROUTER_MODEL_PICKER_STATE"]) {
++    const relative = path.relative(directory, env[key]);
++    assert.ok(relative && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
++      `${key} must remain in the synthetic fixture`);
++  }
++  return env;
+diff --git a/test/health-cache.test.mjs b/test/health-cache.test.mjs
+--- a/test/health-cache.test.mjs
++++ b/test/health-cache.test.mjs
+@@ -113 +113 @@ test("the router probes through the cache, not around it", () => {
+-  assert.match(router, /function serviceHealth\(url\)\s*\{\s*return healthCache\(url,/);
++  assert.match(router, /function serviceHealth\(url, options\)\s*\{\s*return healthCache\(url, \(\) => probeService\(url, options\)\)/);
+diff --git a/test/login-free-app-server.test.mjs b/test/login-free-app-server.test.mjs
+--- a/test/login-free-app-server.test.mjs
++++ b/test/login-free-app-server.test.mjs
+@@ -20,0 +21 @@ import { handleResponsesWebSocketUpgrade } from "../src/responses-websocket.mjs"
++import { WebSocketFrameParser } from "../src/ws-frames.mjs";
+@@ -291 +292,14 @@ async function verifySignedOutTurn(binary, { initialProvider = "openai" } = {})
+-      upgrades.push({ headers: request.headers, url: request.url });
++      const upgrade = { headers: request.headers, url: request.url, frames: [], failures: [] };
++      upgrades.push(upgrade);
++      // Observe actual client frames without changing the edge handler. A
++      // handshake and a generate:false prewarm are not provider executions.
++      const observer = new WebSocketFrameParser({ expectMasked: true,
++        onText(text) {
++          const frame = JSON.parse(text);
++          upgrade.frames.push({ type: frame.type, generate: frame.generate, model: frame.model });
++        },
++        onClose({ code }) { upgrade.closeCode = code; },
++        onFail(code) { upgrade.failures.push(code); },
++      });
++      socket.on("data", (chunk) => observer.feed(chunk));
++      if (head.length) observer.feed(head);
+@@ -294 +308 @@ async function verifySignedOutTurn(binary, { initialProvider = "openai" } = {})
+-      handleResponsesWebSocketUpgrade(request, socket, head, {
++      upgrade.accepted = handleResponsesWebSocketUpgrade(request, socket, head, {
+@@ -350,0 +365 @@ async function verifySignedOutTurn(binary, { initialProvider = "openai" } = {})
++    assert.equal(requests[0].body.model, model);
+@@ -352,4 +367,5 @@ async function verifySignedOutTurn(binary, { initialProvider = "openai" } = {})
+-      // Codex may retire an idle authenticated socket before creating the
+-      // turn on a new connection. Connections are not generations: the single
+-      // upstream request above is the no-replay assertion. Authenticate every
+-      // connection, including unused ones, rather than pinning their count.
++      // CLI 0.162 can leave an authenticated connection unused and issue a
++      // generate:false prewarm on another. Both receive 101 successfully:
++      // neither is an authentication/protocol recovery or an executed turn.
++      // Assert every edge's identity and the actual generation count instead
++      // of assuming that the client always opens exactly one socket.
+@@ -358,0 +375,6 @@ async function verifySignedOutTurn(binary, { initialProvider = "openai" } = {})
++        assert.equal(upgrade.accepted, true);
++        assert.deepEqual(upgrade.failures, []);
++        for (const frame of upgrade.frames) {
++          assert.equal(frame.type, "response.create");
++          assert.equal(frame.model, model);
++        }
+@@ -359,0 +382,2 @@ async function verifySignedOutTurn(binary, { initialProvider = "openai" } = {})
++      const generationFrames = upgrades.flatMap((entry) => entry.frames).filter((frame) => frame.generate !== false);
++      assert.equal(generationFrames.length, 1, "one client generation must produce exactly one provider POST");
+diff --git a/test/model-discovery.test.mjs b/test/model-discovery.test.mjs
+--- a/test/model-discovery.test.mjs
++++ b/test/model-discovery.test.mjs
+@@ -12,2 +12,2 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+-// locally curated models out of both this process and the child processes below
+-// before model-registry.mjs resolves the overlay path at import time.
++// locally curated models and compatibility-layer policy out of this process
++// and its children before model-registry.mjs resolves state at import time.
+@@ -15,2 +15,8 @@ const stateRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-model-discove
+-const originalUserModels = process.env.MODEL_ROUTER_USER_MODELS;
+-process.env.MODEL_ROUTER_USER_MODELS = path.join(stateRoot, "user-models.json");
++const fixtureEnvironment = {
++  MODEL_ROUTER_USER_MODELS: path.join(stateRoot, "user-models.json"),
++  MODEL_ROUTER_STATE_DIR: stateRoot,
++  CODEX_ROUTER_STATE_DIR: stateRoot,
++};
++const originalEnvironment = Object.fromEntries(Object.keys(fixtureEnvironment)
++  .map(name => [name, process.env[name]]));
++Object.assign(process.env, fixtureEnvironment);
+@@ -19,2 +25,4 @@ after(() => {
+-  if (originalUserModels === undefined) delete process.env.MODEL_ROUTER_USER_MODELS;
+-  else process.env.MODEL_ROUTER_USER_MODELS = originalUserModels;
++  for (const [name, value] of Object.entries(originalEnvironment)) {
++    if (value === undefined) delete process.env[name];
++    else process.env[name] = value;
++  }
+diff --git a/test/model-failover-router.test.mjs b/test/model-failover-router.test.mjs
+--- a/test/model-failover-router.test.mjs
++++ b/test/model-failover-router.test.mjs
+@@ -2 +2 @@ import assert from "node:assert/strict";
+-import { spawn } from "node:child_process";
++import { execFileSync, spawn } from "node:child_process";
+@@ -11,0 +12 @@ import { openPort } from "./port-pool.mjs";
++import { setupFixtureEnvironment } from "./fixtures/setup-environment.mjs";
+@@ -293,0 +295,6 @@ function run(
++      CODEX_ROUTER_STATE_DIR: stateDir,
++      CODEX_HOME: path.join(stateDir, "codex"),
++      // Every persistent key above is synthetic and this fresh home cannot
++      // reach the operator's credentials. Failover must resolve those fixture
++      // credentials even when the outer test wrapper disables discovery.
++      CODEX_ROUTER_NO_DISCOVERY: "0",
+@@ -320,0 +328,2 @@ function routerEnv(gatewayPort, routerPort) {
++    CODEX_ROUTER_API_BASE_URL: `http://127.0.0.1:${gatewayPort}/v1`,
++    CODEX_NATIVE_BASE_URL: `http://127.0.0.1:${gatewayPort}/v1`,
+@@ -327,0 +337,6 @@ function routerEnv(gatewayPort, routerPort) {
++// These existing gateway fixtures deliberately exercise ambiguous legacy
++// markers whose provenance header is lost. Their replay requires opt-in.
++function transportRouterEnv(gatewayPort, routerPort) {
++  return { ...routerEnv(gatewayPort, routerPort), CODEX_ROUTER_NATIVE_RETRY_POLICY: "availability" };
++}
++
+@@ -344,0 +360,3 @@ async function waitFor(url, child) {
++  // This single-Router fixture stubs request hops; it does not start every
++  // dependency exposed by SHOW_ALL. Readiness has separate real-stack tests.
++  const probeUrl = url.endsWith("/health") ? `${url}/live` : url;
+@@ -351 +369 @@ async function waitFor(url, child) {
+-      const response = await fetch(url);
++      const response = await fetch(probeUrl);
+@@ -522 +540 @@ test("a turn whose provider is out of usage is served by the next model", async
+-test("a marked provider transport failure moves a subagent to a checked-in v2 route", async () => {
++test("availability moves a marked legacy transport failure to a checked-in v2 subagent route", async () => {
+@@ -536 +554 @@ test("a marked provider transport failure moves a subagent to a checked-in v2 ro
+-  const child = run(routerEnv(gw.port, routerPort), {
++  const child = run(transportRouterEnv(gw.port, routerPort), {
+@@ -571 +589 @@ test("subagent transport failover preserves search history execution mode", asyn
+-  const child = run(routerEnv(gw.port, routerPort), {
++  const child = run(transportRouterEnv(gw.port, routerPort), {
+@@ -599 +617 @@ test("subagent transport failover preserves search history execution mode", asyn
+-test("a marked provider transport failure retries the same ordinary route once", async () => {
++test("availability retries a marked legacy transport failure on the same ordinary route once", async () => {
+@@ -613 +631 @@ test("a marked provider transport failure retries the same ordinary route once",
+-  const child = run(routerEnv(gw.port, routerPort), {
++  const child = run(transportRouterEnv(gw.port, routerPort), {
+@@ -805 +823 @@ test("a marked provider transport failure does not move an ordinary turn", async
+-  const child = run(routerEnv(gw.port, routerPort), {
++  const child = run(transportRouterEnv(gw.port, routerPort), {
+@@ -833 +851 @@ test("a subagent header cannot grant fallback authority to an unverified route",
+-  const child = run(routerEnv(gw.port, routerPort), {
++  const child = run(transportRouterEnv(gw.port, routerPort), {
+@@ -876 +894 @@ test("subagent transport failover stops on the first application response", asyn
+-  const child = run(routerEnv(gw.port, routerPort), {
++  const child = run(transportRouterEnv(gw.port, routerPort), {
+@@ -2228,5 +2246,18 @@ async function oversizedWindowsExcept(keepSlugs = []) {
+-  const { LISTED_MODELS } = await import("../src/model-registry.mjs");
+-  const keep = new Set(keepSlugs);
+-  return LISTED_MODELS.filter(
+-    (model) => !keep.has(model.slug) && Number(model.contextWindow) >= 434983,
+-  ).map((model) => model.slug);
++  // Match the child's pristine registry, rather than the operator's possibly
++  // filtered registry (for example, with the compatibility layer disabled).
++  const directory = mkdtempSync(path.join(os.tmpdir(), "failover-catalog-"));
++  try {
++    const output = execFileSync(process.execPath, ["--input-type=module", "-e", `
++      import { LISTED_MODELS } from "./src/model-registry.mjs";
++      const keep = new Set(JSON.parse(process.argv[1]));
++      process.stdout.write(JSON.stringify(LISTED_MODELS.filter(model =>
++        !keep.has(model.slug) && Number(model.contextWindow) >= 434983,
++      ).map(model => model.slug)));
++    `, JSON.stringify(keepSlugs)], {
++      cwd: root, env: setupFixtureEnvironment(directory, directory),
++      encoding: "utf8", timeout: 30_000, windowsHide: true,
++    });
++    return JSON.parse(output);
++  } finally {
++    rmSync(directory, { recursive: true, force: true });
++  }
+diff --git a/test/native-retry.test.mjs b/test/native-retry.test.mjs
+--- a/test/native-retry.test.mjs
++++ b/test/native-retry.test.mjs
+@@ -188 +188 @@ test("default POST policy never replays after the origin consumed and executed t
+-
++    assert.equal(event.generationOutcome, "failed");
+@@ -224 +224 @@ test("a terminal native socket failure still records every submitted availabilit
+-
++    assert.equal(event.generationOutcome, "failed");
+@@ -268 +268 @@ test("a native generation redirect cannot certify a previously consumed POST as
+-
++        assert.equal(event.generationOutcome, "failed");
+diff --git a/test/orcarouter-provider.test.mjs b/test/orcarouter-provider.test.mjs
+--- a/test/orcarouter-provider.test.mjs
++++ b/test/orcarouter-provider.test.mjs
+@@ -3,2 +3 @@ import { spawnSync } from "node:child_process";
+-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+-import os from "node:os";
++import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+@@ -11,0 +11,3 @@ import { LISTED_MODELS, PROVIDERS } from "../src/model-registry.mjs";
++import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
++import { startProviderControlRuntime, runProviderFixtureNode } from "./fixtures/provider-control-runtime.mjs";
++
+@@ -16 +18,2 @@ function isolatedEnvironment(testRoot) {
+-    ...process.env,
++    ...setupFixtureEnvironment(testRoot, path.join(testRoot, "state")),
++    MODEL_ROUTER_TARGET: "codex",
+@@ -122,2 +125,3 @@ test("OrcaRouter discovery keeps callable chat models and identifies the free su
+-test("a configured OrcaRouter provider enables cleanly and doctor requests curation", () => {
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "orcarouter-enable-test-"));
++test("a configured OrcaRouter provider enables cleanly and doctor requests curation", async () => {
++  const testRoot = setupFixtureRoot("orcarouter-enable-test-");
++  const runtime = await startProviderControlRuntime(testRoot);
+@@ -132,2 +136,2 @@ test("a configured OrcaRouter provider enables cleanly and doctor requests curat
+-    const env = isolatedEnvironment(testRoot);
+-    const enabled = runNode(["src/providers.mjs", "enable", "orca"], env);
++    const env = { ...isolatedEnvironment(testRoot), ...runtime.environment };
++    const enabled = await runProviderFixtureNode(["src/providers.mjs", "enable", "orca"], env);
+@@ -138 +142,7 @@ test("a configured OrcaRouter provider enables cleanly and doctor requests curat
+-    const doctor = runNode(["src/doctor.mjs", "--json"], env);
++    const phases = runtime.events().map((event) => event.phase);
++    assert.equal(phases.indexOf("prepare") < phases.indexOf("service-restart"), true);
++    assert.equal(phases.indexOf("service-restart") < phases.indexOf("health-adoption"), true);
++    assert.equal(phases.indexOf("health-adoption") < phases.indexOf("publish"), true);
++    for (const phase of ["dependencies", "prepare", "service-restart", "health-adoption", "publish"]) assert.equal(phases.includes(phase), true, phase);
++
++    const doctor = await runProviderFixtureNode(["src/doctor.mjs", "--json"], env);
+@@ -145,0 +156 @@ test("a configured OrcaRouter provider enables cleanly and doctor requests curat
++    await runtime.close();
+@@ -151 +162 @@ test("--free-only additively curates the live free OrcaRouter catalog", () => {
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "orcarouter-curation-test-"));
++  const testRoot = setupFixtureRoot("orcarouter-curation-test-");
+diff --git a/test/pr-backlog-provider-fixtures.mjs b/test/pr-backlog-provider-fixtures.mjs
+--- a/test/pr-backlog-provider-fixtures.mjs
++++ b/test/pr-backlog-provider-fixtures.mjs
+@@ -0,0 +1 @@
++import "./fixtures/isolated-runtime-environment.mjs";
+@@ -8,0 +10 @@ import { freePort } from "./port-pool.mjs";
++import { setupFixtureEnvironment } from "./fixtures/setup-environment.mjs";
+@@ -20 +21,0 @@ function fixture(t) {
+-  const allowed = /^(PATH|SystemRoot|WINDIR|ComSpec|PATHEXT|TEMP|TMP|PSModulePath|SystemDrive|ProgramData|ProgramFiles|ProgramFiles\(x86\)|ProgramW6432)$/i;
+@@ -22 +23 @@ function fixture(t) {
+-    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => allowed.test(name))),
++    ...setupFixtureEnvironment(directory, state),
+@@ -38,0 +40,23 @@ function evaluate(code, env, args = []) {
++function selectGatewayFixture(f) {
++  const registry = path.join(f.directory, "gateway-registry.json");
++  writeFileSync(registry, JSON.stringify({ version: 1,
++    providers: [{ id: "custom", displayName: "Fixture gateway", kind: "openai-compatible",
++      ownedBy: "fixture", perModelEndpoint: true, authMode: "per-model" }],
++    models: [{ slug: "custom/gateway-fixture", gatewayModel: "gateway-fixture", upstreamModel: "gateway-fixture",
++      provider: "custom", listed: false, endpoint: { protocol: "openai", keyless: true, baseUrl: "http://127.0.0.1:9/v1" } }],
++  }));
++  writeFileSync(path.join(f.state, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["custom"] }));
++  const environment = { ...f.env, MODEL_ROUTER_REGISTRY: registry };
++  const plan = JSON.parse(evaluate(`
++    import { MODELS, RUNTIME_PROVIDERS, providerForModel } from './src/model-registry.mjs';
++    import { readProviderSelection } from './src/provider-selection.mjs';
++    import { createExecutionPlan } from './src/route-execution-plan.mjs';
++    const selected = new Set(readProviderSelection());
++    console.log(JSON.stringify(createExecutionPlan({ models: MODELS, providerForModel,
++      routeEnabled: model => RUNTIME_PROVIDERS.get(model.provider)?.generic === true || selected.has(model.provider) })));
++  `, environment));
++  assert.equal(plan.needsGateway, true, "the fixture must actually request Python/gateway execution");
++  assert.deepEqual(plan.services, ["api", "gateway"]);
++  return environment;
++}
++
+@@ -188 +212,5 @@ export async function runProviderScenarios(t) {
+-  await t.test("startup proceeds past two real venv probe timeouts and keeps conclusive failures fatal", { skip: process.platform === "win32" }, async (t) => {
++  await t.test("the venv startup fixture selects an actual gateway dependency", (t) => {
++    selectGatewayFixture(fixture(t));
++  });
++
++  await t.test("selected gateway startup proceeds past bounded venv timeouts and keeps conclusive failures degraded", { skip: process.platform === "win32" }, async (t) => {
+@@ -191,0 +220 @@ export async function runProviderScenarios(t) {
++        const gatewayEnvironment = selectGatewayFixture(f);
+@@ -203 +232 @@ export async function runProviderScenarios(t) {
+-        const ports = await Promise.all(Array.from({ length: 5 }, () => freePort()));
++        const ports = await Promise.all(Array.from({ length: 7 }, () => freePort()));
+@@ -205,2 +234,2 @@ export async function runProviderScenarios(t) {
+-        const env = { ...f.env, CODEX_ROUTER_SOURCE_ROOT: source, NODE_OPTIONS: "--preserve-symlinks-main",
+-          MODEL_ROUTER_PORT: String(ports[0]), MODEL_ROUTER_GATEWAY_PORT: String(ports[1]), MODEL_ROUTER_OAUTH_PORT: String(ports[2]), MODEL_ROUTER_API_PORT: String(ports[3]), MODEL_ROUTER_GROK_OAUTH_PORT: String(ports[4]),
++        const env = { ...gatewayEnvironment, CODEX_ROUTER_SOURCE_ROOT: source, NODE_OPTIONS: `${f.env.NODE_OPTIONS} --preserve-symlinks-main`,
++          MODEL_ROUTER_PORT: String(ports[0]), MODEL_ROUTER_GATEWAY_PORT: String(ports[1]), MODEL_ROUTER_OAUTH_PORT: String(ports[2]), MODEL_ROUTER_API_PORT: String(ports[3]), MODEL_ROUTER_GROK_OAUTH_PORT: String(ports[4]), MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: String(ports[5]), MODEL_ROUTER_DEVIN_CLI_PORT: String(ports[6]),
+@@ -208,0 +238 @@ export async function runProviderScenarios(t) {
++          CODEX_ROUTER_GATEWAY_RESTARTS: "0", MODEL_ROUTER_SHUTDOWN_DRAIN_MS: "100", MODEL_ROUTER_SHUTDOWN_FLUSH_MS: "100",
+@@ -217,5 +247,12 @@ export async function runProviderScenarios(t) {
+-            let timer;
+-            let result;
+-            try { result = await Promise.race([startup.exited, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(startup.output())), 30_000); })]); }
+-            finally { clearTimeout(timer); }
+-            assert.equal(result.code, 1, startup.output());
++            // A selected dependency failure blocks full readiness/publication;
++            // it must leave the independent frontend alive and diagnosable.
++            await until(() => startup.output().includes("serving independent routes"), startup);
++            assert.equal(startup.child.exitCode, null, startup.output());
++            assert.equal((await fetch(`http://127.0.0.1:${ports[0]}/health/live`, { signal: AbortSignal.timeout(10_000) })).status, 200);
++            const response = await fetch(`http://127.0.0.1:${ports[0]}/health`, { signal: AbortSignal.timeout(10_000) });
++            assert.equal(response.status, 503);
++            const health = await response.json();
++            assert.equal(health.executionPlan.needsGateway, true);
++            assert.ok(health.degraded.includes("gateway"), JSON.stringify(health));
++            assert.doesNotMatch(startup.output(), /ready \(authenticated loopback endpoint\)/);
++            assert.equal(existsSync(path.join(f.state, "startup-attempts.json")), false, "a live degraded frontend must not create a crash-loop cooldown");
+@@ -224,3 +261 @@ export async function runProviderScenarios(t) {
+-              const record = JSON.parse(readFileSync(path.join(f.state, "startup-attempts.json"), "utf8"));
+-              assert.equal(record.lastReason, "health-timeout");
+-              assert.equal(record.consecutiveFailures, 1);
++              assert.match(startup.output(), /dependency unavailable: Timed out waiting for LiteLLM gateway to become healthy/);
+@@ -231 +265,0 @@ export async function runProviderScenarios(t) {
+-              assert.equal(existsSync(path.join(f.state, "startup-attempts.json")), false);
+diff --git a/test/provider-api-key-diagnostics.test.mjs b/test/provider-api-key-diagnostics.test.mjs
+--- a/test/provider-api-key-diagnostics.test.mjs
++++ b/test/provider-api-key-diagnostics.test.mjs
+@@ -3,2 +3 @@ import { spawn, spawnSync } from "node:child_process";
+-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+-import os from "node:os";
++import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+@@ -10,0 +10,2 @@ import { openPort } from "./port-pool.mjs";
++import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
++
+@@ -12 +13 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
+-const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-api-key-diagnostics-"));
++const testRoot = setupFixtureRoot("codex-router-api-key-diagnostics-");
+@@ -18,0 +20 @@ mkdirSync(stateDir, { recursive: true, mode: 0o700 });
++Object.assign(process.env, setupFixtureEnvironment(testRoot, stateDir));
+@@ -46,2 +48,2 @@ function selectProviders(providers) {
+-function runDoctor(environment = {}) {
+-  return spawnSync(process.execPath, [path.join(repoRoot, "src", "doctor.mjs"), "--json"], {
++function runDoctor(environment = {}, args = []) {
++  return spawnSync(process.execPath, [path.join(repoRoot, "src", "doctor.mjs"), "--json", ...args], {
+@@ -70 +72 @@ test("doctor fails an authoritative pool whose active reference cannot resolve",
+-test("doctor keeps unselected and discovery-disabled pool failures advisory", { timeout: 60_000 }, () => {
++test("doctor suppresses unselected pools by default and keeps explicit inventory and discovery-disabled failures advisory", { timeout: 60_000 }, () => {
+@@ -78,2 +80,7 @@ test("doctor keeps unselected and discovery-disabled pool failures advisory", {
+-    assert.equal(unselectedPool.status, "warn");
+-    assert.match(unselectedPool.detail, /unselected authoritative pool unavailable/);
++    assert.equal(unselectedPool, undefined);
++    const inventory = runDoctor({}, ["--all"]);
++    assert.notEqual(inventory.error?.code, "ETIMEDOUT", inventory.error?.message);
++    const inventoryPool = JSON.parse(inventory.stdout).checks.find((check) => check.name === "Provider API-key pools");
++    assert.equal(inventoryPool.status, "warn");
++    assert.match(inventoryPool.detail, /unselected authoritative pool unavailable/);
++    assert.doesNotMatch(JSON.stringify(inventoryPool), /OPENCODE_API_KEY|Bearer /);
+diff --git a/test/provider-api-key-pool.test.mjs b/test/provider-api-key-pool.test.mjs
+--- a/test/provider-api-key-pool.test.mjs
++++ b/test/provider-api-key-pool.test.mjs
+@@ -568 +568 @@ test("attempts never retry origin 500 and cap an explicit large attempt request"
+-test("oversized maps and symlink state fail closed without truncation", async () => {
++test("oversized maps fail closed without truncation", async () => {
+@@ -578,0 +579 @@ test("oversized maps and symlink state fail closed without truncation", async ()
++  const original = readFileSync(oversizedPath);
+@@ -582,0 +584,2 @@ test("oversized maps and symlink state fail closed without truncation", async ()
++  assert.deepEqual(readFileSync(oversizedPath), original);
++});
+@@ -583,0 +587,2 @@ test("oversized maps and symlink state fail closed without truncation", async ()
++test("symlink state fails closed without reading or overwriting its target", async (t) => {
++  const target = path.join(root, "symlink-target.json");
+@@ -585 +590,12 @@ test("oversized maps and symlink state fail closed without truncation", async ()
+-  symlinkSync(oversizedPath, linkedPath);
++  // A valid target distinguishes symlink refusal from merely rejecting an
++  // already-invalid document. No writer may follow the link to change it.
++  const original = '{"version":1,"providers":{}}\n';
++  writeFileSync(target, original);
++  try { symlinkSync(target, linkedPath, "file"); }
++  catch (error) {
++    if (process.platform === "win32" && error.code === "EPERM") {
++      t.skip("Windows file symlink creation requires developer mode or symlink privileges");
++      return;
++    }
++    throw error;
++  }
+@@ -586,0 +603,2 @@ test("oversized maps and symlink state fail closed without truncation", async ()
++  await assert.rejects(upsertProviderApiKey("openrouter", metadata(credential("symlink", "EXTRA")), { filePath: linkedPath }), /invalid; refusing to overwrite/i);
++  assert.equal(readFileSync(target, "utf8"), original);
+diff --git a/test/provider-onboarding.test.mjs b/test/provider-onboarding.test.mjs
+--- a/test/provider-onboarding.test.mjs
++++ b/test/provider-onboarding.test.mjs
+@@ -11,0 +12 @@ import { freePort } from "./port-pool.mjs";
++import { stageProviderControlRuntime } from "./fixtures/provider-control-runtime.mjs";
+@@ -79,0 +81,2 @@ function isolatedEnvironment(testRoot) {
++  assert.ok(path.isAbsolute(testRoot));
++  assert.ok(testRoot !== os.homedir());
+@@ -82,0 +86,7 @@ function isolatedEnvironment(testRoot) {
++    USERPROFILE: testRoot,
++    APPDATA: path.join(testRoot, "appdata"),
++    LOCALAPPDATA: path.join(testRoot, "localappdata"),
++    CODEX_HOME: path.join(testRoot, "codex"),
++    CODEX_ROUTER_NO_DISCOVERY: "0",
++    CODEX_ROUTER_STATE_DIR: path.join(testRoot, "state"),
++    ...stageProviderControlRuntime(testRoot),
+@@ -146 +156 @@ test("provider onboarding reports install, login, and API key actions without se
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-onboarding-"));
++  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-onboarding-"));
+@@ -190 +200 @@ test("provider onboarding follows authoritative pool readiness instead of a lega
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-pool-onboarding-"));
++  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-pool-onboarding-"));
+@@ -237 +247 @@ test("control accepts an API key only through stdin and stores it privately", ()
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-key-control-"));
++  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-key-control-"));
+@@ -262 +272 @@ test("control clears every catalog source when a shared credential changes", ()
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-family-cache-control-"));
++  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-family-cache-control-"));
+@@ -293 +303 @@ test("control removes a stored API key and disables the provider", () => {
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-key-remove-"));
++  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-key-remove-"));
+@@ -329 +339 @@ test("removing an absent API key reports no change instead of failing", () => {
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-key-remove-absent-"));
++  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-key-remove-absent-"));
+@@ -344 +354 @@ test("provider-key remove awaits removal and reports the deleted credential", ()
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-key-await-remove-"));
++  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-key-await-remove-"));
+@@ -365 +375 @@ test("provider-key remove clears every catalog source sharing the credential", (
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-family-cache-cli-"));
++  const testRoot = mkdtempSync(path.join(process.env.CODEX_HOME || os.tmpdir(), "provider-family-cache-cli-"));
+diff --git a/test/reasoning-tag-policy.test.mjs b/test/reasoning-tag-policy.test.mjs
+--- a/test/reasoning-tag-policy.test.mjs
++++ b/test/reasoning-tag-policy.test.mjs
+@@ -62,2 +62,2 @@ test("explicit legacy opt-in cleans an evidenced inline leak even over Responses
+-  const { output } = await routedText(route, "<think>hidden</think>\nVisible answer");
+-  assert.deepEqual(textEvents(output), ["Visible answer", "Visible answer", "Visible answer"]);
++  const { output } = await routedText(route, "<think>hidden</think>\nVisible <th");
++  assert.deepEqual(textEvents(output), ["Visible ", "<th", "Visible <th", "Visible <th"]);
+diff --git a/test/reasoning-tag-stripper.test.mjs b/test/reasoning-tag-stripper.test.mjs
+--- a/test/reasoning-tag-stripper.test.mjs
++++ b/test/reasoning-tag-stripper.test.mjs
+@@ -553 +553 @@ test("nonce-only compatibility preserves bare literal tags across split deltas",
+-  const deltas = ["XML: <re", "ason>disk full</reason>, <thi", "nk>visible</think>. Tail complete"];
++  const deltas = ["XML: <re", "ason>disk full</reason>, <thi", "nk>visible</think>. Tail </thi"];
+@@ -562 +562 @@ test("nonce-only compatibility preserves bare literal tags across split deltas",
+-  const leaked = [`<think:${HEX}>hidden</thi`, `nk:${HEX}>`, "Answer complete"];
++  const leaked = [`<think:${HEX}>hidden</thi`, `nk:${HEX}>`, "Answer <th"];
+@@ -564,3 +564,3 @@ test("nonce-only compatibility preserves bare literal tags across split deltas",
+-  assert.equal(output.deltas, "Answer complete");
+-  assert.deepEqual(output.done, ["Answer complete"]);
+-  assert.deepEqual(output.messages, ["Answer complete"]);
++  assert.equal(output.deltas, "Answer <th");
++  assert.deepEqual(output.done, ["Answer <th"]);
++  assert.deepEqual(output.messages, ["Answer <th"]);
+diff --git a/test/release-version.test.mjs b/test/release-version.test.mjs
+--- a/test/release-version.test.mjs
++++ b/test/release-version.test.mjs
+@@ -2 +2,3 @@ import assert from "node:assert/strict";
+-import { readFileSync } from "node:fs";
++import { spawnSync } from "node:child_process";
++import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import os from "node:os";
+@@ -5 +7 @@ import test from "node:test";
+-import { fileURLToPath } from "node:url";
++import { fileURLToPath, pathToFileURL } from "node:url";
+@@ -71,3 +73,3 @@ test("releases are tag-driven and validate every asset before publishing", () =>
+-  // CI remains validation for main and pull requests. Publishing is a separate
+-  // tag-triggered workflow, so an ordinary main push cannot create a release.
+-  assert.match(ci, /push:\s*\n\s+branches: \[main\]/);
++  // CI validates upstream main, the personal maintenance branch, and PRs.
++  // Publishing is tag-triggered; an ordinary branch push cannot release.
++  assert.match(ci, /push:\s*\n\s+branches: \[main, personal\]/);
+@@ -163,0 +166,40 @@ test("releases are tag-driven and validate every asset before publishing", () =>
++
++test("the macOS CI lifecycle probe reads real state without starting helper processes", () => {
++  const ci = readFileSync(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
++  const query = ci.slice(ci.indexOf("          query_lifecycle() {"), ci.indexOf("          wait_for_lifecycle() {"));
++  const script = query.match(/node (scripts\/query-control-center-lifecycle\.mjs)/)?.[1];
++  assert.ok(script, "the smoke test must provide an executable Node lifecycle query");
++  const directory = mkdtempSync(path.join(os.tmpdir(), "macos-ci-lifecycle-"));
++  const stateFile = path.join(directory, "control-center-lifecycle.json");
++  const updatedAt = new Date().toISOString();
++  const live = { version: 1, pid: process.pid, ready: true, visible: true, updatedAt };
++  const guard = `
++    import { createRequire, syncBuiltinESMExports } from "node:module";
++    const require = createRequire(import.meta.url);
++    const childProcess = require("node:child_process");
++    for (const method of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"]) {
++      childProcess[method] = () => { throw new Error("A lifecycle observation must not launch a helper process"); };
++    }
++    syncBuiltinESMExports();
++  `;
++  try {
++    for (const [record, running] of [[live, true], [{ ...live, pid: 2147483647 }, false], ["invalid JSON", false]]) {
++      writeFileSync(stateFile, typeof record === "string" ? record : JSON.stringify(record));
++      const result = spawnSync(process.execPath, ["--input-type=module", "-e",
++        `${guard}\nawait import(${JSON.stringify(pathToFileURL(path.join(root, script)).href)});`], {
++        cwd: root,
++        env: { ...process.env, MODEL_ROUTER_CONTROL_CENTER_STATE: stateFile },
++        encoding: "utf8", timeout: 10_000, maxBuffer: 8192, windowsHide: true,
++      });
++      assert.equal(result.status, 0, result.stderr || result.stdout);
++      const state = JSON.parse(result.stdout);
++      assert.equal(state.version, 1);
++      assert.equal(state.running, running);
++      assert.equal(state.pid, running ? process.pid : null);
++      assert.equal(state.ready, running);
++      assert.equal(state.visible, running);
++    }
++  } finally {
++    rmSync(directory, { recursive: true, force: true });
++  }
++});
+diff --git a/test/router-resilience.test.mjs b/test/router-resilience.test.mjs
+--- a/test/router-resilience.test.mjs
++++ b/test/router-resilience.test.mjs
+@@ -35 +35,7 @@ function run(env) {
+-  const stateDir = mkdtempSync(path.join(os.tmpdir(), "router-resilience-state-"));
++  const stateDir = env.MODEL_ROUTER_STATE_DIR || env.CODEX_ROUTER_STATE_DIR || mkdtempSync(path.join(os.tmpdir(), "router-resilience-state-"));
++  if (!existsSync(path.join(stateDir, "enabled-providers.json"))) {
++    // These fixtures exercise native traffic, DeepSeek and Grok OAuth only.
++    // Readiness must cover those routes' real dependencies, not unrelated
++    // listeners that this fixture neither launches nor uses.
++    writeFileSync(path.join(stateDir, "enabled-providers.json"), `${JSON.stringify({ version: 1, providers: ["deepseek", "grok-oauth"] })}\n`);
++  }
+@@ -40,0 +47 @@ function run(env) {
++      CODEX_ROUTER_STATE_DIR: stateDir,
+@@ -44 +51 @@ function run(env) {
+-      CODEX_ROUTER_SHOW_ALL_MODELS: "1",
++      CODEX_ROUTER_SHOW_ALL_MODELS: "0",
+@@ -45,0 +53,10 @@ function run(env) {
++      CODEX_ROUTER_GATEWAY_BASE_URL: "http://127.0.0.1:9/unused-gateway/v1",
++      CODEX_ROUTER_API_BASE_URL: env.CODEX_ROUTER_GATEWAY_BASE_URL || "http://127.0.0.1:9/unused-api/v1",
++      CODEX_NATIVE_BASE_URL: "http://127.0.0.1:9/unused-native",
++      CODEX_ROUTER_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      CODEX_ROUTER_API_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      CODEX_ROUTER_GROK_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      CODEX_ROUTER_GATEWAY_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: "9",
++      MODEL_ROUTER_DEVIN_CLI_PORT: "9",
++      MODEL_ROUTER_LOCAL_BASE_URL: "http://127.0.0.1:9/v1",
+diff --git a/test/router-tray.test.mjs b/test/router-tray.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/router-tray.test.mjs
+@@ -0,0 +1,151 @@
++import assert from "node:assert/strict";
++import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import test from "node:test";
++import { runInNewContext } from "node:vm";
++
++import { transactModelOverlayMutation } from "../src/model-overlay-publication.mjs";
++import { contractOperationDeadline, operationDeadlineFromEnvironment } from "../src/process-tree.mjs";
++
++const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
++// A read-only override lets the same oracle prove that the prior tray source
++// fails against the current runtime contract, without replacing tracked files.
++const swift = process.env.CODEX_ROUTER_TEST_TRAY_SOURCE_PATH
++  ? readFileSync(process.env.CODEX_ROUTER_TEST_TRAY_SOURCE_PATH, "utf8")
++  : read("apps/macos/ModelRouterTray/Sources/ModelRouterTrayApp.swift");
++const control = read("src/control.mjs");
++const ipc = read("apps/control-center/electron/ipc.mjs");
++const runner = read("apps/control-center/electron/command-runner.mjs");
++const processTree = read("src/process-tree.mjs");
++const overlay = read("src/model-overlay-publication.mjs");
++const constants = [ipc, runner, processTree, overlay,
++  read("src/runtime-dependency-preparation.mjs"), read("src/router-restart.mjs")];
++
++function arithmetic(expression) {
++  const numeric = expression.replace(/\b[A-Z][A-Z0-9_]*\b/g, (name) => String(jsConstant(name)));
++  assert.match(numeric, /^[\d_\s+*()]+$/, "only literal budget arithmetic is evaluated");
++  return runInNewContext(numeric.replaceAll("_", ""), {}, { timeout: 100 });
++}
++
++function jsConstant(name, source) {
++  const definition = (source ? [source] : constants).map((text) =>
++    text.match(new RegExp(`\\bconst ${name}\\s*=\\s*([^;]+);`))?.[1]).find(Boolean);
++  assert.ok(definition, `${name} must remain an explicit finite runtime constant`);
++  return arithmetic(definition);
++}
++
++function swiftSeconds(name) {
++  const value = swift.match(new RegExp(`static let ${name}: TimeInterval = ([\\d_]+)`))?.[1];
++  assert.ok(value, `${name} must remain a finite tray budget`);
++  return Number(value.replaceAll("_", ""));
++}
++
++function controlCatalogMs() {
++  const value = control.match(/const maximumControlOperationMs[\s\S]*?: restartBearingOverlayOperation\s*\? ([^:\n]+)/)?.[1];
++  assert.ok(value, "control must expose a distinct catalog operation budget");
++  return arithmetic(value);
++}
++
++test("the tray catalog watchdog mirrors actual Electron and backend transaction ceilings", () => {
++  const outer = swiftSeconds("catalogMutationTimeout") * 1_000;
++  const publication = swiftSeconds("catalogPublicationOperationTimeout") * 1_000;
++  const controlOperation = swiftSeconds("catalogControlOperationTimeout") * 1_000;
++  const cleanup = swiftSeconds("processTreeCleanupReserve") * 1_000;
++  assert.equal(outer, jsConstant("CATALOG_MUTATION_TIMEOUT_MS", ipc));
++  assert.equal(publication, jsConstant("DEFAULT_OVERLAY_TRANSACTION_MS", overlay));
++  assert.equal(controlOperation + cleanup, controlCatalogMs());
++  assert.equal(cleanup, jsConstant("DEFAULT_CHILD_CLEANUP_RESERVE_MS", processTree));
++  assert.ok(outer >= controlCatalogMs() + cleanup,
++    "the tray must leave the Node owner and its nested tree time to retire");
++  assert.ok(outer >= publication + cleanup,
++    "direct curation must expire before the UI watchdog");
++  assert.ok(outer <= jsConstant("MAX_TIMEOUT_MS", runner));
++});
++
++test("the tray publication budget fits six private restorations and complete semantic rollback", () => {
++  const forward = jsConstant("OVERLAY_MUTATION_OPERATION_MS")
++    + jsConstant("OVERLAY_RESTARTING_PUBLICATION_MINIMUM_MS");
++  const restore = jsConstant("OVERLAY_RESTORE_OVERHEAD_MS") + 6 * 15_000;
++  const rollback = jsConstant("OVERLAY_RESTARTING_PUBLICATION_MS") + restore;
++  const minimum = forward + rollback;
++  assert.equal(minimum, 2_690_000, "readiness, dependency and publication budgets compose sequentially");
++  assert.ok(swiftSeconds("catalogPublicationOperationTimeout") * 1_000
++    >= minimum + jsConstant("DEFAULT_CHILD_CLEANUP_RESERVE_MS"));
++  assert.ok(rollback + jsConstant("OVERLAY_OWNER_CLEANUP_RESERVE_MS")
++    <= jsConstant("OVERLAY_ROLLBACK_OWNER_MAX_MS"));
++  assert.equal(jsConstant("MAX_OWNER_SIGNAL_BARRIER_MS", runner),
++    jsConstant("OVERLAY_ROLLBACK_OWNER_MAX_MS"));
++});
++
++test("the parsed tray curation and control deadlines permit the actual six-file transaction", async (t) => {
++  const directory = mkdtempSync(path.join(process.env.MODEL_ROUTER_STATE_DIR || os.tmpdir(), "tray-budget-"));
++  mkdirSync(directory, { recursive: true });
++  t.after(() => rmSync(directory, { force: true, recursive: true }));
++  const files = Array.from({ length: 6 }, (_, index) => path.join(directory, `private-${index}.json`));
++  for (const file of files) writeFileSync(file, "old\n");
++  let now = Date.now();
++  t.mock.method(Date, "now", () => now);
++  for (const launch of ["curation", "control"]) {
++    const ownerMs = (swiftSeconds("catalogControlOperationTimeout")
++      + swiftSeconds("processTreeCleanupReserve")) * 1_000;
++    const deadline = launch === "curation"
++      ? now + swiftSeconds("catalogPublicationOperationTimeout") * 1_000
++      : contractOperationDeadline(operationDeadlineFromEnvironment({
++        CODEX_ROUTER_OPERATION_DEADLINE_MS: String(now + ownerMs),
++      }, { timeoutMs: controlCatalogMs(), maximumMs: controlCatalogMs() }));
++    // Launch/import overhead cannot consume the last millisecond needed to
++    // admit the full six-file transaction before it has changed any state.
++    now += 50;
++    let published = false;
++    await transactModelOverlayMutation({ files, restart: true, lock: false, deadline,
++      mutate: () => { now += 30_000; for (const file of files) writeFileSync(file, "new\n"); },
++      applyPublication: ({ deadline: publicationDeadline }) => {
++        assert.ok(publicationDeadline - now >= jsConstant("OVERLAY_RESTARTING_PUBLICATION_MINIMUM_MS"));
++        published = true;
++      },
++    });
++    assert.equal(published, true, launch);
++    for (const file of files) assert.equal(readFileSync(file, "utf8"), "new\n");
++  }
++});
++
++test("the tray catalog command classifier includes key pools and generic providers exactly like control", () => {
++  const tray = swift.match(/static func isCatalogMutation\([\s\S]*?return \[([\s\S]*?)\]\.contains\(command\)/)?.[1];
++  const runtime = control.match(/const restartBearingOverlayOperation = new Set\(\[([\s\S]*?)\]\)/)?.[1];
++  assert.ok(tray && runtime);
++  const names = (body) => [...body.matchAll(/"([a-z-]+)"/g)].map((match) => match[1]).sort();
++  assert.deepEqual(names(tray), names(runtime));
++  for (const command of ["key-pool", "generic-providers"]) assert.ok(names(tray).includes(command));
++  for (const command of ["providers", "login", "probe-provider", "key-pool-unrelated"]) {
++    assert.equal(names(tray).includes(command), false);
++  }
++  assert.match(swift, /static func controlTimeout\([\s\S]*?isCatalogMutation\(arguments: arguments\)\s*\? catalogMutationTimeout\s*: defaultControlTimeout/);
++  assert.match(swift, /static func operationTimeout\([\s\S]*?isCatalogMutation\(arguments: arguments\)\s*\? catalogControlOperationTimeout\s*: ordinaryOperationTimeout/);
++});
++
++test("ordinary, discovery and interactive OAuth budgets retain their existing boundaries", () => {
++  assert.equal(swiftSeconds("discoveryTimeout"), 45);
++  assert.equal(swiftSeconds("ordinaryOperationTimeout"), 840);
++  assert.equal(swiftSeconds("defaultControlTimeout"), 900);
++  assert.equal(swiftSeconds("antigravityOperationTimeout") * 1_000,
++    jsConstant("ANTIGRAVITY_PROBE_ACTIVATION_TIMEOUT_MS", ipc));
++  assert.equal(swiftSeconds("antigravityRunnerTimeout") * 1_000,
++    jsConstant("ROUTER_BROWSER_OAUTH_TIMEOUT_MS", ipc));
++  assert.match(swift, /static func isBoundedAntigravityOperation\([\s\S]*?arguments\[0\] == "login"[\s\S]*?arguments\[1\] == "antigravity-oauth"[\s\S]*?arguments\[0\] == "probe-provider"/);
++});
++
++test("both tray launch paths export the finite inner deadline before arming the outer watchdog", () => {
++  const operation = swift.slice(swift.indexOf("let controlTimeout = RouterScriptWatchdog.controlTimeout"));
++  assert.match(operation, /let operationTimeout = RouterScriptWatchdog\.operationTimeout\(arguments: arguments\)/);
++  assert.match(operation, /let ownerTimeout = RouterScriptWatchdog\.operationOwnerTimeout\(arguments: arguments\)/);
++  assert.match(operation, /Date\(\)\.timeIntervalSince1970 \+ ownerTimeout/);
++  assert.match(operation, /environment\["CODEX_ROUTER_OPERATION_TIMEOUT_MS"\][\s\S]*?Int\(operationTimeout \* 1_000\)/);
++  assert.match(operation, /watchdog\.arm\(after: controlTimeout\)/);
++  const publicationStart = swift.search(/if script == "curate-models\.mjs" \{\s*let operationTimeout/);
++  assert.ok(publicationStart >= 0, "curation must export its own transaction deadline");
++  const publication = swift.slice(publicationStart);
++  assert.match(publication, /let operationTimeout = RouterScriptWatchdog\.catalogPublicationOperationTimeout/);
++  assert.match(publication, /environment\["CODEX_ROUTER_OPERATION_DEADLINE_MS"\][\s\S]*?Date\(\)\.timeIntervalSince1970 \+ operationTimeout/);
++  assert.match(publication, /watchdog\.arm\(after: timeout\)/);
++});
+diff --git a/test/routing.test.mjs b/test/routing.test.mjs
+--- a/test/routing.test.mjs
++++ b/test/routing.test.mjs
+@@ -117,0 +118,14 @@ function run(script, env, { nodeArgs = [] } = {}) {
++      // Router preparation tests share one local Responses stub for the two
++      // execution hops. Its model is the Router's registry ID, before the
++      // API forwarder's provider-model/credential normalization. Tests of
++      // that second boundary explicitly supply their real local API child.
++      CODEX_ROUTER_GATEWAY_BASE_URL: "http://127.0.0.1:9/unused-gateway/v1",
++      CODEX_ROUTER_API_BASE_URL: env.CODEX_ROUTER_GATEWAY_BASE_URL || "http://127.0.0.1:9/unused-api/v1",
++      CODEX_NATIVE_BASE_URL: "http://127.0.0.1:9/unused-native",
++      CODEX_ROUTER_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      CODEX_ROUTER_API_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      CODEX_ROUTER_GROK_OAUTH_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      CODEX_ROUTER_GATEWAY_HEALTH_URL: "http://127.0.0.1:9/unused-health",
++      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: env.CODEX_ROUTER_GATEWAY_HEALTH_URL ? new URL(env.CODEX_ROUTER_GATEWAY_HEALTH_URL).port : "9",
++      MODEL_ROUTER_DEVIN_CLI_PORT: env.CODEX_ROUTER_GATEWAY_HEALTH_URL ? new URL(env.CODEX_ROUTER_GATEWAY_HEALTH_URL).port : "9",
++      MODEL_ROUTER_LOCAL_BASE_URL: "http://127.0.0.1:9/v1",
+@@ -467 +481 @@ test("router requires the configured path capability before any model route", as
+-      ["activity", "compatibilityLayer", "degraded", "ok", "service", "version"],
++      ["activity", "compatibilityLayer", "degraded", "executionPlan", "ok", "service", "version"],
+@@ -471 +485 @@ test("router requires the configured path capability before any model route", as
+-    // three fixed local service names -- never a URL, a credential, or the
++    // fixed local service names -- never a URL, a credential, or the
+@@ -475 +489 @@ test("router requires the configured path capability before any model route", as
+-        ["oauth", "api", "grokOauth", "gateway"].includes(name)),
++        ["oauth", "api", "grokOauth", "antigravityOauth", "devinCli", "gateway", "ollama"].includes(name)),
+@@ -477,0 +492,4 @@ test("router requires the configured path capability before any model route", as
++    assert.deepEqual(Object.keys(publicPayload.executionPlan).sort(), ["fingerprint", "needsGateway", "services"]);
++    assert.match(publicPayload.executionPlan.fingerprint, /^[a-f0-9]{64}$/);
++    assert.ok(publicPayload.executionPlan.services.includes("api"));
++    assert.doesNotMatch(JSON.stringify(publicPayload), new RegExp(`${CALLER_KEY}|${INTERNAL_KEY}|127\\.0\\.0\\.1`));
+@@ -5329 +5346,0 @@ test("API forwarder never replays embeddings through a provider API-key pool", a
+-  const inactiveRouterPort = await openPort();
+@@ -5334,22 +5351,12 @@ test("API forwarder never replays embeddings through a provider API-key pool", a
+-  for (const [name] of credentials) {
+-    execFileSync(process.execPath, [
+-      path.join(root, "src", "control.mjs"),
+-      "key-pool",
+-      "opencode-go",
+-      "add-env",
+-      name,
+-    ], {
+-      cwd: root,
+-      env: {
+-        ...process.env,
+-        MODEL_ROUTER_TARGET: "codex",
+-        MODEL_ROUTER_STATE_DIR: stateDir,
+-        MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
+-        MODEL_ROUTER_API_KEY_POOL_PATH: poolStatePath,
+-        CODEX_ROUTER_PORT: String(inactiveRouterPort),
+-        CODEX_ROUTER_SERVICE_PLATFORM: "darwin",
+-        MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(stateDir, "launch-agents"),
+-      },
+-      stdio: "ignore",
+-    });
+-  }
++  // Exercise the real metadata writer in an isolated child. This test covers
++  // API credential selection/replay, not the CLI's managed-service staging
++  // transaction (which has its own service-platform fixtures).
++  execFileSync(process.execPath, ["--input-type=module", "--eval", `
++    const { addEnvironmentCredentialToPool } = await import("./src/provider-api-key-control.mjs");
++    const { names, credentialStorePath, poolStatePath } = JSON.parse(process.argv[1]);
++    for (const name of names) await addEnvironmentCredentialToPool("opencode-go", name, { credentialStorePath, poolStatePath });
++  `, JSON.stringify({ names: credentials.map(([name]) => name), credentialStorePath, poolStatePath })], {
++    cwd: root,
++    env: { ...process.env, MODEL_ROUTER_STATE_DIR: stateDir, CODEX_ROUTER_STATE_DIR: stateDir },
++    stdio: "pipe",
++  });
+@@ -9754,0 +9762,36 @@ test("router ages consumed large tool results but preserves the newest result fr
++test("per-model 16KiB policy recognizes Desktop wrapped readback and leaves other routes unchanged", async () => {
++  const bodies = [];
++  const gateway = await mockServer(async (request, response) => {
++    bodies.push(await bodyJson(request));
++    json(response, 200, {output:[{type:"message",role:"assistant",content:"ok"}]});
++  });
++  const stateDir = mkdtempSync(path.join(os.tmpdir(),"routing-model-history-policy-"));
++  const model = "deepseek/deepseek-v4-pro";
++  writeFileSync(path.join(stateDir,"tool-result-aging.json"),JSON.stringify({version:1,enabled:true,nativeEnabled:false,modelMinBytes:{[model]:16384},readbackHintModels:[model]}));
++  const port = await openPort();
++  const router = run("router.mjs",{CODEX_ROUTER_PORT:String(port),CODEX_ROUTER_GATEWAY_BASE_URL:`http://127.0.0.1:${gateway.port}/v1`,MODEL_ROUTER_STATE_DIR:stateDir,CODEX_ROUTER_QUIET:"1"});
++  const text="head\n"+"real evidence row\n".repeat(1300)+"tail";
++  const input=[{type:"function_call",name:"exec_command",call_id:"old16",arguments:'{"cmd":"original-command"}'},{type:"function_call_output",call_id:"old16",output:text},{type:"message",role:"assistant",content:"processed"},...Array.from({length:7},(_,i)=>[{type:"function_call",name:"exec_command",call_id:`medium-${i}`,arguments:"{}"},{type:"function_call_output",call_id:`medium-${i}`,output:text},{type:"message",role:"assistant",content:"used"}]).flat(),...Array.from({length:4},(_,i)=>[{type:"function_call",name:"exec_command",call_id:`new16-${i}`,arguments:"{}"},{type:"function_call_output",call_id:`new16-${i}`,output:"small"},{type:"message",role:"assistant",content:"used"}]).flat()];
++  const tools=[{type:"function",name:"exec_command",parameters:{type:"object",properties:{}}}];
++  const send=async (items,selected=model)=>{
++    const r=await fetch(`${routerBase(port)}/responses`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:selected,stream:false,tools,input:items})});
++    assert.equal(r.status,200,await r.text());return bodies.at(-1).input;
++  };
++  try {
++    await waitFor(`${routerBase(port)}/models`,router);
++    const pending=await send(input);
++    assert.ok(pending[1].output.startsWith(text));
++    assert.equal(pending.at(-1).role,"developer");
++    assert.match(pending.at(-1).content[0].text,/--limit 1/u);
++    const proof=readbackHistory(stateDir,"old16");
++    proof[1].output=[{type:"input_text",text:JSON.stringify({exit_code:0,output:proof[1].output})}];
++    const aged=await send([...input,...proof]);
++    assert.match(aged[1].output,/Older tool result compacted/u);
++    assert.equal(aged[0].arguments,input[0].arguments);
++    assert.equal(aged.filter(x=>x.role==="developer").length,0);
++    const unaffected=await send(input,"deepseek/deepseek-v4-flash");
++    assert.equal(unaffected[1].output,text);
++    assert.equal(unaffected.some(x=>x.role==="developer"),false);
++  } finally {await stopChild(router);await closeServer(gateway.server);rmSync(stateDir,{recursive:true,force:true});}
++});
++
+@@ -10305,0 +10349 @@ test("a live child turn refines a legacy experimental subagent diagnostic", asyn
++      object: "response",
+@@ -10308 +10352 @@ test("a live child turn refines a legacy experimental subagent diagnostic", asyn
+-        { type: "message", content: [{ type: "output_text", text: "child done" }] },
++        { type: "message", role: "assistant", content: [{ type: "output_text", text: "child done" }] },
+diff --git a/test/service-lifecycle.test.mjs b/test/service-lifecycle.test.mjs
+--- a/test/service-lifecycle.test.mjs
++++ b/test/service-lifecycle.test.mjs
+@@ -105 +105 @@ test("foreground supervisor waits for existing lifecycle ownership before bootin
+-    assert.match(stderr, /LiteLLM is not installed/i);
++    assert.match(stderr, /Internal service key is missing/i);
+diff --git a/test/service-render.test.mjs b/test/service-render.test.mjs
+--- a/test/service-render.test.mjs
++++ b/test/service-render.test.mjs
+@@ -92 +92 @@ test("all service platforms persist a bounded native catalog polling override",
+-      for (const [setting, expected] of [["86400000", "86400000"], ["2147483648", "300000"], ["invalid;value", "300000"]]) {
++      for (const [setting, expected] of [["300000", "300000"], ["86400000", "86400000"], ["2147483648", "86400000"], ["invalid;value", "86400000"]]) {
+diff --git a/test/service-stop.test.mjs b/test/service-stop.test.mjs
+--- a/test/service-stop.test.mjs
++++ b/test/service-stop.test.mjs
+@@ -68 +68,5 @@ async function run(command, mode, { missingTask = false, queryFailure = false, r
+-    protectPrivateFile: () => {},
++    writePrivateFile: (file, contents) => {
++      assert.equal(path.dirname(file), stateDir, "launcher writes must remain in the simulated state directory");
++      assert.ok(Buffer.isBuffer(contents), "launcher encodings must reach the shared writer as bytes");
++      if (earlyFailure === "launcher") throw new Error("fixture launcher write failed");
++    },
+diff --git a/test/setup-exit-codes.test.mjs b/test/setup-exit-codes.test.mjs
+--- a/test/setup-exit-codes.test.mjs
++++ b/test/setup-exit-codes.test.mjs
+@@ -3,2 +3 @@ import { spawnSync } from "node:child_process";
+-import { mkdtempSync, rmSync } from "node:fs";
+-import os from "node:os";
++import { rmSync } from "node:fs";
+@@ -8,0 +8,2 @@ import { fileURLToPath } from "node:url";
++import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
++
+@@ -20 +21 @@ function runSetup(args, extraEnv = {}) {
+-  const stateDir = mkdtempSync(path.join(os.tmpdir(), "setup-exit-"));
++  const stateDir = setupFixtureRoot("setup-exit-");
+@@ -26,3 +27 @@ function runSetup(args, extraEnv = {}) {
+-        ...process.env,
+-        MODEL_ROUTER_STATE_DIR: stateDir,
+-        CODEX_HOME: stateDir,
++        ...setupFixtureEnvironment(stateDir, stateDir, stateDir),
+@@ -91,6 +90,6 @@ test("Homebrew refuses the source-only desktop companion before setup changes an
+-// A stored credential would make this run succeed instead of reporting the
+-// gap, so the case is skipped rather than asserted against whatever the
+-// developer's machine happens to hold. Keychain entries are global and no
+-// state-directory override hides them.
+-const deepseekConfigured =
+-  spawnSync(process.execPath, [path.join(root, "src", "provider-key.mjs"), "deepseek", "status"], {
++// The status check uses the same fully synthetic roots as setup, so global
++// operator credentials cannot decide whether this regression runs.
++const statusRoot = setupFixtureRoot("setup-key-status-");
++let deepseekConfigured;
++try {
++  deepseekConfigured = spawnSync(process.execPath, [path.join(root, "src", "provider-key.mjs"), "deepseek", "status"], {
+@@ -98,0 +98 @@ const deepseekConfigured =
++    env: setupFixtureEnvironment(statusRoot, statusRoot, statusRoot),
+@@ -99,0 +100,3 @@ const deepseekConfigured =
++} finally {
++  rmSync(statusRoot, { recursive: true, force: true });
++}
+diff --git a/test/setup-node-deps.test.mjs b/test/setup-node-deps.test.mjs
+--- a/test/setup-node-deps.test.mjs
++++ b/test/setup-node-deps.test.mjs
+@@ -8 +7,0 @@ import {
+-  mkdtempSync,
+@@ -14 +12,0 @@ import {
+-import os from "node:os";
+@@ -17,0 +16,2 @@ import test from "node:test";
++import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
++
+@@ -199 +199 @@ function withFreshGuidedSetup(
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-guided-deps-"));
++  const testRoot = setupFixtureRoot("codex-router-guided-deps-");
+@@ -233 +233 @@ function withFreshGuidedSetup(
+-          ...process.env,
++          ...setupFixtureEnvironment(testRoot, stateDir),
+@@ -277 +277 @@ test(
+-    const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-antigravity-deps-"));
++    const testRoot = setupFixtureRoot("codex-router-antigravity-deps-");
+@@ -324 +324 @@ test(
+-            ...process.env,
++            ...setupFixtureEnvironment(testRoot, stateDir),
+@@ -456 +456 @@ test(
+-      mkdtempSync(path.join(os.tmpdir(), "codex-router-install-deps-")),
++      setupFixtureRoot("codex-router-install-deps-"),
+@@ -503 +503 @@ test(
+-          ...process.env,
++          ...setupFixtureEnvironment(testRoot, path.join(testRoot, "state"), testRoot),
+diff --git a/test/setup.test.mjs b/test/setup.test.mjs
+--- a/test/setup.test.mjs
++++ b/test/setup.test.mjs
+@@ -3,2 +3 @@ import { execFileSync } from "node:child_process";
+-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+-import os from "node:os";
++import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+@@ -8,0 +8,2 @@ import { fileURLToPath } from "node:url";
++import { setupFixtureEnvironment, setupFixtureRoot } from "./fixtures/setup-environment.mjs";
++
+@@ -12 +13 @@ test("automatic selection-only setup exposes only configured providers", () => {
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-setup-"));
++  const testRoot = setupFixtureRoot("codex-router-setup-");
+@@ -28 +29 @@ test("automatic selection-only setup exposes only configured providers", () => {
+-          ...process.env,
++          ...setupFixtureEnvironment(testRoot, stateDir, codexHome),
+@@ -56 +57 @@ test("--no-provider --no-discovery writes an empty selection and the discovery m
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-setup-idle-"));
++  const testRoot = setupFixtureRoot("codex-router-setup-idle-");
+@@ -74 +75 @@ test("--no-provider --no-discovery writes an empty selection and the discovery m
+-          ...process.env,
++          ...setupFixtureEnvironment(testRoot, stateDir, codexHome),
+@@ -95 +96 @@ test("re-running setup without the idle flags clears the discovery marker", () =
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-setup-exit-idle-"));
++  const testRoot = setupFixtureRoot("codex-router-setup-exit-idle-");
+@@ -121 +122 @@ test("re-running setup without the idle flags clears the discovery marker", () =
+-          ...process.env,
++          ...setupFixtureEnvironment(testRoot, stateDir, codexHome),
+@@ -142 +143 @@ test("ensure-configured does not auto-select anonymous providers", () => {
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-ensure-configured-"));
++  const testRoot = setupFixtureRoot("codex-router-ensure-configured-");
+@@ -156 +157 @@ test("ensure-configured does not auto-select anonymous providers", () => {
+-          ...process.env,
++          ...setupFixtureEnvironment(testRoot, stateDir),
+@@ -180 +181 @@ test("ensure-configured accepts an explicitly empty selection as idle", () => {
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-ensure-idle-"));
++  const testRoot = setupFixtureRoot("codex-router-ensure-idle-");
+@@ -199 +200 @@ test("ensure-configured accepts an explicitly empty selection as idle", () => {
+-          ...process.env,
++          ...setupFixtureEnvironment(testRoot, stateDir),
+@@ -214 +215 @@ test("configured setup mode also excludes anonymous providers by default", () =>
+-  const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-setup-configured-"));
++  const testRoot = setupFixtureRoot("codex-router-setup-configured-");
+@@ -228 +229 @@ test("configured setup mode also excludes anonymous providers by default", () =>
+-          ...process.env,
++          ...setupFixtureEnvironment(testRoot, stateDir),
+diff --git a/test/startup-attempts-lifecycle.test.mjs b/test/startup-attempts-lifecycle.test.mjs
+--- a/test/startup-attempts-lifecycle.test.mjs
++++ b/test/startup-attempts-lifecycle.test.mjs
+@@ -7,0 +8,2 @@ import { executeStartupFixture, startupFixturePaths } from "./startup-attempts-f
++import { createExecutionPlan } from "../src/route-execution-plan.mjs";
++import { stopServiceChildren } from "../src/service-shutdown.mjs";
+@@ -67,0 +70,4 @@ async function run({ foreground = false, disabled = false, mode = "healthy", see
++  // Select a real gateway route so optional-dependency planning cannot bypass
++  // the supervision and runtime-failure oracles below.
++  const fixtureProvider = { id: "fixture", kind: "openai-compatible", protocol: "openai" };
++  const fixtureModel = { slug: "fixture/chat", provider: "fixture", upstreamModel: "fixture-chat" };
+@@ -105,0 +112 @@ async function run({ foreground = false, disabled = false, mode = "healthy", see
++    "./service-shutdown.mjs": { stopServiceChildren },
+@@ -107 +114,6 @@ async function run({ foreground = false, disabled = false, mode = "healthy", see
+-    "./model-registry.mjs": { MODELS: [], COMPATIBILITY_LAYER: { enabled: true } },
++    "./model-registry.mjs": {
++      COMPATIBILITY_LAYER: { enabled: true },
++      MODELS: [fixtureModel], RUNTIME_PROVIDERS: new Map([["fixture", fixtureProvider]]),
++      providerForModel: () => fixtureProvider,
++    },
++    "./route-execution-plan.mjs": { createExecutionPlan },
+@@ -117 +129,4 @@ async function run({ foreground = false, disabled = false, mode = "healthy", see
+-    "./provider-selection.mjs": { pruneUnconfiguredProviders: () => [] },
++    "./provider-selection.mjs": {
++      readProviderSelection: () => ["fixture"],
++      pruneUnconfiguredProviders: () => [], // Retain the older-source comparison fixture.
++    },
+@@ -132,0 +148 @@ async function run({ foreground = false, disabled = false, mode = "healthy", see
++    "./native-catalog-events.mjs": { subscribeNativeCatalogEvents: () => () => {} },
+diff --git a/test/startup-attempts-reset.test.mjs b/test/startup-attempts-reset.test.mjs
+--- a/test/startup-attempts-reset.test.mjs
++++ b/test/startup-attempts-reset.test.mjs
+@@ -124 +124,9 @@ async function run(platform, command, mode = 'success', { wrapper = false } = {}
+-    './file-security.mjs': { ensureCheckoutReadable: () => {}, protectPrivateFile: () => {}, writePrivateJson: (file, value) => { if (String(file).endsWith('startup-attempts.json')) record = value; } },
++    './file-security.mjs': {
++      ensureCheckoutReadable: () => {},
++      protectPrivateFile: () => {},
++      writePrivateFile: (file, contents) => {
++        assert.equal(fixturePath.dirname(file), stateDir, 'launcher writes must stay inside the simulated state directory');
++        assert.ok(Buffer.isBuffer(contents), 'launcher encodings must reach the shared writer as bytes');
++      },
++      writePrivateJson: (file, value) => { if (String(file).endsWith('startup-attempts.json')) record = value; },
++    },
+diff --git a/test/startup-attempts-start.test.mjs b/test/startup-attempts-start.test.mjs
+--- a/test/startup-attempts-start.test.mjs
++++ b/test/startup-attempts-start.test.mjs
+@@ -31,0 +32,12 @@ function state(t) {
++  const userDir = path.join(directory, 'user');
++  const homeDir = path.join(directory, 'codex-home');
++  for (const folder of [userDir, homeDir, path.join(userDir, 'AppData', 'Roaming'), path.join(userDir, 'AppData', 'Local')]) {
++    mkdirSync(folder, {recursive: true, mode: 0o700});
++  }
++  const registryFile = path.join(directory, 'registry.json');
++  writeFileSync(registryFile, JSON.stringify({version: 1, providers: [{id: 'custom', displayName: 'Fixture custom',
++    kind: 'openai-compatible', ownedBy: 'fixture', perModelEndpoint: true, authMode: 'per-model'}],
++    models: [{slug: 'custom/gateway-fixture', gatewayModel: 'gateway-fixture', upstreamModel: 'gateway-fixture',
++      provider: 'custom', listed: false, endpoint: {protocol: 'openai', keyless: true,
++        baseUrl: 'http://127.0.0.1:9999/v1'}}]}));
++  writeFileSync(path.join(stateDir, 'enabled-providers.json'), JSON.stringify({version: 1, providers: ['custom']}));
+@@ -36 +48,2 @@ function state(t) {
+-    CODEX_HOME:path.join(directory,'codex-home'),
++    HOME:userDir, USERPROFILE:userDir, CODEX_HOME:homeDir,
++    APPDATA:path.join(userDir,'AppData','Roaming'), LOCALAPPDATA:path.join(userDir,'AppData','Local'),
+@@ -40,0 +54,6 @@ function state(t) {
++    MODEL_ROUTER_REGISTRY:registryFile,
++    MODEL_ROUTER_USER_MODELS:path.join(stateDir,'user-models.json'),
++    MODEL_ROUTER_GENERIC_PROVIDERS:path.join(stateDir,'generic-providers.json'),
++    CODEX_ROUTER_NO_DISCOVERY:'1', NO_DISCOVERY:'1',
++    MODEL_ROUTER_SHOW_ALL_MODELS:'0', CODEX_ROUTER_SHOW_ALL_MODELS:'0',
++    CODEX_ROUTER_SERVICE_PLATFORM:'test-fixture',
+@@ -55,0 +75,77 @@ function run(entry,env,timeout=CHILD_TIMEOUT_MS) {
++// This unlisted registry fixture is still an explicitly selected Chat route:
++// listing controls the picker, not its actual gateway execution dependency.
++// Ask the real registry/plan boundary instead of inferring that from the name.
++function gatewayPlan(env) {
++  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', `
++    import { MODELS, RUNTIME_PROVIDERS, providerForModel } from './src/model-registry.mjs';
++    import { createExecutionPlan } from './src/route-execution-plan.mjs';
++    import { readProviderSelection } from './src/provider-selection.mjs';
++    const selected = new Set(readProviderSelection());
++    console.log(JSON.stringify(createExecutionPlan({ models: MODELS, providerForModel,
++      routeEnabled: model => RUNTIME_PROVIDERS.get(model.provider)?.generic === true || selected.has(model.provider) })));
++  `], { env, cwd: root, encoding: 'utf8', timeout: CHILD_TIMEOUT_MS });
++  assert.ifError(result.error);
++  assert.equal(result.status, 0, result.stderr);
++  return JSON.parse(result.stdout);
++}
++
++async function runDegradedSupervisor(fixture, { entry = 'start.mjs', env = fixture.env,
++  gatewayError = /dependency unavailable: LiteLLM gateway exited before becoming healthy/ } = {}) {
++  const ports = await Promise.all(Array.from({ length: 7 }, () => freePort()));
++  assert.equal(new Set(ports).size, ports.length);
++  const [router, gateway, oauth, api, grok, antigravity, devin] = ports;
++  writeFileSync(path.join(fixture.stateDir, 'internal-secret'), 'foreground-synthetic-internal-key\n', { mode: 0o600 });
++  writeFileSync(path.join(fixture.stateDir, 'caller-secret'), 'foreground-synthetic-caller-key-with-sufficient-length\n', { mode: 0o600 });
++  const child = spawn(process.execPath, [path.join(root, 'src', entry)], {
++    cwd: root,
++    env: {
++      ...env,
++      MODEL_ROUTER_PORT: String(router), MODEL_ROUTER_GATEWAY_PORT: String(gateway),
++      MODEL_ROUTER_OAUTH_PORT: String(oauth), MODEL_ROUTER_API_PORT: String(api), MODEL_ROUTER_GROK_OAUTH_PORT: String(grok),
++      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: String(antigravity), MODEL_ROUTER_DEVIN_CLI_PORT: String(devin),
++      CODEX_NATIVE_BASE_URL: 'http://127.0.0.1:9/unused-native', MODEL_ROUTER_NATIVE_TRANSPORT: 'http',
++      CODEX_ROUTER_GATEWAY_RESTARTS: '0', CODEX_ROUTER_STARTUP_HEALTH_TIMEOUT_MS: '2000',
++      MODEL_ROUTER_SHUTDOWN_DRAIN_MS: '100', MODEL_ROUTER_SHUTDOWN_FLUSH_MS: '100', NODE_USE_ENV_PROXY: '0',
++    },
++    stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true,
++  });
++  let output = '';
++  child.stderr.setEncoding('utf8');
++  child.stderr.on('data', chunk => { output += chunk; });
++  const exited = new Promise((resolve, reject) => {
++    child.once('error', reject);
++    child.once('exit', (code, signal) => resolve({ code, signal }));
++  });
++  let timer;
++  try {
++    const deadline = Date.now() + CHILD_TIMEOUT_MS;
++    while (!/serving independent routes/.test(output) && Date.now() < deadline) {
++      assert.equal(child.exitCode, null, output);
++      await new Promise(resolve => setTimeout(resolve, 50));
++    }
++    assert.match(output, /serving independent routes/);
++    assert.match(output, gatewayError);
++    assert.equal((await fetch(`http://127.0.0.1:${router}/health/live`)).status, 200);
++    const healthResponse = await fetch(`http://127.0.0.1:${router}/health`);
++    assert.equal(healthResponse.status, 503);
++    const health = await healthResponse.json();
++    assert.equal(health.executionPlan.needsGateway, true);
++    assert.deepEqual(health.executionPlan.services, ['api', 'gateway']);
++    assert.ok(health.degraded.includes('gateway'), JSON.stringify(health));
++    assert.doesNotMatch(output, /backing off|foreground-synthetic-(?:internal|caller)-key/);
++    return output;
++  } finally {
++    if (child.exitCode === null && child.signalCode === null) child.send({ type: 'model-router:shutdown' });
++    try {
++      const result = await Promise.race([exited, new Promise((_resolve, reject) => {
++        timer = setTimeout(() => reject(new Error(`supervisor IPC shutdown did not finish: ${output}`)), 15_000);
++      })]);
++      assert.equal(result.signal, null, output);
++      assert.equal(result.code, 0, output);
++    } finally {
++      clearTimeout(timer);
++      if (child.exitCode === null && child.connected) child.disconnect();
++    }
++  }
++}
++
+@@ -86 +182 @@ test('explicit foreground startup bypasses the automatic cooldown',t=>{
+-  assert.match(result.output,/LiteLLM is not installed/);
++  assert.match(result.output,/Internal service key is missing/);
+@@ -90 +186 @@ test('explicit foreground startup bypasses the automatic cooldown',t=>{
+-test('direct kill switch bypasses cooldown and reveals a permanent launcher error',t=>{
++test('direct kill switch bypasses cooldown and reveals a missing service capability',t=>{
+@@ -94 +190 @@ test('direct kill switch bypasses cooldown and reveals a permanent launcher erro
+-  assert.match(result.output,/LiteLLM is not installed/);
++  assert.match(result.output,/Internal service key is missing/);
+@@ -98 +194 @@ test('direct kill switch bypasses cooldown and reveals a permanent launcher erro
+-test('a permanent preflight launcher error fails fast without creating cooldown',t=>{
++test('a missing service capability fails fast without creating cooldown when the gateway is unavailable',t=>{
+@@ -102 +198 @@ test('a permanent preflight launcher error fails fast without creating cooldown'
+-  assert.match(result.output,/LiteLLM is not installed/);
++  assert.match(result.output,/Internal service key is missing/);
+@@ -106 +202,8 @@ test('a permanent preflight launcher error fails fast without creating cooldown'
+-test('a permanent bundled venv import error is a setup failure without cooldown',{skip:process.platform==='win32'},t=>{
++test('the startup fixture explicitly selects a Chat route and its actual gateway dependency', t => {
++  const fixture = state(t);
++  const plan = gatewayPlan(fixture.env);
++  assert.equal(plan.needsGateway, true);
++  assert.deepEqual(plan.services, ['api', 'gateway']);
++});
++
++test('bundled venv setup diagnostics remain visible on degraded startup without seeding cooldown',{skip:process.platform==='win32'},async t=>{
+@@ -110,0 +214 @@ test('a permanent bundled venv import error is a setup failure without cooldown'
++  symlinkSync(path.join(root,'src'),path.join(source,'src'),'dir');
+@@ -113,0 +218,3 @@ test('a permanent bundled venv import error is a setup failure without cooldown'
++  assert.equal(gatewayPlan(env).needsGateway, true);
++  // Credentials are a fatal preflight. A deferred gateway startup diagnostic
++  // does not replace that error, and this early exit must not seed cooldown.
+@@ -116,2 +223 @@ test('a permanent bundled venv import error is a setup failure without cooldown'
+-  assert.match(result.output,/virtual environment is broken/);
+-  assert.match(result.output,/exited with code 1/);
++  assert.match(result.output,/Internal service key is missing/);
+@@ -118,0 +225,6 @@ test('a permanent bundled venv import error is a setup failure without cooldown'
++  // With complete synthetic capabilities, execute the real service boundary
++  // and observe the selected gateway's concrete degraded diagnostic and health.
++  const output = await runDegradedSupervisor(fixture, { env, gatewayError: /gateway unavailable: The LiteLLM virtual environment is broken/ });
++  assert.match(output, /exited with code 1/);
++  assert.doesNotMatch(output, /Internal service key is missing/);
++  assert.equal(existsSync(fixture.record), false);
+@@ -172,2 +283,0 @@ test('the real foreground supervisor reaches its children without changing an ac
+-  const ports = await Promise.all(Array.from({ length: 5 }, () => freePort()));
+-  const [router, gateway, oauth, api, grok] = ports;
+@@ -176,34 +286,3 @@ test('the real foreground supervisor reaches its children without changing an ac
+-  writeFileSync(path.join(fixture.stateDir, 'internal-secret'), 'foreground-synthetic-internal-key\n', { mode: 0o600 });
+-  writeFileSync(path.join(fixture.stateDir, 'caller-secret'), 'foreground-synthetic-caller-key-with-sufficient-length\n', { mode: 0o600 });
+-  const child = spawn(process.execPath, [path.join(root, 'src', 'foreground-start.mjs')], {
+-    cwd: root,
+-    env: {
+-      ...fixture.env, MODEL_ROUTER_LITELLM_BIN: process.execPath,
+-      MODEL_ROUTER_PORT: String(router), MODEL_ROUTER_GATEWAY_PORT: String(gateway),
+-      MODEL_ROUTER_OAUTH_PORT: String(oauth), MODEL_ROUTER_API_PORT: String(api), MODEL_ROUTER_GROK_OAUTH_PORT: String(grok),
+-    },
+-    stdio: ['ignore', 'ignore', 'pipe'],
+-  });
+-  let output = '';
+-  child.stderr.setEncoding('utf8');
+-  child.stderr.on('data', chunk => { output += chunk; });
+-  const exited = new Promise((resolve, reject) => {
+-    child.once('error', reject);
+-    child.once('exit', (code, signal) => resolve({ code, signal }));
+-  });
+-  let timer;
+-  try {
+-    const result = await Promise.race([
+-      exited,
+-      new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`foreground startup did not finish: ${output}`)), 90_000); }),
+-    ]);
+-    assert.equal(result.signal, null, output);
+-    assert.equal(result.code, 1, output);
+-    assert.match(output, /startup failed: LiteLLM gateway exited before becoming healthy/);
+-    assert.doesNotMatch(output, /backing off|foreground-synthetic-(?:internal|caller)-key/);
+-    assert.equal(readFileSync(fixture.record, 'utf8'), original);
+-  } finally {
+-    clearTimeout(timer);
+-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+-    await exited;
+-  }
++  await runDegradedSupervisor(fixture, { entry: 'foreground-start.mjs',
++    env: { ...fixture.env, MODEL_ROUTER_LITELLM_BIN: process.execPath } });
++  assert.equal(readFileSync(fixture.record, 'utf8'), original);
+diff --git a/test/startup-cleanup.test.mjs b/test/startup-cleanup.test.mjs
+--- a/test/startup-cleanup.test.mjs
++++ b/test/startup-cleanup.test.mjs
+@@ -13,0 +14,60 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++function isolatedEnvironment(directory, stateDir) {
++  const runtimeNames = new Set(["PATH", "SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "TEMP", "TMP",
++    "PSModulePath", "SystemDrive", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
++    .map((name) => name.toLowerCase()));
++  const runtime = Object.fromEntries(Object.entries(process.env).filter(([name]) => runtimeNames.has(name.toLowerCase())));
++  const user = path.join(directory, "user");
++  const home = path.join(directory, "codex-home");
++  for (const folder of [user, home, path.join(user, "AppData", "Roaming"), path.join(user, "AppData", "Local")]) {
++    mkdirSync(folder, { recursive: true, mode: 0o700 });
++  }
++  const registry = path.join(directory, "registry.json");
++  writeFileSync(registry, JSON.stringify({ version: 1, providers: [{ id: "custom", displayName: "Fixture custom",
++    kind: "openai-compatible", ownedBy: "fixture", perModelEndpoint: true, authMode: "per-model" }],
++    models: [{ slug: "custom/gateway-fixture", gatewayModel: "gateway-fixture", upstreamModel: "gateway-fixture",
++      provider: "custom", listed: false, endpoint: { protocol: "openai", keyless: true,
++        baseUrl: "http://127.0.0.1:9999/v1" } }] }));
++  writeFileSync(path.join(stateDir, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["custom"] }));
++  return { ...runtime, HOME: user, USERPROFILE: user, CODEX_HOME: home,
++    APPDATA: path.join(user, "AppData", "Roaming"), LOCALAPPDATA: path.join(user, "AppData", "Local"),
++    KIMI_CODE_HOME: path.join(directory, "kimi"), MODEL_ROUTER_STATE_DIR: stateDir, CODEX_ROUTER_STATE_DIR: stateDir,
++    MODEL_ROUTER_REGISTRY: registry, MODEL_ROUTER_USER_MODELS: path.join(stateDir, "user-models.json"),
++    MODEL_ROUTER_GENERIC_PROVIDERS: path.join(stateDir, "generic-providers.json"),
++    CODEX_ROUTER_SOURCE_ROOT: root, CODEX_ROUTER_NO_DISCOVERY: "0", NO_DISCOVERY: "0",
++    MODEL_ROUTER_SHOW_ALL_MODELS: "0", CODEX_ROUTER_SHOW_ALL_MODELS: "0",
++    CODEX_ROUTER_SERVICE_PLATFORM: "test-fixture", CODEX_ROUTER_NATIVE_SESSION_FALLBACK: "0" };
++}
++
++async function waitForDegraded(child, routerPort, readErrors) {
++  const deadline = Date.now() + 30_000;
++  while (Date.now() < deadline) {
++    assert.equal(child.exitCode, null, readErrors());
++    try {
++      const health = await fetch(`http://127.0.0.1:${routerPort}/health`, { signal: AbortSignal.timeout(2_000) });
++      const live = await fetch(`http://127.0.0.1:${routerPort}/health/live`, { signal: AbortSignal.timeout(2_000) });
++      if (health.status === 503 && live.status === 200 && /serving independent routes/.test(readErrors())) {
++        return health.json();
++      }
++    } catch {}
++    await new Promise((resolve) => setTimeout(resolve, 50));
++  }
++  assert.fail(`degraded service did not stay live:\n${readErrors()}`);
++}
++
++async function stopSupervisor(child, readErrors) {
++  if (child.exitCode !== null || child.signalCode !== null) return;
++  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
++  child.send({ type: "model-router:shutdown" });
++  let timer;
++  try {
++    const result = await Promise.race([exited, new Promise((_resolve, reject) => {
++      timer = setTimeout(() => reject(new Error(`IPC shutdown did not finish:\n${readErrors()}`)), 15_000);
++    })]);
++    assert.equal(result.signal, null, readErrors());
++    assert.equal(result.code, 0, readErrors());
++  } finally {
++    clearTimeout(timer);
++    if (child.exitCode === null && child.connected) child.disconnect();
++  }
++}
++
+@@ -33,65 +93 @@ async function portIsClosed(port) {
+-// Startup spawns five children — the three forwarders in parallel, then the
+-// gateway and frontend in sequence — each gated on an HTTP
+-// health probe that backs off from 200 ms to a 2 s cap between refused probes
+-// and widens the probe window itself from 1 s to a 10 s cap. That makes the run
+-// time depend on how fast this machine can fork and schedule processes, not on
+-// the behaviour under test: measured end-to-end at ~1.2 s idle, ~1.5 s under 2x
+-// CPU oversubscription, and ~18.6 s when a concurrent fork storm made spawns
+-// slow enough that live-but-starved servers kept blowing the probe abort. (That
+-// fork-storm figure predates the widening window, which is what stopped those
+-// starved servers being declared dead outright -- but the run time still tracks
+-// machine speed.) A single fixed budget for the whole pipeline therefore races
+-// machine speed, which is why 10 s failed on a busy machine while startup was
+-// working perfectly.
+-//
+-// Progress, not elapsed time, separates "slow" from "stuck": every stage
+-// announces itself on the child's stderr ("[kimi-oauth] listening", the
+-// gateway's spawn error, "startup failed"). Waiting on that observable signal
+-// and failing only once it stops arriving keeps the guard against a hang while
+-// letting a loaded machine take as long as it needs, and the budget no longer
+-// accumulates across stages.
+-//
+-// 30 s is ~2x the worst single-stage silence observed in a run that still
+-// produced the correct result (16.3 s, under the fork storm above). It stays
+-// meaningful because start.mjs self-limits every wait -- 30 s per forwarder,
+-// 300 s for the gateway -- so the only silence this can catch is the gateway's,
+-// and it reports it 270 s sooner than start.mjs would.
+-const STARTUP_STALL_MS = 30_000;
+-
+-// Fails only if the child produces no output at all for STARTUP_STALL_MS and
+-// has not exited. Resolves as soon as it exits, however long that takes.
+-function waitForStartupExit(child, readErrors) {
+-  const started = Date.now();
+-  return new Promise((resolve, reject) => {
+-    let lastOutput = started;
+-    const onProgress = () => {
+-      lastOutput = Date.now();
+-    };
+-    child.stderr.on("data", onProgress);
+-    const finish = () => {
+-      clearInterval(watchdog);
+-      child.stderr.off("data", onProgress);
+-    };
+-    const watchdog = setInterval(() => {
+-      const idleMs = Date.now() - lastOutput;
+-      if (idleMs < STARTUP_STALL_MS) return;
+-      finish();
+-      reject(
+-        new Error(
+-          `startup stalled: no output for ${idleMs} ms after waiting ${Date.now() - started} ms in total; stderr so far:\n${readErrors()}`,
+-        ),
+-      );
+-    }, 250);
+-    child.once("exit", (code, signal) => {
+-      finish();
+-      resolve({ code, signal });
+-    });
+-  });
+-}
+-
+-// The stall watchdog is the real guard and gives a diagnosable message; this
+-// outer timeout only backstops a child that hangs while still chattering. It
+-// has to clear a loaded run (~19 s) plus one full stall window (30 s), so 20 s
+-// was actually below the floor for reporting a stall at all. A passing run is
+-// unaffected -- this bound is only reached when something is already broken.
+-test("startup failure cleans up children and leaves a pending Antigravity proof inactive", { timeout: 120_000 }, async () => {
++test("a degraded gateway preserves independent routes and leaves its pending Antigravity proof inactive", { timeout: 120_000 }, async () => {
+@@ -133 +129 @@ test("startup failure cleans up children and leaves a pending Antigravity proof
+-      ...process.env,
++      ...isolatedEnvironment(rootDir, stateDir),
+@@ -144 +140 @@ test("startup failure cleans up children and leaves a pending Antigravity proof
+-    stdio: ["ignore", "ignore", "pipe"],
++    stdio: ["ignore", "ignore", "pipe", "ipc"],
+@@ -153,4 +149,3 @@ test("startup failure cleans up children and leaves a pending Antigravity proof
+-    const exit = await waitForStartupExit(child, () => errors);
+-    assert.equal(exit.signal, null);
+-    assert.equal(exit.code, 1, errors);
+-    assert.match(errors, /\[model-router\] startup failed/);
++    const health = await waitForDegraded(child, routerPort, () => errors);
++    assert.ok(health.degraded.includes("gateway"));
++    assert.deepEqual(health.executionPlan.services, ["antigravity", "api", "gateway"]);
+@@ -159 +154 @@ test("startup failure cleans up children and leaves a pending Antigravity proof
+-      /startup failed: LiteLLM gateway exited before becoming healthy\./,
++      /dependency unavailable: LiteLLM gateway exited before becoming healthy\./,
+@@ -173 +168,2 @@ test("startup failure cleans up children and leaves a pending Antigravity proof
+-    for (const port of [oauthPort, apiPort, grokOauthPort, antigravityPort]) {
++    await stopSupervisor(child, () => errors);
++    for (const port of [routerPort, oauthPort, apiPort, grokOauthPort, antigravityPort]) {
+@@ -177,2 +173,2 @@ test("startup failure cleans up children and leaves a pending Antigravity proof
+-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+-    rmSync(rootDir, { recursive: true, force: true });
++    try { await stopSupervisor(child, () => errors); }
++    finally { rmSync(rootDir, { recursive: true, force: true }); }
+@@ -203,2 +199 @@ test("the foreground supervisor boots past the Windows service-process record",
+-      ...process.env,
+-      CODEX_HOME: codexHome,
++      ...isolatedEnvironment(rootDir, stateDir),
+@@ -215 +210 @@ test("the foreground supervisor boots past the Windows service-process record",
+-    stdio: ["ignore", "ignore", "pipe"],
++    stdio: ["ignore", "ignore", "pipe", "ipc"],
+@@ -224,3 +219,2 @@ test("the foreground supervisor boots past the Windows service-process record",
+-    const exit = await waitForStartupExit(child, () => errors);
+-    assert.equal(exit.signal, null);
+-    assert.equal(exit.code, 1, errors);
++    const health = await waitForDegraded(child, routerPort, () => errors);
++    assert.ok(health.degraded.includes("gateway"));
+@@ -228 +222 @@ test("the foreground supervisor boots past the Windows service-process record",
+-    assert.match(errors, /startup failed: LiteLLM gateway exited before becoming healthy\./);
++    assert.match(errors, /dependency unavailable: LiteLLM gateway exited before becoming healthy\./);
+@@ -230,2 +224,2 @@ test("the foreground supervisor boots past the Windows service-process record",
+-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+-    rmSync(rootDir, { recursive: true, force: true });
++    try { await stopSupervisor(child, () => errors); }
++    finally { rmSync(rootDir, { recursive: true, force: true }); }
+diff --git a/test/tool-result-recovery.test.mjs b/test/tool-result-recovery.test.mjs
+--- a/test/tool-result-recovery.test.mjs
++++ b/test/tool-result-recovery.test.mjs
+@@ -12 +12 @@ import { acquireFileLock } from "../src/file-lock.mjs";
+-import { ageToolResultsWithRecovery, readRetainedToolResult, retainToolResult, hasLocalReadbackTool, hasVerifiedToolResultReadback, toolResultRecoveryScope, toolResultReadbackTools } from "../src/tool-result-recovery.mjs";
++import { ageToolResultsWithRecovery, readRetainedToolResult, retainToolResult, searchRetainedToolResults, hasLocalReadbackTool, hasVerifiedToolResultReadback, toolResultRecoveryScope, toolResultReadbackTools } from "../src/tool-result-recovery.mjs";
+@@ -30,0 +31,124 @@ async function fixture(t) {
++test("Desktop JSON wrappers preserve readback signature, expiry and scope checks", async t => {
++  const options = await fixture(t);
++  const saved = await retainToolResult(full, options);
++  const proof = readRetainedToolResult(saved.handle, {...options,limit:1});
++  const wrap = text => JSON.stringify({chunk_id:"real-wrapper",exit_code:0,output:text});
++  const nested = [
++    {type:"input_text",text:"Script completed\nOutput:\n"},
++    {type:"input_text",text:wrap(JSON.stringify(proof))},
++  ];
++  const item = {type:"custom_tool_call_output",call_id:"readback",output:nested};
++  assert.equal(hasVerifiedToolResultReadback([item],options.scope,options),true);
++  const batch = {type:"custom_tool_call_output",call_id:"batch",output:[{type:"input_text",text:JSON.stringify({status:"fulfilled",value:JSON.parse(wrap(JSON.stringify(proof)))})}]};
++  assert.equal(hasVerifiedToolResultReadback([batch],options.scope,options),true);
++  assert.equal(hasVerifiedToolResultReadback([item],"different-context",options),false);
++  const forged = structuredClone(item);forged.output[1].text=forged.output[1].text.replace(proof.readbackProof,proof.readbackProof.slice(0,-1)+(proof.readbackProof.endsWith("A")?"B":"A"));
++  assert.equal(hasVerifiedToolResultReadback([forged],options.scope,options),false);
++  assert.equal(hasVerifiedToolResultReadback([item],options.scope,{...options,now:Date.now()+31*60_000}),false);
++});
++
++test("scope search returns exact evidence only from the reference permission scope", async t => {
++  const options=await fixture(t);
++  const reference=await retainToolResult("reference without the requested value",options);
++  const exact="prefix\r\n😀needle-7439\r\nactual original evidence\r\ntail";
++  const saved=await retainToolResult(exact,{...options,callId:"matching"});
++  const foreign=await retainToolResult("needle-7439 FOREIGN PRIVATE RESULT",{...options,scope:"other-thread",callId:"foreign"});
++  const result=searchRetainedToolResults(reference.handle,{...options,find:"needle-7439",limit:2000});
++  assert.equal(result.complete,true);
++  assert.equal(result.matches.length,1);
++  assert.equal(result.matches[0].handle,saved.handle);
++  assert.equal(result.matches[0].text,exact);
++  assert.equal(JSON.stringify(result).includes(foreign.handle),false);
++  assert.equal(JSON.stringify(result).includes("FOREIGN PRIVATE RESULT"),false);
++  assert.equal(hasVerifiedToolResultReadback([{type:"function_call_output",output:JSON.stringify(result)}],options.scope,options),true);
++  const absent=searchRetainedToolResults(reference.handle,{...options,find:"FOREIGN PRIVATE RESULT"});
++  assert.deepEqual(absent.matches,[]);
++  assert.equal(absent.complete,true);
++  const cli=spawnSync(process.execPath,[path.join(root,"src/tool-result-read.mjs"),reference.handle,"--store",options.directory,"--scope-search","--find","needle-7439"],{encoding:"utf8",timeout:20000,windowsHide:true});
++  assert.equal(cli.status,0,cli.stderr);
++  assert.equal(JSON.parse(cli.stdout).matches[0].text,exact);
++  for(const args of [
++    ["--scope-search"],
++    ["--cursor","1"],
++    ["--scope-search","--find","x","--offset","1"],
++    ["--scope-search","--scope-search","--find","x"],
++  ]){
++    const bad=spawnSync(process.execPath,[path.join(root,"src/tool-result-read.mjs"),reference.handle,"--store",options.directory,...args],{encoding:"utf8",timeout:20000,windowsHide:true});
++    assert.notEqual(bad.status,0);
++  }
++});
++
++test("scope search bounds excerpts, detects index changes, and cannot treat corrupt evidence as absent", async t => {
++  const options=await fixture(t);const saved=[];
++  for(let i=0;i<4;i++)saved.push(await retainToolResult(`😀needle-${i}\r\n${"evidence\n".repeat(50)}`,{...options,callId:String(i)}));
++  const first=searchRetainedToolResults(saved[0].handle,{...options,find:"needle",limit:20});
++  assert.equal(first.matches.length,1);
++  assert.equal(first.complete,false);
++  assert.ok(first.matches[0].text.length<=21);
++  const next=searchRetainedToolResults(saved[0].handle,{...options,find:"needle",limit:20,cursor:first.nextCursor,index:first.index});
++  assert.notEqual(next.matches[0].handle,first.matches[0].handle);
++  assert.throws(()=>searchRetainedToolResults(saved[0].handle,{...options,find:"needle",cursor:first.nextCursor,index:"bad-index"}),{code:"search_changed"});
++  await retainToolResult("new entry",{...options,callId:"new-entry"});
++  assert.throws(()=>searchRetainedToolResults(saved[0].handle,{...options,find:"needle",cursor:first.nextCursor,index:first.index}),{code:"search_changed"});
++  writeFileSync(path.join(options.directory,`${saved[1].handle}.result`),"corrupt");
++  const unavailable=searchRetainedToolResults(saved[0].handle,{...options,find:"absent"});
++  assert.equal(unavailable.complete,false);
++  assert.ok(unavailable.unavailable>0);
++  assert.equal(JSON.stringify(unavailable).includes(saved[1].handle),false);
++  assert.throws(()=>searchRetainedToolResults(saved[1].handle,{...options,find:"needle"}),{code:"corrupt"});
++  assert.throws(()=>searchRetainedToolResults(saved[0].handle,{...options,find:"needle",now:Date.now()+20000}),{code:"expired"});
++});
++
++test("opt-in notice enables exact 16KiB recovery without bypassing proof or changing calls", async t => {
++  const options = await fixture(t);
++  const value = `head\n${"distinct audit row\r\n".repeat(1100)}middle-only-evidence-7439\ntail`;
++  assert.ok(Buffer.byteLength(value) > 16384 && Buffer.byteLength(value) < 32768);
++  const input = history(value);
++  const original = JSON.stringify(input);
++  const retain = (text, info) => retainToolResult(text, {...options, ...info});
++  const ordinary = await ageToolResultsWithRecovery(input, {tools, frontier: 0, retain, readbackHint: true});
++  assert.equal(ordinary.input, input, "default 32KiB policy does not qualify this result");
++  const pending = await ageToolResultsWithRecovery(input, {tools, frontier: 0, retain, minBytes: 16384, readbackHint: true});
++  assert.equal(pending.stats.toolResultsAged, 0);
++  assert.ok(pending.input[1].output.startsWith(value));
++  const notice = pending.input.at(-1);
++  assert.equal(notice.role, "developer");
++  assert.match(notice.content[0].text, /--limit 1/u);
++  assert.match(notice.content[0].text, /tool-result-read.mjs/u);
++  assert.equal(JSON.stringify(input), original, "neither history nor call arguments were changed");
++  const filename = readdirSync(options.directory).find(n => n.endsWith(".result"));
++  const proof = readRetainedToolResult(filename.slice(0,-7), {...options,limit: 1});
++  const verified = [...input, {type: "function_call_output",call_id:"reader",output:JSON.stringify(proof)}];
++  const result = await ageToolResultsWithRecovery(verified, {tools, frontier:0, retain, minBytes:16384, readbackHint:true});
++  assert.equal(result.stats.toolResultsAged, 1);
++  assert.equal(result.input.length, verified.length, "a valid proof removes the wire-only notice");
++  assert.equal(result.input[0], input[0]);
++  assert.match(readRetainedToolResult(filename.slice(0,-7), {...options,find:"middle-only-evidence-7439"}).text, /middle-only-evidence-7439/u);
++  for (const inventory of [[], [{type:"function",name:"web_search"}]]) {
++    const denied = await ageToolResultsWithRecovery(input, {tools:inventory,frontier:0,minBytes:16384,readbackHint:true,retain(){assert.fail("no local tool must not archive");}});
++    assert.equal(denied.input,input);
++  }
++  const failed = await ageToolResultsWithRecovery(input, {tools,frontier:0,minBytes:16384,readbackHint:true,retain(){throw Error("disk unavailable");}});
++  assert.equal(failed.input,input,"failed storage cannot inject a readback command or omit text");
++});
++
++test("failed archive probes suppress optional hints and preserve full results", async t => {
++  const options = await fixture(t);
++  const saved = await retainToolResult(full, options);
++  const input = [...history(),
++    {type:"function_call",name:"exec_command",call_id:"failed-reader",arguments:JSON.stringify({cmd:`node tool-result-read.mjs ${saved.handle} --store denied`})},
++    {type:"function_call_output",call_id:"failed-reader",output:JSON.stringify({error:"EACCES"})},
++  ];
++  const result = await ageToolResultsWithRecovery(input,{tools,scope:options.scope,frontier:0,readbackHint:true,retain:(text,info)=>retainToolResult(text,{...options,...info})});
++  assert.equal(result.stats.toolResultsAged,0);
++  assert.equal(result.input.some(x=>x.role==="developer"),false,"permission failure must not force repeated model/tool probes");
++  assert.ok(result.input[1].output.startsWith(full),"failed readback preserves all original bytes");
++});
++
++test("small savings keep the default policy without extra archives or hints", async () => {
++  const input=history("x".repeat(20000));
++  const result=await ageToolResultsWithRecovery(input,{tools,frontier:0,minBytes:16384,readbackHint:true,minSavingsBytes:131072,retain(){assert.fail("small opt-in cannot create an unnecessary archive");}});
++  assert.equal(result.input,input);
++  assert.equal(result.stats.toolResultsAged,0);
++});
++
+@@ -158 +282,4 @@ test("concurrent store contention fails open, then succeeds after release", asyn
+-  const options = await fixture(t);
++  // This checks lock ownership, not elapsed retention time. Real Windows ACL
++  // helpers can outlast the short fixture TTL under load; expiry is exercised
++  // separately with an explicitly advanced clock.
++  const options = { ...await fixture(t), now: Date.now() };

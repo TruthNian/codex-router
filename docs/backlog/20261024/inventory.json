@@ -1399,7 +1399,7 @@
           "pr": 1072,
           "url": "https://github.com/duolahypercho/codex-router/pull/1072",
           "head": "58508b98d72c687252d32a41b488e7d649a7e705",
-          "status": "ci_running",
+          "status": "ci_passed_waiting_merge",
           "backupPr": 24,
           "sourceTopic": "private-writers"
         }
@@ -2315,7 +2315,7 @@
       "pr": 1072,
       "url": "https://github.com/duolahypercho/codex-router/pull/1072",
       "head": "58508b98d72c687252d32a41b488e7d649a7e705",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 24,
       "sourceTopic": "private-writers"
     }

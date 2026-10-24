@@ -67,7 +67,11 @@
       ],
       "branch": "archive/20261024/routed-delivery",
       "archiveCommit": "7c158142bf43bc0e4028d07a6752166feb10d5f8",
-      "prTitle": "archive: Routed failover delivery evidence"
+      "prTitle": "archive: Routed failover delivery evidence",
+      "pr": 8,
+      "url": "https://github.com/TruthNian/codex-router/pull/8",
+      "publishedHead": "7c158142bf43bc0e4028d07a6752166feb10d5f8",
+      "isDraft": true
     },
     {
       "id": "generation-redirect",
@@ -104,7 +108,11 @@
       ],
       "branch": "archive/20261024/generation-redirect",
       "archiveCommit": "24cf3b167f8fd3c6bca25bb8889506babac969c7",
-      "prTitle": "archive: Reject API and vision generation redirects"
+      "prTitle": "archive: Reject API and vision generation redirects",
+      "pr": 9,
+      "url": "https://github.com/TruthNian/codex-router/pull/9",
+      "publishedHead": "24cf3b167f8fd3c6bca25bb8889506babac969c7",
+      "isDraft": true
     },
     {
       "id": "vision-delivery",
@@ -177,7 +185,11 @@
       ],
       "branch": "archive/20261024/vision-delivery",
       "archiveCommit": "3484f6d4d8e14e5dc80d64f433cb1adb25b9c4f0",
-      "prTitle": "archive: Vision retry delivery and completion semantics"
+      "prTitle": "archive: Vision retry delivery and completion semantics",
+      "pr": 10,
+      "url": "https://github.com/TruthNian/codex-router/pull/10",
+      "publishedHead": "3484f6d4d8e14e5dc80d64f433cb1adb25b9c4f0",
+      "isDraft": true
     },
     {
       "id": "direct-responses",
@@ -233,7 +245,11 @@
       ],
       "branch": "archive/20261024/direct-responses",
       "archiveCommit": "87a1d841396c7f5eade26f035d5b921299066a72",
-      "prTitle": "archive: Use direct Responses routes while retaining compatibility"
+      "prTitle": "archive: Use direct Responses routes while retaining compatibility",
+      "pr": 11,
+      "url": "https://github.com/TruthNian/codex-router/pull/11",
+      "publishedHead": "87a1d841396c7f5eade26f035d5b921299066a72",
+      "isDraft": true
     },
     {
       "id": "selected-services",
@@ -323,7 +339,11 @@
       ],
       "branch": "archive/20261024/selected-services",
       "archiveCommit": "07d28ee008b3f6b943f75956aca55d18d1e3a54f",
-      "prTitle": "archive: Start services from the selected execution plan"
+      "prTitle": "archive: Start services from the selected execution plan",
+      "pr": 12,
+      "url": "https://github.com/TruthNian/codex-router/pull/12",
+      "publishedHead": "07d28ee008b3f6b943f75956aca55d18d1e3a54f",
+      "isDraft": true
     },
     {
       "id": "dependency-preparation",
@@ -360,7 +380,11 @@
       ],
       "branch": "archive/20261024/dependency-preparation",
       "archiveCommit": "2e93a7cabff6e98b465164386f92b26ceffeb5d0",
-      "prTitle": "archive: Prepare only selected runtime dependencies"
+      "prTitle": "archive: Prepare only selected runtime dependencies",
+      "pr": 13,
+      "url": "https://github.com/TruthNian/codex-router/pull/13",
+      "publishedHead": "2e93a7cabff6e98b465164386f92b26ceffeb5d0",
+      "isDraft": true
     },
     {
       "id": "doctor-scope",
@@ -434,7 +458,11 @@
       ],
       "branch": "archive/20261024/doctor-scope",
       "archiveCommit": "1e0c2c19a28aebc4589e468b5c4b4c92895bdac6",
-      "prTitle": "archive: Scope doctor to selected provider readiness"
+      "prTitle": "archive: Scope doctor to selected provider readiness",
+      "pr": 14,
+      "url": "https://github.com/TruthNian/codex-router/pull/14",
+      "publishedHead": "1e0c2c19a28aebc4589e468b5c4b4c92895bdac6",
+      "isDraft": true
     },
     {
       "id": "overlay-adoption",
@@ -540,7 +568,11 @@
       ],
       "branch": "archive/20261024/overlay-adoption",
       "archiveCommit": "111ce872d34fad6432daea088a7c444e71a1a216",
-      "prTitle": "archive: Adopt configuration before publishing client models"
+      "prTitle": "archive: Adopt configuration before publishing client models",
+      "pr": 15,
+      "url": "https://github.com/TruthNian/codex-router/pull/15",
+      "publishedHead": "111ce872d34fad6432daea088a7c444e71a1a216",
+      "isDraft": true
     },
     {
       "id": "rollback-budget",
@@ -606,7 +638,11 @@
       ],
       "branch": "archive/20261024/rollback-budget",
       "archiveCommit": "c8cff3e93d4cd12751f9be2e4a1d8a2f7727f82c",
-      "prTitle": "archive: Reserve a separate configuration rollback budget"
+      "prTitle": "archive: Reserve a separate configuration rollback budget",
+      "pr": 16,
+      "url": "https://github.com/TruthNian/codex-router/pull/16",
+      "publishedHead": "c8cff3e93d4cd12751f9be2e4a1d8a2f7727f82c",
+      "isDraft": true
     },
     {
       "id": "installer-publication",
@@ -689,7 +725,11 @@
       ],
       "branch": "archive/20261024/installer-publication",
       "archiveCommit": "0a69602a73e8907e6acfcace9e6f0b7b0757cc80",
-      "prTitle": "archive: Publish installed clients after service readiness"
+      "prTitle": "archive: Publish installed clients after service readiness",
+      "pr": 17,
+      "url": "https://github.com/TruthNian/codex-router/pull/17",
+      "publishedHead": "0a69602a73e8907e6acfcace9e6f0b7b0757cc80",
+      "isDraft": true
     },
     {
       "id": "credential-transactions",
@@ -763,7 +803,11 @@
       ],
       "branch": "archive/20261024/credential-transactions",
       "archiveCommit": "f84811aa71cd60522d65daac9d962214ca3520d4",
-      "prTitle": "archive: Apply credential mutations through adoption transactions"
+      "prTitle": "archive: Apply credential mutations through adoption transactions",
+      "pr": 18,
+      "url": "https://github.com/TruthNian/codex-router/pull/18",
+      "publishedHead": "f84811aa71cd60522d65daac9d962214ca3520d4",
+      "isDraft": true
     },
     {
       "id": "profile-offline",
@@ -803,7 +847,11 @@
       ],
       "branch": "archive/20261024/profile-offline",
       "archiveCommit": "8b8c8e6ebef93f4b80c26cc1fa5ffa6638f2f6de",
-      "prTitle": "archive: Verify offline native profile catalog adoption"
+      "prTitle": "archive: Verify offline native profile catalog adoption",
+      "pr": 19,
+      "url": "https://github.com/TruthNian/codex-router/pull/19",
+      "publishedHead": "8b8c8e6ebef93f4b80c26cc1fa5ffa6638f2f6de",
+      "isDraft": true
     },
     {
       "id": "adopted-catalog",
@@ -836,7 +884,11 @@
       ],
       "branch": "archive/20261024/adopted-catalog",
       "archiveCommit": "c347080e3a64b2f357d244899ad0f14ebd4c2909",
-      "prTitle": "archive: Validate adopted routes before catalog-only refresh"
+      "prTitle": "archive: Validate adopted routes before catalog-only refresh",
+      "pr": 20,
+      "url": "https://github.com/TruthNian/codex-router/pull/20",
+      "publishedHead": "c347080e3a64b2f357d244899ad0f14ebd4c2909",
+      "isDraft": true
     },
     {
       "id": "catalog-events",
@@ -914,7 +966,11 @@
       ],
       "branch": "archive/20261024/catalog-events",
       "archiveCommit": "d6022672412d19ca9514ef4929debee6ffeac686",
-      "prTitle": "archive: Refresh native models from identity events with daily fallback"
+      "prTitle": "archive: Refresh native models from identity events with daily fallback",
+      "pr": 21,
+      "url": "https://github.com/TruthNian/codex-router/pull/21",
+      "publishedHead": "d6022672412d19ca9514ef4929debee6ffeac686",
+      "isDraft": true
     },
     {
       "id": "recovery-readiness",
@@ -996,7 +1052,11 @@
       ],
       "branch": "archive/20261024/recovery-readiness",
       "archiveCommit": "2bc13e25b7bd40149c24d5f68eac28d2a8c47449",
-      "prTitle": "archive: Finalize readiness from current owned children"
+      "prTitle": "archive: Finalize readiness from current owned children",
+      "pr": 22,
+      "url": "https://github.com/TruthNian/codex-router/pull/22",
+      "publishedHead": "2bc13e25b7bd40149c24d5f68eac28d2a8c47449",
+      "isDraft": true
     },
     {
       "id": "service-shutdown",
@@ -1043,7 +1103,11 @@
       ],
       "branch": "archive/20261024/service-shutdown",
       "archiveCommit": "e445f5a19aba31d124627aa5c5b5a94dfd8038a1",
-      "prTitle": "archive: Drain frontend before stopping owned dependencies"
+      "prTitle": "archive: Drain frontend before stopping owned dependencies",
+      "pr": 23,
+      "url": "https://github.com/TruthNian/codex-router/pull/23",
+      "publishedHead": "e445f5a19aba31d124627aa5c5b5a94dfd8038a1",
+      "isDraft": true
     },
     {
       "id": "private-writers",
@@ -1241,7 +1305,11 @@
       ],
       "branch": "archive/20261024/private-writers",
       "archiveCommit": "6eaa21eb98417b090025be9947c303e02ff5e2f2",
-      "prTitle": "archive: Consolidate callers on the private file boundary"
+      "prTitle": "archive: Consolidate callers on the private file boundary",
+      "pr": 24,
+      "url": "https://github.com/TruthNian/codex-router/pull/24",
+      "publishedHead": "6eaa21eb98417b090025be9947c303e02ff5e2f2",
+      "isDraft": true
     },
     {
       "id": "request-timing",
@@ -1296,7 +1364,11 @@
       ],
       "branch": "archive/20261024/request-timing",
       "archiveCommit": "538a870f71bc89f336071228bc688252241c6361",
-      "prTitle": "archive: Record ingress preparation and upstream-header timing"
+      "prTitle": "archive: Record ingress preparation and upstream-header timing",
+      "pr": 25,
+      "url": "https://github.com/TruthNian/codex-router/pull/25",
+      "publishedHead": "538a870f71bc89f336071228bc688252241c6361",
+      "isDraft": true
     },
     {
       "id": "macos-diagnostics",
@@ -1334,7 +1406,11 @@
       ],
       "branch": "archive/20261024/macos-diagnostics",
       "archiveCommit": "1d67615ca896566c1ac84972d80b38c1b26d7d13",
-      "prTitle": "archive: Preserve bounded native macOS launch diagnostics"
+      "prTitle": "archive: Preserve bounded native macOS launch diagnostics",
+      "pr": 26,
+      "url": "https://github.com/TruthNian/codex-router/pull/26",
+      "publishedHead": "1d67615ca896566c1ac84972d80b38c1b26d7d13",
+      "isDraft": true
     },
     {
       "id": "manual-ci-scope",
@@ -1372,7 +1448,11 @@
       ],
       "branch": "archive/20261024/manual-ci-scope",
       "archiveCommit": "5c4e2773b7d6172e158c36616a96288b595593f7",
-      "prTitle": "archive: Select manual runtime CI without reducing automatic coverage"
+      "prTitle": "archive: Select manual runtime CI without reducing automatic coverage",
+      "pr": 27,
+      "url": "https://github.com/TruthNian/codex-router/pull/27",
+      "publishedHead": "5c4e2773b7d6172e158c36616a96288b595593f7",
+      "isDraft": true
     },
     {
       "id": "runtime-fixtures",
@@ -1693,7 +1773,11 @@
       ],
       "branch": "archive/20261024/runtime-fixtures",
       "archiveCommit": "9ec39c14af00ba28f92e61af2652de608a67628c",
-      "prTitle": "archive: Isolate runtime and provider test fixtures"
+      "prTitle": "archive: Isolate runtime and provider test fixtures",
+      "pr": 28,
+      "url": "https://github.com/TruthNian/codex-router/pull/28",
+      "publishedHead": "9ec39c14af00ba28f92e61af2652de608a67628c",
+      "isDraft": true
     },
     {
       "id": "existing-tool-history",
@@ -1866,7 +1950,11 @@
       "coverageRole": "additional extraction, may overlap integrated reconstruction fragments",
       "branch": "archive/20261024/catalog-fixture-isolation",
       "archiveCommit": "5f72f1ba0da9264bed539efc0431cfbfa4e0fa99",
-      "prTitle": "archive: Isolate catalog tests from operator compatibility policy"
+      "prTitle": "archive: Isolate catalog tests from operator compatibility policy",
+      "pr": 29,
+      "url": "https://github.com/TruthNian/codex-router/pull/29",
+      "publishedHead": "5f72f1ba0da9264bed539efc0431cfbfa4e0fa99",
+      "isDraft": true
     },
     {
       "id": "retention-clock",
@@ -1886,7 +1974,11 @@
       "coverageRole": "additional extraction, may overlap integrated reconstruction fragments",
       "branch": "archive/20261024/retention-clock",
       "archiveCommit": "4e33f7f097c361e450e00a5c7e429ca7aa2e0dc3",
-      "prTitle": "archive: Keep the retention contention test clock deterministic"
+      "prTitle": "archive: Keep the retention contention test clock deterministic",
+      "pr": 30,
+      "url": "https://github.com/TruthNian/codex-router/pull/30",
+      "publishedHead": "4e33f7f097c361e450e00a5c7e429ca7aa2e0dc3",
+      "isDraft": true
     },
     {
       "id": "cache-version-metadata",
@@ -1908,7 +2000,11 @@
       "coverageRole": "additional extraction, may overlap integrated reconstruction fragments",
       "branch": "archive/20261024/cache-version-metadata",
       "archiveCommit": "68582a4c7ebd8912a78a6e9a5fcff4315dda03b2",
-      "prTitle": "archive: Persist native catalog client version metadata"
+      "prTitle": "archive: Persist native catalog client version metadata",
+      "pr": 31,
+      "url": "https://github.com/TruthNian/codex-router/pull/31",
+      "publishedHead": "68582a4c7ebd8912a78a6e9a5fcff4315dda03b2",
+      "isDraft": true
     }
   ],
   "coverage": {
@@ -1981,9 +2077,22 @@
     "threadId": "01a0cc31-18bd-7e30-b588-2eebe2cfd351",
     "eighteenItemTurn": "01a128f1-1de8-7780-af15-7ba609758e20",
     "glmThreadId": "01a161c7-b493-74a1-ad24-79e76bc4d31c",
-    "boundaryFile": "work/upstream-pr-series-20261018/later-three-boundaries.json"
+    "boundaryFile": "work/upstream-pr-series-20261018/later-three-boundaries.json",
+    "pagesRead": 8,
+    "turnsRead": 72,
+    "entireCurrentThreadRead": true
   },
   "purpose": "Fork-only archival drafts. Do not merge into personal/main. Re-extract, review and validate each feature against then-current upstream main before proposing it upstream.",
   "baseBranch": "archive/20261024/upstream-base",
-  "indexBranch": "archive/20261024/inventory"
+  "indexBranch": "archive/20261024/inventory",
+  "indexPr": {
+    "isDraft": true,
+    "number": 7,
+    "state": "OPEN",
+    "url": "https://github.com/TruthNian/codex-router/pull/7",
+    "initialPublishedHead": "7477d0367237b7b88cbc29016bcbff1796b0579a"
+  },
+  "initialIndexCommit": "7477d0367237b7b88cbc29016bcbff1796b0579a",
+  "archiveStatus": "24 feature/fix archives plus one inventory PR published and remote heads verified; existing fork PRs 4-6 retained",
+  "promotionGate": "Archive existence does not authorize blind patch application. Inspect actual main, identify a coherent diff, verify every prerequisite merged, review and validate it, then submit one upstream PR after previous CI is stable."
 }

@@ -1959,7 +1959,10 @@
       "publishedHead": "5f72f1ba0da9264bed539efc0431cfbfa4e0fa99",
       "isDraft": true,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1064",
-      "promotionStatus": "ci_passed_waiting_merge"
+      "promotionStatus": "ci_passed_waiting_merge",
+      "prState": "CLOSED",
+      "closedAt": "2026-10-24T13:58:39Z",
+      "closureReason": "Promoted as upstream #1064; exact published head and all applicable CI verified; archival branch retained."
     },
     {
       "id": "retention-clock",
@@ -2009,7 +2012,9 @@
       "pr": 31,
       "url": "https://github.com/TruthNian/codex-router/pull/31",
       "publishedHead": "68582a4c7ebd8912a78a6e9a5fcff4315dda03b2",
-      "isDraft": true
+      "isDraft": true,
+      "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1063",
+      "promotionStatus": "ci_passed_waiting_merge"
     }
   ],
   "coverage": {
@@ -2116,6 +2121,14 @@
       "head": "c5ee2cce428f5deccae0f3d47d371d6c73884385",
       "status": "ci_running",
       "backupPr": 9
+    },
+    "cache-version-metadata": {
+      "topic": "cache-version-metadata",
+      "pr": 1063,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1063",
+      "head": "955645840771efbb0e689d395d753e9168143d19",
+      "status": "ci_passed_waiting_merge",
+      "backupPr": 31
     }
   }
 }

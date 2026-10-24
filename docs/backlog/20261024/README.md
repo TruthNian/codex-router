@@ -97,3 +97,4 @@ Keep this inventory available until every item has an explicit disposition.
 |---|---|---|---|
 | catalog-fixture-isolation | [#1064](https://github.com/duolahypercho/codex-router/pull/1064) | `b9e54fc6b201e68ab5212b279162434561dc8ee7` | ci_passed_waiting_merge |
 | generation-redirect | [#1065](https://github.com/duolahypercho/codex-router/pull/1065) | `c5ee2cce428f5deccae0f3d47d371d6c73884385` | ci_running |
+| cache-version-metadata | [#1063](https://github.com/duolahypercho/codex-router/pull/1063) | `955645840771efbb0e689d395d753e9168143d19` | ci_passed_waiting_merge |

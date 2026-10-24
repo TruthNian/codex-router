@@ -1,0 +1,522 @@
+diff --git a/changelog.d/optional-gateway-install.md b/changelog.d/optional-gateway-install.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/optional-gateway-install.md
+@@ -0,0 +1 @@
++- Install Python and LiteLLM only when a selected route needs the gateway; native and direct Responses deployments now prepare without a Python runtime. Explicit dependency repair still rebuilds both dependency trees.
+diff --git a/src/runtime-dependency-preparation.mjs b/src/runtime-dependency-preparation.mjs
+new file mode 100644
+--- /dev/null
++++ b/src/runtime-dependency-preparation.mjs
+@@ -0,0 +1,123 @@
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++
++import { routerNodeBinary } from "./node-runtime.mjs";
++import { operationDeadlineFromEnvironment, remainingOperationMs,
++  runOperationProcessTree, runProcessTree } from "./process-tree.mjs";
++
++const SELF = fileURLToPath(import.meta.url);
++const REPO_ROOT = path.resolve(path.dirname(SELF), "..");
++const CHILD_ARGUMENT = "--prepare-in-fresh-process";
++export const RUNTIME_DEPENDENCY_PREPARATION_MS = 600_000;
++
++function preparationDeadline(deadline, environment) {
++  return operationDeadlineFromEnvironment(Number.isSafeInteger(deadline)
++    ? { ...environment, CODEX_ROUTER_OPERATION_DEADLINE_MS: String(deadline) } : environment,
++  { timeoutMs: RUNTIME_DEPENDENCY_PREPARATION_MS, maximumMs: RUNTIME_DEPENDENCY_PREPARATION_MS });
++}
++
++export function runtimeDependencyInstallInvocation({ platform = process.platform,
++  sourceRoot = REPO_ROOT, environment = process.env } = {}) {
++  if (platform === "win32") {
++    const shell = environment.SystemRoot
++      ? path.win32.join(environment.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
++      : "powershell.exe";
++    return { command: shell, args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
++      "-File", path.join(sourceRoot, "install.ps1"), "-CheckoutInstall", "-DependenciesOnly", "-Target", "codex"] };
++  }
++  return { command: "sh", args: [path.join(sourceRoot, "bin", "install"), "--dependencies-only"] };
++}
++
++/** Only dependency trees change; installer owns hash verification and repair. */
++export async function prepareRuntimeDependencies({
++  requirements,
++  stepStatus,
++  run = runProcessTree,
++  sourceRoot = REPO_ROOT,
++  environment = process.env,
++  platform = process.platform,
++  signal,
++  deadline,
++} = {}) {
++  const operationDeadline = preparationDeadline(deadline, environment);
++  const status = stepStatus || (await import("./install-plan.mjs")).stepStatus;
++  const required = requirements || (async () => (await import("./runtime-dependency-requirements.mjs"))
++    .runtimeDependencyRequirements());
++  const readStep = (step) => {
++    remainingOperationMs(operationDeadline, signal);
++    const result = status(step, { root: sourceRoot, platform });
++    if (!["skip", "run"].includes(result)) throw new Error("Runtime dependency readiness could not be verified.");
++    return result;
++  };
++  const readRequirements = async () => {
++    remainingOperationMs(operationDeadline, signal);
++    const result = await required();
++    if (typeof result?.needsGateway !== "boolean") throw new Error("Runtime dependency requirements could not be verified.");
++    return result;
++  };
++  // A missing Node tree may prevent registry imports. The dependency-only
++  // installer repairs Node before asking the same route requirement helper.
++  let needsInstall = readStep("node-deps") === "run";
++  let plan;
++  if (!needsInstall) {
++    plan = await readRequirements();
++    needsInstall = plan.needsGateway && readStep("python-deps") === "run";
++  }
++  if (needsInstall) {
++    const invocation = runtimeDependencyInstallInvocation({ platform, sourceRoot, environment });
++    const result = await runOperationProcessTree(invocation.command, invocation.args, {
++      cwd: sourceRoot, env: environment, childEnvironment: { MODEL_ROUTER_TARGET: "codex" },
++      signal, deadline: operationDeadline, run, windowsHide: true,
++    });
++    remainingOperationMs(operationDeadline, signal);
++    if (result?.status !== 0) throw new Error("Required runtime dependencies could not be prepared; model routes were not published.");
++    if (readStep("node-deps") !== "skip") throw new Error("Node dependencies are still missing or outdated after preparation.");
++    plan = await readRequirements();
++    if (plan.needsGateway && readStep("python-deps") !== "skip") {
++      throw new Error("Required gateway dependencies are still missing or outdated after preparation.");
++    }
++  }
++  remainingOperationMs(operationDeadline, signal);
++  return { prepared: true, installed: needsInstall, needsGateway: plan.needsGateway };
++}
++
++/** Registry and selected-route requirements must be loaded after mutation. */
++export async function prepareRuntimeDependenciesFresh({
++  run = runProcessTree,
++  sourceRoot = REPO_ROOT,
++  environment = process.env,
++  executable = routerNodeBinary(environment),
++  signal,
++  deadline,
++} = {}) {
++  const operationDeadline = preparationDeadline(deadline, environment);
++  const result = await runOperationProcessTree(executable, [SELF, CHILD_ARGUMENT], {
++    cwd: sourceRoot, env: environment, childEnvironment: { MODEL_ROUTER_TARGET: "codex" },
++    signal, deadline: operationDeadline, run, encoding: "utf8", windowsHide: true,
++  });
++  if (result?.status !== 0) throw new Error("Required runtime dependencies could not be prepared; model routes were not published.");
++  // Installer progress can precede the final JSON result, but no output from
++  // dependency tooling is forwarded to the caller or included in this result.
++  let prepared;
++  try { prepared = JSON.parse(String(result.stdout || "").trim().split(/\r?\n/).at(-1)); } catch {
++    throw new Error("Runtime dependency preparation returned an invalid result.");
++  }
++  if (prepared?.prepared !== true || typeof prepared.installed !== "boolean" || typeof prepared.needsGateway !== "boolean") {
++    throw new Error("Runtime dependency preparation returned an invalid result.");
++  }
++  return { prepared: true, installed: prepared.installed, needsGateway: prepared.needsGateway };
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === SELF) {
++  if (process.argv[2] !== CHILD_ARGUMENT || process.argv.length !== 3) {
++    console.error(`Usage: node ${path.basename(SELF)} ${CHILD_ARGUMENT}`);
++    process.exitCode = 2;
++  } else {
++    try {
++      process.stdout.write(`${JSON.stringify(await prepareRuntimeDependencies())}\n`);
++    } catch (error) {
++      console.error(error instanceof Error ? error.message : String(error));
++      process.exitCode = 1;
++    }
++  }
++}
+diff --git a/src/setup-shared.mjs b/src/setup-shared.mjs
+--- a/src/setup-shared.mjs
++++ b/src/setup-shared.mjs
+@@ -311 +311 @@ export function configureProvider(provider, { guided, providerKeyCommand }) {
+-  run(process.execPath, [path.join(SOURCE_ROOT, "src", "provider-key.mjs"), provider.id, "set"]);
++  run(process.execPath, [path.join(SOURCE_ROOT, "src", "provider-key.mjs"), provider.id, "set", "--stage"]);
+diff --git a/src/setup.mjs b/src/setup.mjs
+--- a/src/setup.mjs
++++ b/src/setup.mjs
+@@ -431 +431 @@ async function configureProvider(provider) {
+-    run(process.execPath, [path.join(SOURCE_ROOT, "src", "provider-key.mjs"), provider.id, "set"]);
++    run(process.execPath, [path.join(SOURCE_ROOT, "src", "provider-key.mjs"), provider.id, "set", "--stage"]);
+diff --git a/test/runtime-dependency-preparation.test.mjs b/test/runtime-dependency-preparation.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/runtime-dependency-preparation.test.mjs
+@@ -0,0 +1,114 @@
++import assert from "node:assert/strict";
++import path from "node:path";
++import test from "node:test";
++
++import { prepareRuntimeDependencies, prepareRuntimeDependenciesFresh,
++  runtimeDependencyInstallInvocation } from "../src/runtime-dependency-preparation.mjs";
++
++test("native and direct Responses plans never probe or install unused Python", async () => {
++  const calls = [];
++  const result = await prepareRuntimeDependencies({
++    requirements: () => ({ needsGateway: false }),
++    stepStatus: (step) => { calls.push(step); assert.equal(step, "node-deps"); return "skip"; },
++    run: async () => assert.fail("matching Node and unused Python must not invoke an installer"),
++  });
++  assert.deepEqual(calls, ["node-deps"]);
++  assert.deepEqual(result, { prepared: true, installed: false, needsGateway: false });
++});
++
++test("a ready translated plan does not reinstall matching dependency trees", async () => {
++  const calls = [];
++  const result = await prepareRuntimeDependencies({
++    requirements: () => ({ needsGateway: true }),
++    stepStatus: (step) => { calls.push(step); return "skip"; },
++    run: async () => assert.fail("ready runtime must not reinstall"),
++  });
++  assert.deepEqual(calls, ["node-deps", "python-deps"]);
++  assert.equal(result.installed, false);
++});
++
++test("first translated activation prepares missing Python before adoption", async () => {
++  let installed = false;
++  let invocation;
++  const result = await prepareRuntimeDependencies({
++    environment: {}, sourceRoot: "/synthetic/router", platform: "linux",
++    requirements: () => ({ needsGateway: true }),
++    stepStatus: (step) => step === "node-deps" || installed ? "skip" : "run",
++    run: async (command, args, options) => {
++      invocation = { command, args, options };
++      installed = true;
++      return { status: 0 };
++    },
++  });
++  assert.equal(invocation.command, "sh");
++  assert.deepEqual(invocation.args, [path.join("/synthetic/router", "bin", "install"), "--dependencies-only"]);
++  assert.equal(invocation.options.env.MODEL_ROUTER_TARGET, "codex");
++  assert.ok(Number.isSafeInteger(invocation.options.deadline));
++  assert.equal(invocation.options.windowsHide, true);
++  assert.deepEqual(result, { prepared: true, installed: true, needsGateway: true });
++});
++
++test("missing Node repairs before importing route requirements and leaves unused Python alone", async () => {
++  let installed = false;
++  const events = [];
++  await prepareRuntimeDependencies({
++    requirements: () => { assert.equal(installed, true); events.push("requirements"); return { needsGateway: false }; },
++    stepStatus: (step) => { assert.equal(step, "node-deps"); events.push(step); return installed ? "skip" : "run"; },
++    run: async () => { events.push("install"); installed = true; return { status: 0 }; },
++  });
++  assert.deepEqual(events, ["node-deps", "install", "node-deps", "requirements"]);
++});
++
++test("installer failure or unchanged required stamps never become a ready result", async () => {
++  await assert.rejects(prepareRuntimeDependencies({
++    requirements: () => ({ needsGateway: true }),
++    stepStatus: () => "run",
++    run: async () => ({ status: 1, stderr: "SYNTHETIC_SECRET_DO_NOT_RELAY" }),
++  }), (error) => /could not be prepared/.test(error.message) && !error.message.includes("SYNTHETIC_SECRET"));
++  await assert.rejects(prepareRuntimeDependencies({
++    requirements: () => ({ needsGateway: true }),
++    stepStatus: (step) => step === "node-deps" ? "skip" : "run",
++    run: async () => ({ status: 0 }),
++  }), /gateway dependencies are still missing/);
++});
++
++test("ambiguous dependency metadata and cancellation fail before installation", async () => {
++  await assert.rejects(prepareRuntimeDependencies({ stepStatus: () => "unknown",
++    run: async () => assert.fail("unknown readiness cannot install blindly") }), /readiness could not be verified/);
++  await assert.rejects(prepareRuntimeDependencies({ stepStatus: () => "skip", requirements: () => ({}),
++    run: async () => assert.fail("unknown requirements cannot install blindly") }), /requirements could not be verified/);
++  const aborted = new AbortController();
++  aborted.abort(new Error("synthetic dependency cancellation"));
++  await assert.rejects(prepareRuntimeDependencies({ signal: aborted.signal,
++    stepStatus: () => assert.fail("aborted preparation cannot inspect runtime"),
++  }), /synthetic dependency cancellation/);
++});
++
++test("Windows dependency preparation uses a hidden noninteractive checkout-only installer", () => {
++  const invocation = runtimeDependencyInstallInvocation({ platform: "win32", sourceRoot: "C:\\synthetic\\router",
++    environment: { SystemRoot: "C:\\Windows" } });
++  assert.equal(invocation.command, "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
++  assert.ok(invocation.args.includes("-NonInteractive"));
++  assert.deepEqual(invocation.args.slice(-4), ["-CheckoutInstall", "-DependenciesOnly", "-Target", "codex"]);
++  assert.equal(invocation.args.includes("-ForceDeps"), false);
++});
++
++test("fresh dependency preparation preserves bounded owner cleanup and validates its result", async () => {
++  let invocation;
++  const deadline = Date.now() + 60_000;
++  const result = await prepareRuntimeDependenciesFresh({ executable: "/runtime/node", sourceRoot: "/synthetic/router",
++    environment: {}, deadline,
++    run: async (command, args, options) => {
++      invocation = { command, args, options };
++      return { status: 0, stdout: '{"prepared":true,"installed":false,"needsGateway":false}\n' };
++    },
++  });
++  assert.equal(invocation.command, "/runtime/node");
++  assert.equal(invocation.args[1], "--prepare-in-fresh-process");
++  assert.equal(invocation.options.deadline, deadline);
++  assert.equal(invocation.options.env.CODEX_ROUTER_OPERATION_DEADLINE_MS, String(deadline - 10_000));
++  assert.deepEqual(result, { prepared: true, installed: false, needsGateway: false });
++  await assert.rejects(prepareRuntimeDependenciesFresh({
++    run: async () => ({ status: 0, stdout: '{"prepared":true}\n' }),
++  }), /invalid result/);
++});
+diff --git a/test/runtime-dependency-requirements.test.mjs b/test/runtime-dependency-requirements.test.mjs
+--- a/test/runtime-dependency-requirements.test.mjs
++++ b/test/runtime-dependency-requirements.test.mjs
+@@ -3 +3 @@ import { spawnSync } from "node:child_process";
+-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+@@ -230,0 +231,250 @@ test("pending Antigravity proof gets its adoption listener before enablement; ga
++function windowsDependencies({ gateway = "unused", pythonStep = "run", force = false,
++  mode = "dependencies", serviceExit = 0, healthExit = 0 } = {}) {
++  const staged = fixture();
++  const checkout = path.join(staged.directory, "checkout");
++  const shim = path.join(staged.directory, "shims");
++  const calls = path.join(staged.directory, "calls.log");
++  try {
++    mkdirSync(checkout, { recursive: true });
++    mkdirSync(shim, { recursive: true });
++    cpSync(path.join(root, "install.ps1"), path.join(checkout, "install.ps1"));
++    writeFileSync(path.join(checkout, "package.json"), '{"name":"codex-model-router"}\n');
++    for (const client of ["dsh", "gemini", "cursor", "claude", "openclaw"]) {
++      writeFileSync(path.join(staged.env.MODEL_ROUTER_STATE_DIR, `${client}-models.json`), "{}\n");
++    }
++    writeFileSync(path.join(shim, "node.cmd"), [
++      "@echo off", 'echo node %*>>"%FIXTURE_CALLS%"',
++      'if /I "%~1"=="-p" (echo 24.0.0& exit /b 0)',
++      'if /I "%~1"=="src/compatibility-layer-state.mjs" (echo required& exit /b 0)',
++      'if /I "%~1"=="src/runtime-dependency-requirements.mjs" (echo %FIXTURE_GATEWAY%& exit /b 0)',
++      'if /I "%~1"=="src/install-plan.mjs" if /I "%~2"=="status" (',
++      '  if /I "%~3"=="python-deps" (echo %FIXTURE_PYTHON_STEP%& exit /b 0)',
++      "  echo skip", "  exit /b 0", ")",
++      'if /I "%~1"=="src/service.mjs" if /I "%~2"=="install" exit /b %FIXTURE_SERVICE_EXIT%',
++      'if /I "%~1"=="src/wait-health.mjs" exit /b %FIXTURE_HEALTH_EXIT%',
++      'if /I "%~2"=="status" echo {"mode":"native","installed":false}',
++      "exit /b 0", "",
++    ].join("\r\n"));
++    for (const tool of ["npm", "uv"]) writeFileSync(path.join(shim, `${tool}.cmd`),
++      `@echo off\r\necho ${tool} %*>>"%FIXTURE_CALLS%"\r\nexit /b 0\r\n`);
++    const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
++      path.join(checkout, "install.ps1"), "-CheckoutInstall",
++      ...(mode === "dependencies" ? ["-DependenciesOnly"] : mode === "prepare" ? ["-PrepareOnly"] : []),
++      ...(force ? ["-ForceDeps"] : [])], {
++      cwd: checkout, encoding: "utf8", timeout: 30_000,
++      env: { ...staged.env, PATH: `${shim};${process.env.PATH}`, FIXTURE_CALLS: calls,
++        FIXTURE_GATEWAY: gateway, FIXTURE_PYTHON_STEP: pythonStep,
++        FIXTURE_SERVICE_EXIT: String(serviceExit), FIXTURE_HEALTH_EXIT: String(healthExit) },
++    });
++    const invoked = readFileSync(calls, "utf8").replace(/\\/g, "/");
++    return { result, invoked };
++  } finally {
++    rmSync(staged.directory, { recursive: true, force: true });
++  }
++}
++
++test("Windows dependencies-only Responses install performs no Python or state work", {
++  skip: process.platform !== "win32",
++}, () => {
++  const { result, invoked } = windowsDependencies();
++  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
++  assert.match(invoked, /runtime-dependency-requirements\.mjs --gateway-required/);
++  assert.doesNotMatch(invoked, /python-deps|venv-home|uv |provider-selection|secret|catalog|service|config-manager|install-manifest/);
++});
++
++test("Windows gateway preparation keeps hash-verified LiteLLM installation", {
++  skip: process.platform !== "win32",
++}, () => {
++  const { result, invoked } = windowsDependencies({ gateway: "required" });
++  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
++  assert.match(invoked, /status python-deps/);
++  assert.match(invoked, /uv pip install --python .* --require-hashes -r requirements\/python\.txt/);
++  assert.match(invoked, /record python-deps/);
++  assert.doesNotMatch(invoked, /provider-selection|secret|catalog|service|config-manager|install-manifest/);
++});
++
++test("Windows explicit repair rebuilds both trees even for Responses-only routes", {
++  skip: process.platform !== "win32",
++}, () => {
++  const { result, invoked } = windowsDependencies({ force: true });
++  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
++  assert.match(invoked, /npm ci --omit=dev/);
++  assert.match(invoked, /uv pip install .*--require-hashes/);
++  assert.doesNotMatch(invoked, /runtime-dependency-requirements/);
++});
++
++test("Windows malformed dependency query fails before provisioning or publication", {
++  skip: process.platform !== "win32",
++}, () => {
++  const { result, invoked } = windowsDependencies({ gateway: "unexpected" });
++  assert.notEqual(result.status, 0);
++  assert.doesNotMatch(invoked, /python-deps|uv |catalog|service|config-manager/);
++});
++
++test("Windows PrepareOnly never publishes companion routes or catalog", { skip: process.platform !== "win32" }, () => {
++  const { result, invoked } = windowsDependencies({ mode: "prepare" });
++  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
++  assert.doesNotMatch(invoked, /catalog\.mjs|config-manager\.mjs (?:enable|install)|service\.mjs install/);
++});
++
++test("Windows full install adopts a healthy service before every client publication", { skip: process.platform !== "win32" }, () => {
++  const { result, invoked } = windowsDependencies({ mode: "full" });
++  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
++  const health = invoked.indexOf("src/wait-health.mjs");
++  assert.ok(invoked.indexOf("install-manifest.mjs record") < invoked.indexOf("service.mjs install"));
++  for (const marker of ["catalog.mjs", "dsh-config-manager.mjs install", "gemini-config-manager.mjs install",
++    "cursor-config-manager.mjs install", "claude-code-config-manager.mjs install",
++    "openclaw-config-manager.mjs install", "config-manager.mjs enable"]) {
++    assert.ok(health !== -1 && invoked.indexOf(marker) > health, `not published after readiness: ${marker}`);
++  }
++});
++
++for (const [failure, options] of [["service installation", { serviceExit: 17 }], ["readiness", { healthExit: 18 }],
++  ["cold-start timeout", { serviceExit: 75 }]]) {
++  test(`Windows full install does not publish clients after failed ${failure}`, { skip: process.platform !== "win32" }, () => {
++    const { result, invoked } = windowsDependencies({ mode: "full", ...options });
++    assert.notEqual(result.status, 0);
++    assert.doesNotMatch(invoked, /catalog\.mjs|config-manager\.mjs (?:enable|install)/);
++    if (options.serviceExit === 75) assert.doesNotMatch(invoked, /service\.mjs uninstall/);
++  });
++}
++
++test("POSIX dependencies-only exits before state writers and preserves gateway hash commands", () => {
++  const source = readFileSync(path.join(root, "bin", "install"), "utf8");
++  assert.ok(source.indexOf('if [ "$dependencies_only" = true ]; then\n  echo "Runtime dependencies') <
++    source.indexOf("node src/secret.mjs ensure"));
++  assert.match(source, /if \[ "\$gateway_required" = unused \]; then[\s\S]*else\s*case "\$\(install_step python-deps\)"/);
++  assert.match(source, /uv pip install --python \.venv\/bin\/python --require-hashes -r requirements\/python\.txt/);
++  assert.match(source, /\.venv\/bin\/python -m pip install --require-hashes -r requirements\/python\.txt/);
++});
++
++function posixShell() {
++  // Windows resolves the executable before the shell can interpret the fixture's
++  // POSIX PATH. Retain an absolute Git shell across that PATH replacement.
++  if (process.platform === "win32") {
++    const git = spawnSync("git", ["--exec-path"], { encoding: "utf8" });
++    if (git.status === 0) {
++      const bundled = path.resolve(git.stdout.trim(), "../../..", "bin", "sh.exe");
++      if (existsSync(bundled)) return bundled;
++    }
++    return null;
++  }
++  return spawnSync("sh", ["-c", "exit 0"], { stdio: "ignore" }).status === 0 ? "sh" : null;
++}
++
++const shell = posixShell();
++
++function enableFixture({ existing = false, serviceExit = 0, publicationExit = 0, healthExit = 0,
++  entry = "enable", args = [] } = {}) {
++  const staged = fixture();
++  const checkout = path.join(staged.directory, "checkout");
++  const runtime = path.join(staged.directory, "runtime");
++  const calls = path.join(staged.directory, "calls.log");
++  try {
++    mkdirSync(path.join(checkout, "bin"), { recursive: true });
++    mkdirSync(runtime, { recursive: true });
++    for (const script of ["enable", "install"]) cpSync(path.join(root, "bin", script), path.join(checkout, "bin", script));
++    for (const client of ["dsh", "gemini", "cursor", "claude", "openclaw"]) {
++      writeFileSync(path.join(staged.env.MODEL_ROUTER_STATE_DIR, `${client}-models.json`), "{}\n");
++    }
++    writeFileSync(path.join(runtime, "node"), `#!/bin/sh
++printf '%s\\n' "$*" >>"$FIXTURE_CALLS"
++case "\${1:-}" in
++  src/install-plan.mjs) [ "\${2:-}" = status ] && printf 'skip\\n'; exit 0 ;;
++  src/compatibility-layer-state.mjs) printf 'required\\n'; exit 0 ;;
++  src/runtime-dependency-requirements.mjs) printf 'unused\\n'; exit 0 ;;
++  src/wait-health.mjs) exit "$FIXTURE_HEALTH_EXIT" ;;
++  src/service.mjs)
++    case "\${2:-}" in
++      status) printf '{"installed": %s}\\n' "$FIXTURE_EXISTING" ;;
++      install) exit "$FIXTURE_SERVICE_EXIT" ;;
++    esac ;;
++  src/config-manager.mjs)
++    case "\${2:-}" in
++      status) [ "$FIXTURE_EXISTING" = true ] && printf '{"mode": "router"}\\n' || printf '{"mode": "native"}\\n' ;;
++      enable) exit "$FIXTURE_PUBLICATION_EXIT" ;;
++    esac ;;
++esac
++exit 0
++`, { mode: 0o755 });
++    writeFileSync(path.join(runtime, "npm"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
++    writeFileSync(path.join(runtime, "uname"), "#!/bin/sh\nprintf 'Linux\\n'\n", { mode: 0o755 });
++    const unixPath = (value) => process.platform === "win32"
++      ? value.replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_match, letter) => `/${letter.toLowerCase()}`)
++      : value;
++    const result = spawnSync(shell, ["-c", 'PATH="$FIXTURE_RUNTIME:/usr/bin:/bin"; export PATH; exec "$FIXTURE_ENTRY" "$@"', "fixture", ...args], {
++      cwd: checkout, encoding: "utf8", timeout: 30_000,
++      env: { ...staged.env, PATH: `${unixPath(runtime)}:/usr/bin:/bin`, MODEL_ROUTER_TARGET: "codex",
++        FIXTURE_CALLS: unixPath(calls), FIXTURE_EXISTING: String(existing), FIXTURE_SERVICE_EXIT: String(serviceExit),
++        FIXTURE_PUBLICATION_EXIT: String(publicationExit), FIXTURE_HEALTH_EXIT: String(healthExit),
++        FIXTURE_RUNTIME: unixPath(runtime), FIXTURE_ENTRY: unixPath(path.join(checkout, "bin", entry)) },
++    });
++    return { result, invoked: existsSync(calls) ? readFileSync(calls, "utf8") : "" };
++  } finally {
++    rmSync(staged.directory, { recursive: true, force: true });
++  }
++}
++
++test("enable prepares dependencies and reaches readiness before publishing routes", { skip: !shell }, () => {
++  const { result, invoked } = enableFixture();
++  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
++  assert.ok(invoked.indexOf("provider-selection.mjs ensure-configured") < invoked.indexOf("install-plan.mjs status node-deps"));
++  assert.ok(invoked.indexOf("install-plan.mjs status node-deps") < invoked.indexOf("service.mjs install"));
++  assert.ok(invoked.indexOf("wait-health.mjs") < invoked.indexOf("catalog.mjs"));
++  assert.ok(invoked.indexOf("wait-health.mjs") < invoked.indexOf("config-manager.mjs enable"));
++  assert.doesNotMatch(invoked, /python-deps|litellm-config/);
++});
++
++test("failed enable preparation preserves pre-existing service and client config", { skip: !shell }, () => {
++  const { result, invoked } = enableFixture({ existing: true, serviceExit: 17 });
++  assert.equal(result.status, 17, `${result.stdout}\n${result.stderr}`);
++  assert.doesNotMatch(invoked, /catalog\.mjs|config-manager\.mjs (?:enable|disable)|service\.mjs uninstall/);
++});
++
++test("failed first enable removes only the service it just created", { skip: !shell }, () => {
++  const { result, invoked } = enableFixture({ serviceExit: 17 });
++  assert.equal(result.status, 17);
++  assert.match(invoked, /service\.mjs uninstall/);
++  assert.doesNotMatch(invoked, /config-manager\.mjs (?:enable|disable)|catalog\.mjs/);
++});
++
++test("failed publication does not disable an existing client or uninstall its service", { skip: !shell }, () => {
++  const { result, invoked } = enableFixture({ existing: true, publicationExit: 18 });
++  assert.equal(result.status, 18);
++  assert.doesNotMatch(invoked, /config-manager\.mjs disable|service\.mjs uninstall/);
++});
++
++test("enable readiness timeout preserves its starting service without publishing", { skip: !shell }, () => {
++  const { result, invoked } = enableFixture({ serviceExit: 75 });
++  assert.equal(result.status, 75);
++  assert.doesNotMatch(invoked, /catalog\.mjs|config-manager\.mjs (?:enable|disable)|service\.mjs uninstall/);
++});
++
++test("POSIX PrepareOnly never publishes companion routes or catalog", { skip: !shell }, () => {
++  const { result, invoked } = enableFixture({ entry: "install", args: ["--prepare-only"] });
++  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
++  assert.doesNotMatch(invoked, /catalog\.mjs|config-manager\.mjs (?:enable|install)|service\.mjs install/);
++});
++
++test("POSIX full install adopts a healthy service before every client publication", { skip: !shell }, () => {
++  const { result, invoked } = enableFixture({ entry: "install" });
++  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
++  const health = invoked.indexOf("src/wait-health.mjs");
++  assert.ok(invoked.indexOf("install-manifest.mjs record") < invoked.indexOf("service.mjs install"));
++  for (const marker of ["catalog.mjs", "dsh-config-manager.mjs install", "gemini-config-manager.mjs install",
++    "cursor-config-manager.mjs install", "claude-code-config-manager.mjs install",
++    "openclaw-config-manager.mjs install", "config-manager.mjs enable"]) {
++    assert.ok(health !== -1 && invoked.indexOf(marker) > health, `not published after readiness: ${marker}`);
++  }
++});
++
++for (const [failure, options] of [["service installation", { serviceExit: 17 }], ["readiness", { healthExit: 18 }],
++  ["cold-start timeout", { serviceExit: 75 }]]) {
++  test(`POSIX full install does not publish clients after failed ${failure}`, { skip: !shell }, () => {
++    const { result, invoked } = enableFixture({ entry: "install", ...options });
++    assert.notEqual(result.status, 0);
++    assert.doesNotMatch(invoked, /catalog\.mjs|config-manager\.mjs (?:enable|install)/);
++    if (options.serviceExit === 75) assert.doesNotMatch(invoked, /service\.mjs uninstall/);
++  });
++}
++

@@ -1,0 +1,464 @@
+diff --git a/src/router.mjs b/src/router.mjs
+--- a/src/router.mjs
++++ b/src/router.mjs
+@@ -1704,4 +1725,2 @@ async function healthPayload() {
+-    oauth,
+-    api,
+-    grokOauth,
+-    gateway,
++    executionPlan: adoptedExecutionPlan,
++    ...dependencies,
+@@ -2042,19 +2061,2 @@ agentPayloadCachePurgeTimer.unref?.();
+-// Periodically refresh the native account catalog, compare it with the last
+-// capture, and republish changes. Codex stops updating models_cache.json while
+-// model_catalog_json points at the router, so the refresh cannot depend on
+-// Codex rewriting that file itself.
+-const nativeCatalogDriftCheckTimer = setInterval(
+-  async () => {
+-    try {
+-      const { republishOnNativeDrift } = await import("./native-catalog-drift.mjs");
+-      await republishOnNativeDrift();
+-    } catch (error) {
+-      // Drift check is best-effort; log but don't crash the router
+-      if (!String(error.message).includes("Native catalog drift detected")) {
+-        console.error(`[codex-router] Periodic native drift check failed: ${error.message}`);
+-      }
+-    }
+-  },
+-  5 * 60_000, // Every 5 minutes
+-);
+-nativeCatalogDriftCheckTimer.unref?.();
++// The supervisor owns catalog observation and its daily fallback. A second
++// scheduler in this child would multiply refreshes and ignore that policy.
+diff --git a/src/vision-bridge.mjs b/src/vision-bridge.mjs
+--- a/src/vision-bridge.mjs
++++ b/src/vision-bridge.mjs
+@@ -0,0 +1 @@
++import { rejectGenerationRedirect } from "./generation-redirect.mjs";
+@@ -5,0 +7,4 @@ import { cooldownUntil, parseRateLimitHeaders } from "./rate-limit-headers.mjs";
++import {
++  isRetryableTransportError, NATIVE_RETRY_POLICY, sleep, transportDeliveryState,
++} from "./upstream-retry.mjs";
++import { PROVIDER_DELIVERY_STATE_HEADER, providerTransportDeliveryState } from "./transport-failure.mjs";
+@@ -896 +901 @@ function responsesBody(engine, imageUrl, { stream = false, effort, question = ""
+-function describeRequest(engine, imageUrl, gatewayBase, gatewayHeaders, nativeCall, effort, question = "") {
++function describeRequest(engine, imageUrl, gatewayBase, gatewayHeaders, nativeCall, effort, question = "", responsesTarget) {
+@@ -943 +948 @@ function describeRequest(engine, imageUrl, gatewayBase, gatewayHeaders, nativeCa
+-    url: `${gatewayBase}/responses`,
++    url: responsesTarget ?? `${gatewayBase}/responses`,
+@@ -949,7 +954,5 @@ function describeRequest(engine, imageUrl, gatewayBase, gatewayHeaders, nativeCa
+-// A read that fails once is not a read that cannot be done. The engine is a
+-// rate-limited account on the other side of a network, so 429s, 502s and reset
+-// connections happen -- and losing that image for the whole turn means the
+-// operator pastes a screenshot and gets told it could not be read, for a reason
+-// that would have gone away in a second. Everything here is a *transient*
+-// answer: a refusal (401, 403, 404) or a bad request is not retried, because a
+-// second identical call buys the identical refusal.
++// A vision read is a generation POST too. No description reaching the caller
++// does not establish that the engine never executed it. Retry positive
++// pre-send failures; ambiguous transport/status failures need the same explicit
++// availability policy as ordinary native turns. Observed empty completions and
++// short rate-limit refusals retain their separate bounded repair contracts.
+@@ -962,7 +964,0 @@ function isTransientStatus(status) {
+-// A timeout is deliberately *not* transient. The per-attempt budget is already
+-// two minutes; spending another two on the same slow engine turns one late
+-// answer into a turn that never comes back.
+-function isTransientError(error) {
+-  return !["TimeoutError", "AbortError"].includes(error?.name);
+-}
+-
+@@ -970 +966 @@ export class VisionUpstreamError extends Error {
+-  constructor(message, { status, failureKind, cooldownUntil: until, retryable = false } = {}) {
++  constructor(message, { status, failureKind, cooldownUntil: until, retryable = false, deliveryState } = {}) {
+@@ -976,0 +973 @@ export class VisionUpstreamError extends Error {
++    this.deliveryState = deliveryState;
+@@ -990,0 +988 @@ export async function describeImage({
++  responsesTarget,
+@@ -998,0 +997,2 @@ export async function describeImage({
++  deliveryPolicy = NATIVE_RETRY_POLICY,
++  trustedTransportResponse = false,
+@@ -1003,3 +1003 @@ export async function describeImage({
+-      await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt - 1]));
+-      // The caller went away between attempts; there is nobody to read for.
+-      if (signal?.aborted) break;
++      await sleep(retryDelaysMs[attempt - 1], signal);
+@@ -1006,0 +1005,2 @@ export async function describeImage({
++    // A departing caller does not wait out backoff or start another paid read.
++    signal?.throwIfAborted();
+@@ -1011,0 +1012 @@ export async function describeImage({
++        responsesTarget,
+@@ -1018,0 +1020,2 @@ export async function describeImage({
++        deliveryPolicy,
++        trustedTransportResponse,
+@@ -1032,0 +1036 @@ async function attemptDescribe({
++  responsesTarget,
+@@ -1039,0 +1044,2 @@ async function attemptDescribe({
++  deliveryPolicy,
++  trustedTransportResponse,
+@@ -1041 +1047 @@ async function attemptDescribe({
+-  const request = describeRequest(engine, imageUrl, gatewayBase, headers, nativeCall, effort, question);
++  const request = describeRequest(engine, imageUrl, gatewayBase, headers, nativeCall, effort, question, responsesTarget);
+@@ -1046,0 +1053 @@ async function attemptDescribe({
++      redirect: "manual",
+@@ -1050,0 +1058 @@ async function attemptDescribe({
++    await rejectGenerationRedirect(upstream);
+@@ -1054,2 +1062,3 @@ async function attemptDescribe({
+-    // it with something tidier would throw that away. It is still retried --
+-    // a server that is restarting answers the second ask.
++    // it with something tidier would throw that away. A reset may come after
++    // the complete POST was executed, so wording alone cannot permit replay.
++    if (error?.name === "AbortError") throw error;
+@@ -1057 +1066,3 @@ async function attemptDescribe({
+-      throw new Error(`${engine.displayName || engine.slug} took too long to read it`);
++      throw new VisionUpstreamError(`${engine.displayName || engine.slug} took too long to read it`, {
++        deliveryState: "possibly_sent",
++      });
+@@ -1060,2 +1071,15 @@ async function attemptDescribe({
+-    if (isTransientError(error)) throw new TransientVisionError(message);
+-    throw new Error(message);
++    const deliveryState = transportDeliveryState(error);
++    if (isRetryableTransportError(error) &&
++        (deliveryState === "not_sent" || deliveryPolicy === "availability")) {
++      throw new TransientVisionError(message, { deliveryState });
++    }
++    throw new VisionUpstreamError(message, { deliveryState });
++  }
++  let bytes;
++  try {
++    bytes = Buffer.from(await upstream.arrayBuffer());
++  } catch (error) {
++    if (error?.name === "AbortError") throw error;
++    throw new VisionUpstreamError(`${engine.displayName || engine.slug} stopped partway through reading it`, {
++      deliveryState: "response_started",
++    });
+@@ -1063 +1086,0 @@ async function attemptDescribe({
+-  const bytes = Buffer.from(await upstream.arrayBuffer());
+@@ -1065 +1088,3 @@ async function attemptDescribe({
+-    throw new Error(`${engine.displayName || engine.slug} returned an oversized response`);
++    throw new VisionUpstreamError(`${engine.displayName || engine.slug} returned an oversized response`, {
++      deliveryState: "response_started",
++    });
+@@ -1073,0 +1099,4 @@ async function attemptDescribe({
++    const transportState = !engine.native && !engine.local && trustedTransportResponse
++      ? providerTransportDeliveryState(bodyText, {
++          trustedDeliveryState: upstream.headers.get(PROVIDER_DELIVERY_STATE_HEADER),
++        }) : undefined;
+@@ -1078,0 +1108 @@ async function attemptDescribe({
++      deliveryState: transportState ?? ([400, 401, 403, 404, 429].includes(upstream.status) ? "rejected" : "response_started"),
+@@ -1082,0 +1113 @@ async function attemptDescribe({
++      (upstream.status === 429 || deliveryPolicy === "availability" || transportState === "not_sent") &&
+@@ -1091,3 +1122,15 @@ async function attemptDescribe({
+-    text = request.stream
+-      ? streamedResponseText(bytes.toString("utf8"))
+-      : responseText(JSON.parse(bytes.toString("utf8")));
++    if (request.stream) {
++      text = streamedResponseText(bytes.toString("utf8"));
++    } else {
++      const payload = JSON.parse(bytes.toString("utf8"));
++      const responsesShape = payload?.object === "response" || Array.isArray(payload?.output) ||
++        typeof payload?.output_text === "string";
++      const status = typeof payload?.status === "string" ? payload.status : undefined;
++      // The buffered Responses contract has the same terminal verdict as SSE.
++      // A declared failure is not a completed empty reply to repair, and its
++      // partial text must never become apparently complete image evidence.
++      if (payload?.error || (responsesShape && status !== undefined && status !== "completed")) {
++        throw new VisionStreamError("the reader's buffered response failed before it finished");
++      }
++      text = responseText(payload);
++    }
+@@ -1097 +1140 @@ async function attemptDescribe({
+-    throw new Error(
++    throw new VisionUpstreamError(
+@@ -1100,0 +1144 @@ async function attemptDescribe({
++      { deliveryState: "response_started" },
+@@ -1107,0 +1152 @@ async function attemptDescribe({
++      { deliveryState: "completed" },
+diff --git a/test/vision-bridge-e2e.test.mjs b/test/vision-bridge-e2e.test.mjs
+--- a/test/vision-bridge-e2e.test.mjs
++++ b/test/vision-bridge-e2e.test.mjs
+@@ -375,3 +375,4 @@ test("one image is bought once per question asked, never once per turn", async (
+-    // read, on purpose -- it is the only way to answer it. The bound is a
+-    // difference rather than an absolute, because carrying an image also costs
+-    // a fixed amount that has nothing to do with the engine.
++    // read, on purpose -- it is the only way to answer it. Record latency as a
++    // measurement; scheduling under parallel load can exceed the reader delay.
++    // The independent cost oracle is whether another upstream read occurred.
++    const readsBeforeRepeat = upstreams.state.visionRequests.length;
+@@ -390,5 +391,2 @@ test("one image is bought once per question asked, never once per turn", async (
+-    assert.ok(
+-      asked - repeated.ms >= VISION_DELAY_MS * 0.5,
+-      `a repeated question (${repeated.ms.toFixed(0)}ms) did not visibly skip the ` +
+-        `${VISION_DELAY_MS}ms read that a new one (${asked.toFixed(0)}ms) pays`,
+-    );
++    assert.equal(upstreams.state.visionRequests.length, readsBeforeRepeat,
++      "a repeated question must not buy another upstream read");
+@@ -437,2 +435,2 @@ test("a failed vision read degrades to a stated failure and the turn still compl
+-    // A 500 is transient, so the read was asked for again before the image was
+-    // written off: one attempt plus two retries.
++    // A 500 can follow an executed generation POST. The default policy does
++    // not silently replay that image against the same engine.
+@@ -440 +438 @@ test("a failed vision read degrades to a stated failure and the turn still compl
+-    assert.equal(upstreams.state.visionRequests.length, 3);
++    assert.equal(upstreams.state.visionRequests.length, 1);
+@@ -460 +458 @@ test("a failed vision read degrades to a stated failure and the turn still compl
+-    // Three attempts against the failing engine, then one against the
++    // One attempt against the failing engine, then one against the
+@@ -463 +461 @@ test("a failed vision read degrades to a stated failure and the turn still compl
+-    assert.equal(upstreams.state.visionRequests.length, 4);
++    assert.equal(upstreams.state.visionRequests.length, 2);
+diff --git a/test/vision-bridge.test.mjs b/test/vision-bridge.test.mjs
+--- a/test/vision-bridge.test.mjs
++++ b/test/vision-bridge.test.mjs
+@@ -743 +743 @@ test("the candidate list is still built at most once, fallback or not", () => {
+-test("a read that fails transiently is asked again; a refusal is not", async () => {
++test("short rate limits and explicit availability are retried; a refusal is not", async () => {
+@@ -758,0 +759 @@ test("a read that fails transiently is asked again; a refusal is not", async ()
++      ...(status === 503 ? { deliveryPolicy: "availability" } : {}),
+@@ -813,0 +815 @@ test("a read that fails transiently is asked again; a refusal is not", async ()
++      deliveryPolicy: "availability",
+diff --git a/test/vision-retry-delivery.test.mjs b/test/vision-retry-delivery.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/vision-retry-delivery.test.mjs
+@@ -0,0 +1,241 @@
++import assert from "node:assert/strict";
++import http from "node:http";
++import test from "node:test";
++
++import { describeImage, localVisionEngine } from "../src/vision-bridge.mjs";
++import { PROVIDER_DELIVERY_STATE_HEADER } from "../src/transport-failure.mjs";
++
++const imageUrl = "data:image/png;base64,c3ludGhldGljLWltYWdl";
++const registryEngine = {
++  slug: "custom/synthetic-vision", gatewayModel: "synthetic-vision", displayName: "Synthetic vision",
++  inputModalities: ["text", "image"],
++};
++
++async function listen(server, port = 0) {
++  await new Promise((resolve, reject) => {
++    server.once("error", reject);
++    server.listen(port, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); });
++  });
++  return server.address().port;
++}
++
++async function close(server) {
++  server.closeAllConnections();
++  if (server.listening) await new Promise((resolve) => server.close(resolve));
++}
++
++function successfulResponse(response, shape) {
++  if (shape === "local") {
++    response.writeHead(200, { "Content-Type": "application/json" });
++    response.end(JSON.stringify({ choices: [{ message: { content: "## Summary\nSynthetic evidence." } }] }));
++  } else if (shape === "native") {
++    response.writeHead(200, { "Content-Type": "text/event-stream" });
++    response.end(`data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", output: [
++      { type: "message", role: "assistant", content: [{ type: "output_text", text: "## Summary\nSynthetic evidence." }] },
++    ] } })}\n\n`);
++  } else {
++    response.writeHead(200, { "Content-Type": "application/json" });
++    response.end(JSON.stringify({ output: [{ type: "message", role: "assistant", content: [
++      { type: "output_text", text: "## Summary\nSynthetic evidence." },
++    ] }] }));
++  }
++}
++
++function callOptions(base, shape) {
++  return {
++    engine: shape === "local" ? localVisionEngine({ local: { model: "synthetic-local", baseUrl: `${base}/v1` } }) :
++      { ...registryEngine, ...(shape === "native" ? { native: true } : {}) },
++    imageUrl,
++    gatewayBase: `${base}/unused-gateway`,
++    responsesTarget: `${base}/v1/responses`,
++    headers: { "Content-Type": "application/json", Authorization: "Bearer synthetic-internal-capability" },
++    nativeCall: { baseUrl: `${base}/native`, headers: { Authorization: "Bearer synthetic-native-session" } },
++    timeoutMs: 2_000,
++    retryDelaysMs: [1, 1],
++  };
++}
++
++test("vision POST delivery policy uses real local sockets for all three call shapes", async (t) => {
++  for (const shape of ["registry", "native", "local"]) {
++    for (const failure of ["reset", "503"]) {
++      for (const deliveryPolicy of ["at-most-once", "availability"]) {
++        await t.test(`${shape}: ${failure}, ${deliveryPolicy}`, async () => {
++          const received = [];
++          const server = http.createServer(async (request, response) => {
++            const chunks = [];
++            for await (const chunk of request) chunks.push(chunk);
++            received.push({ url: request.url, body: Buffer.concat(chunks).toString("utf8") });
++            // This records a complete generation POST before failure. There is
++            // deliberately no client byte proving whether it executed.
++            if (received.length === 1) {
++              if (failure === "reset") { request.socket.destroy(); return; }
++              response.writeHead(503, { "Content-Type": "application/json" });
++              response.end(JSON.stringify({ error: { message: "synthetic-private-provider-error" } }));
++              return;
++            }
++            successfulResponse(response, shape);
++          });
++          const port = await listen(server);
++          try {
++            const call = describeImage({ ...callOptions(`http://127.0.0.1:${port}`, shape), deliveryPolicy });
++            if (deliveryPolicy === "availability") {
++              assert.match(await call, /Synthetic evidence/);
++              assert.equal(received.length, 2, "the explicit policy permits one ambiguous replay");
++              assert.equal(received[0].body, received[1].body);
++            } else {
++              await assert.rejects(call, (error) => {
++                assert.doesNotMatch(error.message, /synthetic-private-provider-error/);
++                assert.equal(error.retryable, false);
++                assert.equal(error.deliveryState, failure === "reset" ? "possibly_sent" : "response_started");
++                return true;
++              });
++              assert.equal(received.length, 1, "an accepted POST must not be silently replayed");
++            }
++            const body = JSON.parse(received[0].body);
++            assert.equal(body.model, shape === "local" ? "synthetic-local" : "synthetic-vision");
++            assert.ok(received.every(({ url }) => url === (shape === "local" ? "/v1/chat/completions" :
++              shape === "native" ? "/native/responses" : "/v1/responses")));
++            assert.ok(received[0].body.includes(imageUrl));
++          } finally {
++            await close(server);
++          }
++        });
++      }
++    }
++  }
++});
++
++test("a positively refused connection can be retried without sending two POSTs", async () => {
++  const reserved = http.createServer();
++  const port = await listen(reserved);
++  await close(reserved);
++  const received = [];
++  const server = http.createServer(async (request, response) => {
++    const chunks = [];
++    for await (const chunk of request) chunks.push(chunk);
++    received.push(Buffer.concat(chunks).toString("utf8"));
++    successfulResponse(response, "registry");
++  });
++  let attempts = 0;
++  try {
++    const text = await describeImage({
++      ...callOptions(`http://127.0.0.1:${port}`, "registry"), deliveryPolicy: "at-most-once",
++      fetchImpl: async (...args) => {
++        attempts += 1;
++        try { return await fetch(...args); } catch (error) {
++          if (attempts === 1) {
++            assert.equal(error.cause?.code, "ECONNREFUSED");
++            await listen(server, port);
++          }
++          throw error;
++        }
++      },
++    });
++    assert.match(text, /Synthetic evidence/);
++    assert.equal(attempts, 2);
++    assert.equal(received.length, 1, "only the connected attempt reaches the server");
++  } finally {
++    await close(server);
++  }
++});
++
++test("positive pre-send retries stay bounded and cancellation interrupts backoff", async () => {
++  const refusal = () => new TypeError("fetch failed", { cause: Object.assign(new Error("refused"), {
++    code: "ECONNREFUSED", syscall: "connect",
++  }) });
++  let attempts = 0;
++  await assert.rejects(describeImage({
++    ...callOptions("http://127.0.0.1:1", "registry"), deliveryPolicy: "at-most-once",
++    fetchImpl: async () => { attempts += 1; throw refusal(); },
++  }), (error) => error.deliveryState === "not_sent");
++  assert.equal(attempts, 3);
++
++  const controller = new AbortController();
++  let canceledAttempts = 0;
++  const call = describeImage({
++    ...callOptions("http://127.0.0.1:1", "registry"), deliveryPolicy: "at-most-once",
++    retryDelaysMs: [60_000], signal: controller.signal,
++    fetchImpl: async () => { canceledAttempts += 1; setImmediate(() => controller.abort()); throw refusal(); },
++  });
++  await assert.rejects(call, { name: "AbortError" });
++  assert.equal(canceledAttempts, 1);
++});
++
++test("vision trusts delivery provenance only for an explicitly identified local API reply", async () => {
++  for (const shape of ["registry", "native", "local"]) {
++    for (const trustedTransportResponse of [false, true]) {
++      let attempts = 0;
++      const call = describeImage({
++        ...callOptions("http://127.0.0.1:1", shape), deliveryPolicy: "at-most-once", trustedTransportResponse,
++        fetchImpl: async () => {
++          attempts += 1;
++          return attempts === 1 ? new Response(JSON.stringify({ error: {
++            type: "provider_transport_error", code: "ECONNREFUSED", deliveryState: "not_sent",
++          } }), { status: 502, headers: { [PROVIDER_DELIVERY_STATE_HEADER]: "not_sent" } }) :
++            new Response(JSON.stringify({ output: [{ type: "message", role: "assistant", content: [
++              { type: "output_text", text: "## Summary\nSynthetic evidence." },
++            ] }] }));
++        },
++      });
++      if (shape === "registry" && trustedTransportResponse) {
++        assert.match(await call, /Synthetic evidence/);
++        assert.equal(attempts, 2);
++      } else {
++        await assert.rejects(call, /answered HTTP 502/);
++        assert.equal(attempts, 1, `${shape} origin cannot claim local forwarder provenance`);
++      }
++    }
++  }
++});
++
++test("a failure after real response headers never replays a partially read generation", async () => {
++  let accepted = 0;
++  let originResponse;
++  const server = http.createServer(async (request, response) => {
++    for await (const _chunk of request) { /* consume the entire submitted POST */ }
++    accepted += 1;
++    originResponse = response;
++    response.writeHead(200, { "Content-Type": "application/json" });
++    response.write('{"output":[');
++  });
++  const port = await listen(server);
++  try {
++    await assert.rejects(describeImage({
++      ...callOptions(`http://127.0.0.1:${port}`, "registry"), deliveryPolicy: "at-most-once",
++      fetchImpl: async (...args) => {
++        const upstream = await fetch(...args);
++        // The actual fetch has resolved its headers before the owned origin
++        // closes its unfinished body, independently of machine scheduling.
++        setImmediate(() => originResponse.destroy());
++        return upstream;
++      },
++    }), (error) => error.deliveryState === "response_started" && error.retryable === false);
++    assert.equal(accepted, 1);
++  } finally {
++    await close(server);
++  }
++});
++
++test("explicit failed and incomplete JSON generations are neither empty-repaired nor quoted", async () => {
++  for (const status of ["failed", "incomplete"]) for (const partial of [false, true]) {
++    let attempts = 0;
++    await assert.rejects(describeImage({
++      ...callOptions("http://127.0.0.1:1", "registry"), deliveryPolicy: "at-most-once",
++      fetchImpl: async () => {
++        attempts += 1;
++        return new Response(JSON.stringify({ object: "response", status,
++          ...(status === "failed" ? { error: { message: "synthetic-private-failure-detail" } } : {}),
++          output: partial ? [{ type: "message", role: "assistant", content: [
++            { type: "output_text", text: "synthetic-private-partial-transcript" },
++          ] }] : [],
++        }), { status: 200 });
++      },
++    }), (error) => {
++      assert.equal(error.deliveryState, "response_started");
++      assert.equal(error.retryable, false);
++      assert.doesNotMatch(error.message, /synthetic-private/);
++      return true;
++    });
++    assert.equal(attempts, 1, `${status} is an explicit failure, not an observed completed-empty repair`);
++  }
++});

@@ -36,7 +36,7 @@ this inventory, in addition to the existing tool-history PRs #4–#6.
 | Isolate runtime and provider test fixtures | [#28](https://github.com/TruthNian/codex-router/pull/28) | selected-services |
 | Isolate catalog tests from operator compatibility policy | [#29 (closed)](https://github.com/TruthNian/codex-router/pull/29) | none recorded |
 | Keep the retention contention test clock deterministic | [#30](https://github.com/TruthNian/codex-router/pull/30) | none recorded |
-| Persist native catalog client version metadata | [#31](https://github.com/TruthNian/codex-router/pull/31) | none recorded |
+| Persist native catalog client version metadata | [#31 (closed)](https://github.com/TruthNian/codex-router/pull/31) | none recorded |
 
 The first 18 rows are the historical optimization families. Remaining rows
 preserve macOS diagnostics, manual CI scope, runtime fixture isolation, and

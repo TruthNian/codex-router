@@ -2032,7 +2032,10 @@
       "publishedHead": "68582a4c7ebd8912a78a6e9a5fcff4315dda03b2",
       "isDraft": true,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1063",
-      "promotionStatus": "ci_passed_waiting_merge"
+      "promotionStatus": "ci_passed_waiting_merge",
+      "prState": "CLOSED",
+      "closedAt": "2026-10-24T14:42:40Z",
+      "closureReason": "Promoted as upstream #1063; exact published head and all applicable CI verified. Source branch retained."
     }
   ],
   "coverage": {
@@ -2049,7 +2052,11 @@
     {
       "number": 4,
       "topic": "Desktop readback proofs",
-      "upstreamPr": 1062
+      "upstreamPr": 1062,
+      "state": "CLOSED",
+      "closedAt": "2026-10-24T14:42:36Z",
+      "upstreamHead": "90a52eeb01410dac63ec86ed279e16a1bc6fcaab",
+      "ci": "9 SUCCESS, 2 conditional SKIPPED; exact published head verified before closing backup"
     },
     {
       "number": 5,

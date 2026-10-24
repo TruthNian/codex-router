@@ -112,7 +112,10 @@
       "pr": 9,
       "url": "https://github.com/TruthNian/codex-router/pull/9",
       "publishedHead": "24cf3b167f8fd3c6bca25bb8889506babac969c7",
-      "isDraft": true
+      "isDraft": true,
+      "upstreamPr": 1065,
+      "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1065",
+      "promotionStatus": "ci_running"
     },
     {
       "id": "vision-delivery",
@@ -2105,6 +2108,14 @@
       "head": "b9e54fc6b201e68ab5212b279162434561dc8ee7",
       "status": "ci_passed_waiting_merge",
       "backupPr": 29
+    },
+    "generation-redirect": {
+      "topic": "generation-redirect",
+      "pr": 1065,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1065",
+      "head": "c5ee2cce428f5deccae0f3d47d371d6c73884385",
+      "status": "ci_running",
+      "backupPr": 9
     }
   }
 }

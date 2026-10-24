@@ -1,0 +1,1 @@
+- Refuse API, routed, and vision generation redirects without following or exposing their Location. The API forwarder reports a non-retryable endpoint configuration error, and vision preserves that refusal instead of retrying or switching engines. Configure the final API endpoint instead.

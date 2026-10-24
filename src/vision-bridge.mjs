@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { generationRedirectRefusal, rejectGenerationRedirect } from "./generation-redirect.mjs";
 
 import { upstreamFailureKind } from "./error-translation.mjs";
 import { PROVIDERS } from "./model-registry.mjs";
@@ -1044,6 +1045,7 @@ async function attemptDescribe({
   try {
     upstream = await fetchImpl(request.url, {
       method: "POST",
+      redirect: "manual",
       headers: request.headers,
       body: JSON.stringify(request.body),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
@@ -1060,6 +1062,9 @@ async function attemptDescribe({
     if (isTransientError(error)) throw new TransientVisionError(message);
     throw new Error(message);
   }
+  // Keep a redirect outside the transient transport catch: retrying it can
+  // repeat a generation that the first endpoint already consumed.
+  await rejectGenerationRedirect(upstream);
   const bytes = Buffer.from(await upstream.arrayBuffer());
   if (bytes.length > MAX_VISION_RESPONSE_BYTES) {
     throw new Error(`${engine.displayName || engine.slug} returned an oversized response`);
@@ -1070,6 +1075,11 @@ async function attemptDescribe({
     // exhausted account is not mistaken for a one-second burst limit.
     const message = `${engine.displayName || engine.slug} answered HTTP ${upstream.status}`;
     const bodyText = bytes.toString("utf8");
+    const redirectRefusal = generationRedirectRefusal(bodyText);
+    if (redirectRefusal) {
+      redirectRefusal.status = upstream.status;
+      throw redirectRefusal;
+    }
     const failureKind = upstreamFailureKind({ status: upstream.status, bodyText });
     const rateLimit = upstream.status === 429 ? parseRateLimitHeaders(upstream.headers) : undefined;
     const until = cooldownUntil(rateLimit);

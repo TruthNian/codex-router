@@ -426,19 +426,17 @@ function isGrokOauthRoute(route) {
 
 // Grok keeps its stall-guard-sized pool. Local Ollama uses a separate pool
 // whose headers and body idle bounds outlast its LiteLLM timeout.
-function fetchForRoute(route, url, init) {
-  // A followed generation redirect destroys evidence about the original POST.
-  // Native transport must reject it before a later connect failure can look unsent.
-  if (!route && String(init?.method).toUpperCase() === "POST") {
-    return fetch(url, { ...init, redirect: "manual" }).then(rejectGenerationRedirect);
-  }
+async function fetchForRoute(route, url, init) {
+  // Every generation POST may already have executed at its first origin.
+  // A failed redirect target cannot establish that the original was unsent.
+  if (String(init?.method).toUpperCase() === "POST") init = { ...init, redirect: "manual" };
   if (isGrokOauthRoute(route)) {
-    return longIdleStreamFetch(url, init, { bodyTimeoutMs: GROK_TRANSPORT_IDLE_TIMEOUT_MS });
+    return rejectGenerationRedirect(await longIdleStreamFetch(url, init, { bodyTimeoutMs: GROK_TRANSPORT_IDLE_TIMEOUT_MS }));
   }
   if (route && canonicalProviderId(route.provider) === "local") {
-    return longIdleStreamFetch(url, init, { bodyTimeoutMs: LOCAL_TRANSPORT_IDLE_TIMEOUT_MS });
+    return rejectGenerationRedirect(await longIdleStreamFetch(url, init, { bodyTimeoutMs: LOCAL_TRANSPORT_IDLE_TIMEOUT_MS }));
   }
-  return fetch(url, init);
+  return rejectGenerationRedirect(await fetch(url, init));
 }
 
 // Codex sends the service tier the operator picked, and a priority tier bills
@@ -2619,6 +2617,7 @@ async function bridgeVisionInput(input, route, request) {
         return { text, engineName: engine.displayName || engine.slug };
       } catch (error) {
         lastError = error;
+        if (error?.code === "upstream_redirect_refused") throw error;
         if (error?.failureKind === "out_of_usage") exhaustedProviders.add(provider);
       }
     }

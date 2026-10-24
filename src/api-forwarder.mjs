@@ -1,4 +1,5 @@
 import { compatibilityLayerError } from "./compatibility-layer-state.mjs";
+import { rejectGenerationRedirect } from "./generation-redirect.mjs";
 import { normalizeAzureOpenAIResponsesRequest } from "./azure-openai-compat.mjs";
 import http from "node:http";
 import {
@@ -1665,6 +1666,7 @@ async function relayUpstreamResponse(
   startedAt,
   telemetryUpstream = upstream,
 ) {
+  await rejectGenerationRedirect(upstream);
   const upstreamContentType = upstream.headers.get("content-type") || "";
   if (
     normalized.provider.id === "clinepass" &&
@@ -2155,9 +2157,9 @@ async function handleRequest(request, response) {
           ),
           body: upstreamBody,
           signal: controller.signal,
-          redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "follow",
+          redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "manual",
         });
-        let attemptResponse = await sendAttempt();
+        let attemptResponse = await rejectGenerationRedirect(await sendAttempt());
         // The source credential can still be valid when Copilot changes the
         // account's inference endpoint or short-lived routing token. Preserve
         // the existing same-key force-refresh contract inside each pool
@@ -2173,7 +2175,7 @@ async function handleRequest(request, response) {
             normalized.endpoint,
           );
           attemptTarget = upstreamTarget(attemptSession, normalized, route, requestUrl.search);
-          attemptResponse = await sendAttempt();
+          attemptResponse = await rejectGenerationRedirect(await sendAttempt());
         }
         if (!attemptResponse.ok) {
           const bodyText = (await readResponseBody(attemptResponse, {
@@ -2230,6 +2232,7 @@ async function handleRequest(request, response) {
       },
     });
     const result = pooled.result;
+    if (!pooled.committed && pooled.error?.code === "upstream_redirect_refused") throw pooled.error;
     if (result?.upstreamHeaders) {
       // Plan attempts keep their provider headers separate from the safe error
       // headers relayed to the caller. Only the result the pool selected may
@@ -2286,8 +2289,9 @@ async function handleRequest(request, response) {
       ),
       body: upstreamBody,
       signal: controller.signal,
-      redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "follow",
+      redirect: ["/embeddings", "/decisions"].includes(route) ? "error" : "manual",
     });
+    await rejectGenerationRedirect(upstream);
     // Embeddings and Decisions can be billed even when the response never
     // reaches the caller. Select one pool credential above and record its
     // outcome, but do not replay the same input through another credential
@@ -2333,7 +2337,9 @@ async function handleRequest(request, response) {
       ),
       body: upstreamBody,
       signal: controller.signal,
+      redirect: "manual",
     });
+    await rejectGenerationRedirect(upstream);
   }
   // Falling back here is legal for the same reason the Copilot replay above
   // is: nothing has been relayed yet. The refusal is read rather than piped
@@ -2387,7 +2393,9 @@ async function handleRequest(request, response) {
 
 const server = http.createServer((request, response) => {
   handleRequest(request, response).catch((error) => {
-    const status = httpErrorStatus(error);
+    // A final endpoint is a configuration requirement, not a transient 5xx.
+    // LiteLLM and other callers must not retry the consumed origin request.
+    const status = error?.code === "upstream_redirect_refused" ? 400 : httpErrorStatus(error);
     const transport = providerTransportError(error);
     // Names and codes only: a forwarder failure can wrap upstream response
     // text in its message, and bodies never belong in the log. The code chain
@@ -2398,10 +2406,13 @@ const server = http.createServer((request, response) => {
     if (!response.headersSent) {
       writeJson(response, status, {
         error: error.code === "compatibility_layer_disabled"
-          ? compatibilityLayerError("the requested route").error : transport || {
+          ? compatibilityLayerError("the requested route").error : transport || (error?.code === "upstream_redirect_refused" ? {
+          type: "provider_redirect_refused",
+          message: error.message,
+        } : {
           type: "provider_api_proxy_error",
           message: "The API-provider forwarder could not complete the request.",
-        },
+        }),
       });
     } else if (!response.writableEnded) {
       endStreamedResponse(response, {

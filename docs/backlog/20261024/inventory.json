@@ -278,7 +278,10 @@
         "base": "9945d74354ab07942f171be329cf81c9478fc5e2",
         "commit": "e454b39f7e778db022880857da7f67f450bd0be4",
         "status": "ci_running"
-      }
+      },
+      "upstreamPr": 1069,
+      "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1069",
+      "promotionStatus": "ci_running"
     },
     {
       "id": "selected-services",
@@ -2207,6 +2210,14 @@
       "head": "3b29062c03c43721e4934e873b3596182e5f7e43",
       "status": "ci_passed_waiting_merge",
       "backupPr": 27
+    },
+    "direct-responses": {
+      "topic": "direct-responses",
+      "pr": 1069,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1069",
+      "head": "e454b39f7e778db022880857da7f67f450bd0be4",
+      "status": "ci_running",
+      "backupPr": 11
     }
   }
 }

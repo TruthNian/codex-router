@@ -32,7 +32,7 @@ this inventory, in addition to the existing tool-history PRs #4–#6.
 | Consolidate callers on the private file boundary | [#24](https://github.com/TruthNian/codex-router/pull/24) | none recorded |
 | Record ingress preparation and upstream-header timing | [#25](https://github.com/TruthNian/codex-router/pull/25) | none recorded |
 | Preserve bounded native macOS launch diagnostics | [#26](https://github.com/TruthNian/codex-router/pull/26) | none recorded |
-| Select manual runtime CI without reducing automatic coverage | [#27](https://github.com/TruthNian/codex-router/pull/27) | none recorded |
+| Select manual runtime CI without reducing automatic coverage | [#27 (closed)](https://github.com/TruthNian/codex-router/pull/27) | none recorded |
 | Isolate runtime and provider test fixtures | [#28](https://github.com/TruthNian/codex-router/pull/28) | selected-services |
 | Isolate catalog tests from operator compatibility policy | [#29 (closed)](https://github.com/TruthNian/codex-router/pull/29) | none recorded |
 | Keep the retention contention test clock deterministic | [#30 (closed)](https://github.com/TruthNian/codex-router/pull/30) | none recorded |
@@ -99,4 +99,4 @@ Keep this inventory available until every item has an explicit disposition.
 | generation-redirect | [#1065](https://github.com/duolahypercho/codex-router/pull/1065) | `3acbe3e752fd15bb1efd8c0c2e7ca1e972cd3c2b` | ci_passed_waiting_merge |
 | cache-version-metadata | [#1063](https://github.com/duolahypercho/codex-router/pull/1063) | `955645840771efbb0e689d395d753e9168143d19` | ci_passed_waiting_merge |
 | retention-clock | [#1067](https://github.com/duolahypercho/codex-router/pull/1067) | `2029173a65ab9a7dcc05cc028ee7086640ae82a8` | ci_passed_waiting_merge |
-| manual-ci-scope | [#1068](https://github.com/duolahypercho/codex-router/pull/1068) | `3b29062c03c43721e4934e873b3596182e5f7e43` | ci_running |
+| manual-ci-scope | [#1068](https://github.com/duolahypercho/codex-router/pull/1068) | `3b29062c03c43721e4934e873b3596182e5f7e43` | ci_passed_waiting_merge |

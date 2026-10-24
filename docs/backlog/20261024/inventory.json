@@ -259,7 +259,26 @@
       "pr": 11,
       "url": "https://github.com/TruthNian/codex-router/pull/11",
       "publishedHead": "87a1d841396c7f5eade26f035d5b921299066a72",
-      "isDraft": true
+      "isDraft": true,
+      "candidateExtraction": {
+        "branch": "feat/direct-responses-routing-20261025",
+        "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-direct-responses-20261025",
+        "title": "fix: route Responses-native models directly through API forwarder",
+        "acceptance": {
+          "mainNegative": "Exact main routes Responses through refusing gateway (503), while Chat control passes",
+          "chatBoundaryNegative": "Forcing all routed models direct makes Chat fail at API protocol boundary with 400",
+          "canonicalContracts": "9 final cases passed with real Router/API/loopback origins; tools, phases, reasoning, JSON/SSE, image/history, compact, cancellation, identity and synthetic credential confinement",
+          "expanded": "201 other protocol/routing cases passed plus all 43 failover cases in isolated parent state; total 244 covered",
+          "namespaces": "55 namespace/direct cases passed; final API path assertions 2 passed",
+          "syntax": "npm run check passed; final test syntax/execution passed",
+          "hunkReview": "17/17 accepted on exact published head; no findings or missing/stale hunks",
+          "ci": "running on exact published head e454b39f7e778db022880857da7f67f450bd0be4"
+        },
+        "notes": "Only per-model target selection consumes the existing main execution planner. The API forwarder retains credentials and canonical request/frame processing. No service lifecycle, vision-retry, redirect or delivery-policy fragments imported. Test stubs explicitly own API paths; fixture-parent compatibility mismatch diagnosed and isolated without relaxing assertions.",
+        "base": "9945d74354ab07942f171be329cf81c9478fc5e2",
+        "commit": "e454b39f7e778db022880857da7f67f450bd0be4",
+        "status": "ci_running"
+      }
     },
     {
       "id": "selected-services",
@@ -1481,7 +1500,11 @@
       },
       "upstreamPr": 1068,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1068",
-      "promotionStatus": "ci_running"
+      "promotionStatus": "ci_passed_waiting_merge",
+      "backupState": "CLOSED",
+      "closedAt": "2026-10-24T16:57:50Z",
+      "prState": "CLOSED",
+      "closureReason": "Promoted as upstream #1068; exact head and all applicable upstream CI verified. Source branch retained."
     },
     {
       "id": "runtime-fixtures",
@@ -2182,7 +2205,7 @@
       "pr": 1068,
       "url": "https://github.com/duolahypercho/codex-router/pull/1068",
       "head": "3b29062c03c43721e4934e873b3596182e5f7e43",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 27
     }
   }

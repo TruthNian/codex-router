@@ -35,7 +35,7 @@ this inventory, in addition to the existing tool-history PRs #4–#6.
 | Select manual runtime CI without reducing automatic coverage | [#27](https://github.com/TruthNian/codex-router/pull/27) | none recorded |
 | Isolate runtime and provider test fixtures | [#28](https://github.com/TruthNian/codex-router/pull/28) | selected-services |
 | Isolate catalog tests from operator compatibility policy | [#29 (closed)](https://github.com/TruthNian/codex-router/pull/29) | none recorded |
-| Keep the retention contention test clock deterministic | [#30](https://github.com/TruthNian/codex-router/pull/30) | none recorded |
+| Keep the retention contention test clock deterministic | [#30 (closed)](https://github.com/TruthNian/codex-router/pull/30) | none recorded |
 | Persist native catalog client version metadata | [#31 (closed)](https://github.com/TruthNian/codex-router/pull/31) | none recorded |
 
 The first 18 rows are the historical optimization families. Remaining rows
@@ -98,4 +98,4 @@ Keep this inventory available until every item has an explicit disposition.
 | catalog-fixture-isolation | [#1064](https://github.com/duolahypercho/codex-router/pull/1064) | `b9e54fc6b201e68ab5212b279162434561dc8ee7` | ci_passed_waiting_merge |
 | generation-redirect | [#1065](https://github.com/duolahypercho/codex-router/pull/1065) | `3acbe3e752fd15bb1efd8c0c2e7ca1e972cd3c2b` | ci_passed_waiting_merge |
 | cache-version-metadata | [#1063](https://github.com/duolahypercho/codex-router/pull/1063) | `955645840771efbb0e689d395d753e9168143d19` | ci_passed_waiting_merge |
-| retention-clock | [#1067](https://github.com/duolahypercho/codex-router/pull/1067) | `2029173a65ab9a7dcc05cc028ee7086640ae82a8` | ci_running |
+| retention-clock | [#1067](https://github.com/duolahypercho/codex-router/pull/1067) | `2029173a65ab9a7dcc05cc028ee7086640ae82a8` | ci_passed_waiting_merge |

@@ -1466,15 +1466,16 @@
       "candidateExtraction": {
         "branch": "ci/manual-runtime-scope-20261024",
         "commit": "3b29062c03c43721e4934e873b3596182e5f7e43",
-        "status": "ready_local",
+        "status": "ci_running",
         "forkCiRun": 40102703491,
         "forkCiUrl": "https://github.com/TruthNian/codex-router/actions/runs/40102703491",
         "acceptance": {
-          "review": "3/3 accepted with current manifest",
+          "review": "3/3 accepted and verified against exact published source commit 3b29062c03c43721e4934e873b3596182e5f7e43; latest main unchanged",
           "structure": "YAML parsed; all other jobs/triggers/permissions/matrices/steps identical to main",
           "behavior": "Only manual Homebrew installation is skipped for runtime; default all and omitted legacy input retain install",
           "actualDispatch": "All seven applicable jobs SUCCESS; Homebrew install SKIPPED as requested. Exact head 3b29062c03c43721e4934e873b3596182e5f7e43; includes three runtime platforms, both Electron builds and native macOS lifecycle.",
-          "syntax": "npm run check passed"
+          "syntax": "npm run check passed",
+          "ci": "running on exact published head; actual fork runtime dispatch already passed all seven jobs"
         },
         "base": "9945d74354ab07942f171be329cf81c9478fc5e2"
       }
@@ -2010,7 +2011,11 @@
       "publishedHead": "4e33f7f097c361e450e00a5c7e429ca7aa2e0dc3",
       "isDraft": true,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1067",
-      "promotionStatus": "ci_running"
+      "promotionStatus": "ci_passed_waiting_merge",
+      "backupState": "CLOSED",
+      "closedAt": "2026-10-24T15:48:10Z",
+      "prState": "CLOSED",
+      "closureReason": "Promoted as upstream #1067; exact head and all applicable CI verified. Source branch retained."
     },
     {
       "id": "cache-version-metadata",
@@ -2166,7 +2171,7 @@
       "pr": 1067,
       "url": "https://github.com/duolahypercho/codex-router/pull/1067",
       "head": "2029173a65ab9a7dcc05cc028ee7086640ae82a8",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 30
     }
   }

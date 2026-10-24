@@ -1,0 +1,864 @@
+diff --git a/changelog.d/service-shutdown.md b/changelog.d/service-shutdown.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/service-shutdown.md
+@@ -0,0 +1 @@
++- **Service shutdown drains the frontend before stopping its dependencies.** The supervisor preserves downstream forwarders during the frontend's drain and flush, then stops only its owned child handles. Each phase and the complete stop attempt have bounded deadlines, repeated stop requests share one operation, and owned Node children can request the existing graceful shutdown handler over IPC on Windows.
+diff --git a/src/api-forwarder.mjs b/src/api-forwarder.mjs
+--- a/src/api-forwarder.mjs
++++ b/src/api-forwarder.mjs
+@@ -2424,0 +2435,2 @@ process.once("SIGINT", () => genericProviderPools.closeAll());
++// IPC shutdown disconnects only after HTTP turns have drained.
++process.once("disconnect", () => genericProviderPools.closeAll());
+diff --git a/src/http-utils.mjs b/src/http-utils.mjs
+--- a/src/http-utils.mjs
++++ b/src/http-utils.mjs
+@@ -412 +412,6 @@ export function installGracefulShutdown(
+-    exit = (code) => process.exit(code),
++    exit = (code) => {
++      // Let libuv retire the IPC handle before Node terminates. Synchronous
++      // exit from a Windows IPC shutdown callback can assert HANDLE_CLOSING.
++      process.exitCode = code;
++      if (process.connected) process.disconnect();
++    },
+@@ -476,0 +482,8 @@ export function installGracefulShutdown(
++  // Windows ChildProcess.kill('SIGTERM') terminates the process immediately.
++  // The supervisor's private IPC channel asks the same bounded drain handler
++  // to run before its absolute force-stop deadline, on every platform.
++  if (process.connected) {
++    process.on("message", (message) => {
++      if (message?.type === "model-router:shutdown") shutdown();
++    });
++  }
+diff --git a/src/router.mjs b/src/router.mjs
+--- a/src/router.mjs
++++ b/src/router.mjs
+@@ -6951,0 +7009,2 @@ process.once("SIGINT", () => nativeWsPools.closeAll());
++// Retire pooled upstream sockets after the supervisor's IPC drain completes.
++process.once("disconnect", () => nativeWsPools.closeAll());
+diff --git a/src/service-shutdown.mjs b/src/service-shutdown.mjs
+new file mode 100644
+--- /dev/null
++++ b/src/service-shutdown.mjs
+@@ -0,0 +1,184 @@
++// One supervisor owns this stable array. Never infer ownership from a PID or
++// from a listener on a port; only its already-verified child handles belong here.
++const shutdowns = new WeakMap();
++const EXIT_MARGIN_MS = 1_000;
++const MAX_TIMER_MS = 2_147_483_647;
++
++function hasExited(child) {
++  return child.exitCode !== null || child.signalCode !== null;
++}
++
++function observeExit(child, label, { signal }) {
++  if (hasExited(child)) return Promise.resolve({ label, code: child.exitCode, signal: child.signalCode });
++  return new Promise((resolve, reject) => {
++    const clean = () => {
++      child.off("exit", exited);
++      child.off("close", exited);
++      child.off("error", spawnFailed);
++      signal.removeEventListener("abort", abort);
++    };
++    const exited = (code, exitSignal) => {
++      clean();
++      resolve({ label, code, signal: exitSignal });
++    };
++    const spawnFailed = () => {
++      // A failed spawn has no process to drain and may emit close without exit.
++      // An error on a running process is not proof that it has exited.
++      if (child.pid === undefined) exited(child.exitCode, child.signalCode);
++    };
++    const abort = () => {
++      clean();
++      reject(new Error("Shutdown exit observation ended"));
++    };
++    child.once("exit", exited);
++    child.once("close", exited);
++    child.on("error", spawnFailed);
++    signal.addEventListener("abort", abort, { once: true });
++    if (signal.aborted) abort();
++    else if (hasExited(child)) exited(child.exitCode, child.signalCode);
++  });
++}
++
++/**
++ * Stop owned children in dependency order. The frontend gets drain+flush+1s
++ * before downstream services receive shutdown; each phase is bounded, and an
++ * absolute backstop is installed at 2*(drain+flush)+2s from the first call.
++ *
++ * Calls with the same stable children array share one Promise. The caller must
++ * stop spawning children before calling. An injected waitForExit receives
++ * (child, "child", { signal }); it may use the signal to retire its listeners.
++ *
++ * { timedOut, forced } describes the shutdown attempt, not proof that an OS
++ * process disappeared. Even an uncooperative exit waiter cannot hold the
++ * Promise past the backstop. On Windows, graceful shutdown requires the owned
++ * Node child's IPC handler; ChildProcess.kill("SIGTERM") itself is abrupt.
++ */
++export function stopServiceChildren({
++  frontend,
++  children,
++  drainMs = 0,
++  flushMs = 0,
++  signalChild,
++  waitForExit = observeExit,
++  setTimer = setTimeout,
++  clearTimer = clearTimeout,
++} = {}) {
++  if (!Array.isArray(children)) throw new TypeError("children must be the supervisor's owned child array");
++  const previous = shutdowns.get(children);
++  if (previous) return previous;
++  const owned = [...new Set(children)];
++  if (owned.some((child) => !child || typeof child.kill !== "function")) {
++    throw new TypeError("children must contain owned ChildProcess handles");
++  }
++  if (frontend !== undefined && !owned.includes(frontend)) {
++    throw new TypeError("frontend must belong to the owned children array");
++  }
++  if (![drainMs, flushMs].every((value) => typeof value === "number" && Number.isFinite(value) && value >= 0)) {
++    throw new TypeError("shutdown drainMs and flushMs must be finite nonnegative numbers");
++  }
++  const phaseMs = drainMs + flushMs + EXIT_MARGIN_MS;
++  if (2 * phaseMs > MAX_TIMER_MS) throw new RangeError("shutdown budget exceeds the timer limit");
++  if (typeof waitForExit !== "function" || typeof setTimer !== "function" || typeof clearTimer !== "function" ||
++    (signalChild !== undefined && typeof signalChild !== "function")) {
++    throw new TypeError("shutdown callbacks must be functions");
++  }
++
++  let resolveShutdown;
++  const promise = new Promise((resolve) => { resolveShutdown = resolve; });
++  shutdowns.set(children, promise);
++  const live = new Set(owned.filter((child) => !hasExited(child)));
++  const sent = new Map(owned.map((child) => [child, new Set()]));
++  const timers = new Set();
++  const observation = new AbortController();
++  let finished = false;
++  let dependenciesStarted = false;
++  let frontendTimer;
++  let timedOut = false;
++  let forced = false;
++
++  const cancelTimer = (timer) => {
++    if (!timers.delete(timer)) return;
++    clearTimer(timer);
++  };
++  const finish = () => {
++    if (finished) return;
++    finished = true;
++    for (const timer of [...timers]) cancelTimer(timer);
++    observation.abort();
++    live.clear();
++    resolveShutdown({ timedOut, forced });
++  };
++  const schedule = (callback, duration) => {
++    const timer = setTimer(() => {
++      timers.delete(timer);
++      if (!finished) callback();
++    }, duration);
++    timers.add(timer);
++    return timer;
++  };
++  const signalOwned = (child, signal) => {
++    if (finished || !live.has(child) || hasExited(child) || sent.get(child).has(signal)) return;
++    sent.get(child).add(signal);
++    if (signal === "SIGKILL") forced = true;
++    if (signalChild) {
++      try { Promise.resolve(signalChild(child, signal)).catch(() => {}); } catch { /* The bounded backstop still applies. */ }
++      return;
++    }
++    if (signal === "SIGTERM" && child.connected && typeof child.send === "function") {
++      // IPC invokes the same drain handler on Windows; SIGTERM alone forcibly
++      // terminates a Node child there. A failed IPC send retains kill fallback.
++      let answered = false;
++      const sentMessage = (error) => {
++        if (answered) return;
++        answered = true;
++        if (!error || finished || !live.has(child) || hasExited(child)) return;
++        try { child.kill(signal); } catch { /* Reaped or still bounded by the backstop. */ }
++      };
++      try { child.send({ type: "model-router:shutdown" }, sentMessage); } catch (error) { sentMessage(error); }
++      return;
++    }
++    try { child.kill(signal); } catch { /* Reaped or still bounded by the backstop. */ }
++  };
++  const forceRemaining = () => {
++    timedOut = true;
++    for (const child of live) signalOwned(child, "SIGKILL");
++    finish();
++  };
++  const stopDependencies = () => {
++    if (finished || dependenciesStarted) return;
++    dependenciesStarted = true;
++    cancelTimer(frontendTimer);
++    for (const child of owned) if (child !== frontend) signalOwned(child, "SIGTERM");
++    if (!live.size) finish();
++    else schedule(forceRemaining, phaseMs);
++  };
++  const exited = (child) => {
++    if (finished || !live.delete(child)) return;
++    if (!live.size) finish();
++    else if (child === frontend) stopDependencies();
++  };
++
++  if (!live.size) {
++    finish();
++    return promise;
++  }
++  schedule(forceRemaining, 2 * phaseMs);
++  // Register every observer before signaling, including a child whose kill or
++  // IPC handler exits synchronously. Rejected waiters never certify an exit.
++  for (const child of live) {
++    try {
++      Promise.resolve(waitForExit(child, "child", { signal: observation.signal })).then(
++        () => exited(child), () => {},
++      );
++    } catch { /* A broken observer cannot remove the owned-child backstop. */ }
++  }
++  if (frontend && live.has(frontend)) {
++    frontendTimer = schedule(() => {
++      timedOut = true;
++      signalOwned(frontend, "SIGKILL");
++      stopDependencies();
++    }, phaseMs);
++    signalOwned(frontend, "SIGTERM");
++  } else stopDependencies();
++  return promise;
++}
+diff --git a/src/start.mjs b/src/start.mjs
+--- a/src/start.mjs
++++ b/src/start.mjs
+@@ -24,0 +25 @@ import { gatewaySupervisorLimits, superviseGateway } from "./gateway-supervisor.
++import { stopServiceChildren } from "./service-shutdown.mjs";
+@@ -269,0 +269,3 @@ let shuttingDown = false;
++let frontendChild;
++let shutdownPromise;
++const shutdownController = new AbortController();
+@@ -281,0 +301 @@ function run(command, args, extraEnv = {}) {
++  if (shuttingDown) throw new Error("Service shutdown has started; no new child can be launched.");
+@@ -288 +308 @@ function run(command, args, extraEnv = {}) {
+-    stdio: "inherit",
++    stdio: command === process.execPath ? ["inherit", "inherit", "inherit", "ipc"] : "inherit",
+@@ -328 +339 @@ function stopChildren() {
+-  if (shuttingDown) return;
++  if (shuttingDown) return shutdownPromise;
+@@ -329,0 +341 @@ function stopChildren() {
++  shutdownController.abort();
+@@ -331,8 +343,7 @@ function stopChildren() {
+-  for (const child of children) {
+-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+-  }
+-  setTimeout(() => {
+-    for (const child of children) {
+-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+-    }
+-  }, SIGKILL_AFTER_MS).unref();
++  shutdownPromise = stopServiceChildren({
++    frontend: frontendChild,
++    children,
++    drainMs: SHUTDOWN_DRAIN_MS,
++    flushMs: SHUTDOWN_FLUSH_MS,
++  });
++  return shutdownPromise;
+@@ -342,0 +354,5 @@ for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, stopChildren);
++if (process.connected) {
++  process.on("message", (message) => {
++    if (message?.type === "model-router:shutdown") stopChildren();
++  });
++}
+@@ -626,2 +645,2 @@ try {
+-  stopChildren();
+-  await Promise.all(children.map((child) => waitForExit(child, "child")));
++  const shutdown = await stopChildren();
++  if (shutdown.timedOut) console.error("[model-router] owned-child shutdown exceeded its graceful allowance; force-stop was requested.");
+@@ -635,0 +655,3 @@ try {
++  // Receiving shutdown through IPC keeps that channel referenced. Release it
++  // only after owned-child shutdown, so the supervisor can drain and exit.
++  if (process.connected) process.disconnect();
+diff --git a/test/graceful-websocket-shutdown.test.mjs b/test/graceful-websocket-shutdown.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/graceful-websocket-shutdown.test.mjs
+@@ -0,0 +1,238 @@
++import assert from "node:assert/strict";
++import { spawn } from "node:child_process";
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import http from "node:http";
++import os from "node:os";
++import path from "node:path";
++import test from "node:test";
++import { fileURLToPath, pathToFileURL } from "node:url";
++
++import { callerBaseUrl } from "../src/caller-auth.mjs";
++import { handleResponsesWebSocketUpgrade } from "../src/responses-websocket.mjs";
++import { userModelEntry } from "../src/user-models.mjs";
++import { openPort } from "./port-pool.mjs";
++
++const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++const caller = "synthetic-graceful-ws-caller-capability";
++const internal = "synthetic-graceful-ws-internal-capability";
++const nativeCredential = "synthetic-graceful-ws-native-credential";
++const responseId = "resp_synthetic_shutdown";
++const messageId = "msg_synthetic_shutdown";
++const answer = "Synthetic final answer survives an IPC drain.";
++const frame = (event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
++const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
++
++async function within(promise, milliseconds, message) {
++  let timer;
++  try { return await Promise.race([promise, new Promise((_, reject) => {
++    timer = setTimeout(() => reject(new Error(message)), milliseconds);
++  })]); } finally { clearTimeout(timer); }
++}
++
++function observeBody(response) {
++  let text = "";
++  let firstByte;
++  const first = new Promise((resolve) => { firstByte = resolve; });
++  const done = new Promise((resolve, reject) => {
++    response.setEncoding("utf8");
++    response.on("data", (chunk) => { text += chunk; firstByte(); });
++    response.once("end", () => resolve(text));
++    response.once("error", reject);
++  });
++  // Attach a handler before shutdown can abort a stream, without swallowing the
++  // assertion's eventual rejection.
++  void done.catch(() => {});
++  return { first, done };
++}
++
++function events(text) {
++  return text.split(/\r?\n\r?\n/).flatMap((block) => {
++    const data = block.split(/\r?\n/).find((line) => line.startsWith("data: "))?.slice(6);
++    return data && data !== "[DONE]" ? [JSON.parse(data)] : [];
++  });
++}
++
++test("IPC shutdown drains real upstream WebSocket turns and closes their pools before natural exit", { timeout: 45_000 }, async (t) => {
++  for (const service of ["native Router", "generic API forwarder"]) {
++    for (const outcome of ["completed during drain", "held through drain deadline", "awaiting first provider event", "awaiting event without disconnect cleanup"]) {
++      await t.test(`${service}: ${outcome}`, { timeout: 10_000 }, async (subtest) => {
++        const directory = mkdtempSync(path.join(os.tmpdir(), "graceful-ws-shutdown-"));
++        const codexHome = path.join(directory, "codex");
++        mkdirSync(codexHome);
++        const sockets = new Set();
++        let upgrades = 0;
++        let submitted;
++        let providerResponse;
++        const turnArrived = new Promise((resolve) => { submitted = resolve; });
++        let closed;
++        const socketClosed = new Promise((resolve) => { closed = resolve; });
++        let rawHttpCalls = 0;
++        const awaitingEvent = outcome.startsWith("awaiting");
++        const provider = http.createServer(async (request, response) => {
++          if (request.method !== "POST" || request.url !== "/v1/responses") {
++            rawHttpCalls += 1;
++            response.writeHead(503).end("Synthetic forbidden HTTP fallback");
++            return;
++          }
++          const chunks = [];
++          for await (const chunk of request) chunks.push(chunk);
++          const body = JSON.parse(Buffer.concat(chunks));
++          providerResponse = response;
++          if (awaitingEvent) { submitted(body); return; }
++          response.writeHead(200, { "content-type": "text/event-stream" });
++          response.write(frame({ type: "response.created", sequence_number: 0,
++            response: { id: responseId, object: "response", created_at: 1, status: "in_progress", output: [] } }));
++          response.write(frame({ type: "response.output_item.added", sequence_number: 1, output_index: 0,
++            item: { id: messageId, type: "message", role: "assistant", status: "in_progress", content: [] } }));
++          response.write(frame({ type: "response.output_text.delta", sequence_number: 2,
++            output_index: 0, item_id: messageId, content_index: 0, delta: answer }));
++          submitted(body);
++        });
++        await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
++        const providerPort = provider.address().port;
++        provider.on("upgrade", (request, socket, head) => {
++          upgrades += 1;
++          sockets.add(socket);
++          socket.once("close", () => { sockets.delete(socket); closed(); });
++          handleResponsesWebSocketUpgrade(request, socket, head, {
++            callerKey: "synthetic-provider-unused-caller",
++            authenticateUpgrade: () => "/v1/responses",
++            responsesUrl: `http://127.0.0.1:${providerPort}/v1/responses`,
++          });
++        });
++        const generic = service === "generic API forwarder";
++        const model = userModelEntry({ providerId: "shutdown-ws", upstreamId: "synthetic-ws-model", priority: 100 });
++        writeFileSync(path.join(directory, "generic-providers.json"), JSON.stringify({ version: 1,
++          providers: [{ id: "shutdown-ws", displayName: "Synthetic shutdown provider",
++            baseUrl: `http://127.0.0.1:${providerPort}/v1`, adapter: "openai-responses", transport: "websocket",
++            headers: { "X-Tenant": "synthetic-owned-provider" }, allowPrivate: true, enabled: true }] }));
++        writeFileSync(path.join(directory, "user-models.json"), JSON.stringify({ version: 1, models: generic ? [model] : [] }));
++        writeFileSync(path.join(directory, "enabled-providers.json"), JSON.stringify({ version: 1, providers: generic ? ["shutdown-ws"] : [] }));
++        const port = await openPort();
++        const env = { ...process.env };
++        for (const name of Object.keys(env)) {
++          if (/^(MODEL_ROUTER_|CODEX_ROUTER_|ROUTER_PLANE_)/.test(name) || /^(https?|all|no)_proxy$/i.test(name)) delete env[name];
++        }
++        Object.assign(env, { CODEX_HOME: codexHome, MODEL_ROUTER_STATE_DIR: directory, CODEX_ROUTER_STATE_DIR: directory,
++          MODEL_ROUTER_USER_MODELS: path.join(directory, "user-models.json"),
++          MODEL_ROUTER_GENERIC_PROVIDERS: path.join(directory, "generic-providers.json"),
++          CODEX_ROUTER_PORT: String(port), MODEL_ROUTER_API_PORT: String(port), CODEX_ROUTER_API_PORT: String(port),
++          CODEX_ROUTER_INTERNAL_KEY: internal, MODEL_ROUTER_INTERNAL_KEY: internal, KIMI_INTERNAL_KEY: internal,
++          CODEX_ROUTER_CALLER_KEY: caller, CODEX_ROUTER_QUIET: "1", CODEX_ROUTER_NO_DISCOVERY: "0",
++          CODEX_ROUTER_SHOW_ALL_MODELS: "1", NODE_USE_ENV_PROXY: "0",
++          MODEL_ROUTER_SHUTDOWN_DRAIN_MS: outcome === "completed during drain" ? "1000" : "100",
++          CODEX_NATIVE_BASE_URL: `http://127.0.0.1:${providerPort}/backend-api/codex`,
++          CODEX_ROUTER_GATEWAY_BASE_URL: `http://127.0.0.1:${providerPort}/forbidden-gateway`,
++          MODEL_ROUTER_NATIVE_TRANSPORT: "websocket" });
++        const script = path.join(root, "src", generic ? "api-forwarder.mjs" : "router.mjs");
++        const removeCleanup = outcome === "awaiting event without disconnect cleanup";
++        const sourceUrl = pathToFileURL(script).href;
++        // Load the real service and all its normal dependencies. The negative
++        // control removes only the disconnect hook in this owned process;
++        // neither the repository file nor the production runtime is edited.
++        const negativeEntry = `
++          import { registerHooks } from "node:module";
++          registerHooks({ load(url, context, nextLoad) {
++            const result = nextLoad(url, context);
++            if (url !== ${JSON.stringify(sourceUrl)}) return result;
++            const source = Buffer.from(result.source).toString();
++            const changed = source.replace(/^process\\.once\\("disconnect", \\(\\) => (nativeWsPools|genericProviderPools)\\.closeAll\\(\\)\\);\\r?$/m, "");
++            if (changed === source) throw new Error("The disconnect-hook negative control did not apply.");
++            return { ...result, source: changed };
++          }});
++          await import(${JSON.stringify(sourceUrl)});
++        `;
++        const child = spawn(process.execPath, removeCleanup ? ["--input-type=module", "-e", negativeEntry] : [script], {
++          cwd: root, env, stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true,
++        });
++        let errors = "";
++        child.stderr.on("data", (chunk) => { errors += chunk; });
++        const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
++        subtest.after(async () => {
++          if (child.exitCode === null && child.signalCode === null) { child.kill("SIGKILL"); await exited; }
++          for (const socket of sockets) socket.destroy();
++          provider.closeAllConnections();
++          await new Promise((resolve) => provider.close(resolve));
++          const resolved = path.resolve(directory);
++          assert.ok(resolved.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`) &&
++            path.basename(resolved).startsWith("graceful-ws-shutdown-"), "cleanup must stay inside the owned fixture");
++          rmSync(resolved, { recursive: true, force: true });
++        });
++        const healthUrl = generic ? `http://127.0.0.1:${port}/health` : `${callerBaseUrl(port, caller)}/models`;
++        const deadline = Date.now() + 5_000;
++        for (;;) {
++          assert.equal(child.exitCode, null, errors);
++          try {
++            const response = await fetch(healthUrl, { headers: { authorization: `Bearer ${internal}` }, signal: AbortSignal.timeout(500) });
++            await response.arrayBuffer();
++            if (response.ok) break;
++          } catch { /* The owned listener may still be starting. */ }
++          assert.ok(Date.now() < deadline, `fixture did not start: ${errors}`);
++          await delay(25);
++        }
++        const target = new URL(generic ? `http://127.0.0.1:${port}/v1/responses` : `${callerBaseUrl(port, caller)}/responses`);
++        const payload = JSON.stringify({ model: generic ? model.gatewayModel : "gpt-6.1-sol", stream: true,
++          input: [{ type: "message", role: "user", content: "Synthetic graceful WebSocket generation" }] });
++        const pending = new Promise((resolve, reject) => {
++          const request = http.request(target, { method: "POST", agent: false,
++            headers: { "content-type": "application/json", authorization: `Bearer ${generic ? internal : nativeCredential}` } }, resolve);
++          request.once("error", reject);
++          request.end(payload);
++        });
++        let response;
++        let body;
++        if (!awaitingEvent) {
++          response = await within(pending, 3_000, `provider response did not begin: ${errors}`);
++          body = observeBody(response);
++          await within(body.first, 3_000, "the real WebSocket turn never reached the caller");
++        }
++        const submittedBody = await within(turnArrived, 3_000, "no complete upstream WebSocket request");
++        assert.equal(submittedBody.model, generic ? "synthetic-ws-model" : "gpt-6.1-sol");
++        assert.equal(upgrades, 1, "the tested service must acquire one actual upstream WebSocket");
++        assert.equal(sockets.size, 1, "the generation must still own an open upstream socket at shutdown");
++        await new Promise((resolve, reject) => child.send({ type: "model-router:shutdown" }, (error) => error ? reject(error) : resolve()));
++        const drainDeadline = Date.now() + 2_000;
++        while (!errors.includes("shutting down with") && Date.now() < drainDeadline) await delay(5);
++        assert.match(errors, /shutting down with 1 request\(s\) in flight/);
++        if (outcome === "completed during drain") {
++          assert.equal(sockets.size, 1, "IPC must not close a leased upstream socket before the HTTP drain finishes");
++          const item = { id: messageId, type: "message", role: "assistant", status: "completed",
++            content: [{ type: "output_text", text: answer, annotations: [] }] };
++          providerResponse.write(frame({ type: "response.output_item.done", sequence_number: 3, output_index: 0, item }));
++          providerResponse.end(frame({ type: "response.completed", sequence_number: 4,
++            response: { id: responseId, object: "response", status: "completed", output: [item],
++              usage: { input_tokens: 4, output_tokens: 8, total_tokens: 12 } } }));
++        }
++        if (awaitingEvent) {
++          response = await within(pending, 3_000, `IPC did not answer the pending prelude: ${errors}`);
++          body = observeBody(response);
++        }
++        const text = await within(body.done, 3_000, "IPC drain reset or held the caller response");
++        assert.equal(response.complete, true, "the HTTP response must reach clean EOF");
++        const output = awaitingEvent ? [] : events(text);
++        if (awaitingEvent) {
++          assert.equal(response.statusCode, 503);
++          assert.equal(JSON.parse(text).error.type, "local_router_restarting");
++          assert.match(text, /restarting/);
++        } else if (outcome === "completed during drain") {
++          assert.ok(output.some((event) => event.type === "response.completed"), text);
++          assert.ok(!output.some((event) => event.type === "error" || event.type === "response.failed"), text);
++        } else {
++          assert.ok(output.some((event) => event.type === "error" || event.type === "response.failed"), text);
++          assert.ok(!output.some((event) => event.type === "response.completed"), text);
++          assert.match(text, /restarting/);
++        }
++        if (removeCleanup) {
++          const exitedNaturally = await Promise.race([exited.then(() => true), delay(500).then(() => false)]);
++          assert.equal(exitedNaturally, false, "the negative control must expose the referenced leased socket");
++          assert.equal(sockets.size, 1, "removing cleanup must retain the real upstream socket after caller EOF");
++        } else {
++          assert.deepEqual(await within(exited, 2_000, `the drained process retained a leased WebSocket: ${errors}`), { code: 0, signal: null });
++          await within(socketClosed, 1_000, "natural shutdown did not close the upstream WebSocket");
++          assert.equal(sockets.size, 0);
++        }
++        assert.equal(rawHttpCalls, 0, "these assertions must not pass through HTTP fallback or another gateway");
++      });
++    }
++  }
++});
+diff --git a/test/service-shutdown.test.mjs b/test/service-shutdown.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/service-shutdown.test.mjs
+@@ -0,0 +1,339 @@
++import assert from "node:assert/strict";
++import { EventEmitter } from "node:events";
++import test from "node:test";
++
++import { stopServiceChildren } from "../src/service-shutdown.mjs";
++
++const drainMs = 20;
++const flushMs = 5;
++const phaseMs = 1_025;
++const absoluteMs = 2_050;
++const flushPromises = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
++
++function clock() {
++  let now = 0;
++  let serial = 0;
++  const pending = new Map();
++  const created = [];
++  const cleared = [];
++  return {
++    created,
++    cleared,
++    now: () => now,
++    pending: () => pending.size,
++    setTimer(callback, delay) {
++      const timer = { id: ++serial, at: now + delay, callback };
++      created.push(timer);
++      pending.set(timer.id, timer);
++      return timer;
++    },
++    clearTimer(timer) { cleared.push(timer.id); pending.delete(timer.id); },
++    async advance(duration) {
++      const target = now + duration;
++      await flushPromises();
++      for (;;) {
++        const next = [...pending.values()].filter((timer) => timer.at <= target)
++          .sort((left, right) => left.at - right.at || left.id - right.id)[0];
++        if (!next) break;
++        now = next.at;
++        pending.delete(next.id);
++        next.callback();
++        await flushPromises();
++      }
++      now = target;
++      await flushPromises();
++    },
++    suspend(timer) { pending.delete(timer.id); },
++  };
++}
++
++let fakePid = 100;
++class Child extends EventEmitter {
++  constructor(name, calls) {
++    super();
++    this.name = name;
++    this.calls = calls;
++    this.pid = ++fakePid;
++    this.exitCode = null;
++    this.signalCode = null;
++    this.connected = false;
++    this.messages = [];
++    this.sendCallbacks = [];
++  }
++  kill(signal) {
++    this.calls.push(`${this.name}:${signal}`);
++    return true;
++  }
++  send(message, callback) {
++    this.messages.push(message);
++    this.sendCallbacks.push(callback);
++    this.calls.push(`${this.name}:IPC`);
++    return true;
++  }
++  exit(code = 0, signal = null) {
++    this.exitCode = code;
++    this.signalCode = signal;
++    this.connected = false;
++    this.emit("exit", code, signal);
++    this.emit("close", code, signal);
++  }
++}
++
++function harness(names = ["frontend", "forwarder", "gateway"]) {
++  const timers = clock();
++  const calls = [];
++  const children = names.map((name) => new Child(name, calls));
++  const options = { frontend: children[0], children, drainMs, flushMs,
++    setTimer: timers.setTimer, clearTimer: timers.clearTimer };
++  return { timers, calls, children, options };
++}
++
++function noListeners(children) {
++  for (const child of children) {
++    assert.equal(child.listenerCount("exit"), 0, child.name);
++    assert.equal(child.listenerCount("close"), 0, child.name);
++    assert.equal(child.listenerCount("error"), 0, child.name);
++  }
++}
++
++test("frontend drains before dependencies receive any stop signal", async () => {
++  const h = harness();
++  const stop = stopServiceChildren(h.options);
++  assert.deepEqual(h.calls, ["frontend:SIGTERM"]);
++  await h.timers.advance(100);
++  assert.deepEqual(h.calls, ["frontend:SIGTERM"], "downstream calls must remain possible during the drain");
++  h.children[0].exit();
++  await flushPromises();
++  assert.deepEqual(h.calls, ["frontend:SIGTERM", "forwarder:SIGTERM", "gateway:SIGTERM"]);
++  h.children[1].exit();
++  h.children[2].exit();
++  assert.deepEqual(await stop, { timedOut: false, forced: false });
++  assert.equal(h.timers.pending(), 0);
++  noListeners(h.children);
++  await h.timers.advance(absoluteMs);
++  assert.equal(h.calls.length, 3, "cleared backstops must never signal again");
++});
++
++test("synchronous exits during signaling preserve dependency order and clear every timer", async () => {
++  const h = harness();
++  for (const child of h.children) {
++    child.kill = (signal) => { h.calls.push(`${child.name}:${signal}`); child.exit(); return true; };
++  }
++  assert.deepEqual(await stopServiceChildren(h.options), { timedOut: false, forced: false });
++  assert.deepEqual(h.calls, ["frontend:SIGTERM", "forwarder:SIGTERM", "gateway:SIGTERM"]);
++  assert.equal(h.timers.pending(), 0);
++  noListeners(h.children);
++});
++
++test("an already exited frontend and a startup failure without a frontend stop dependencies immediately", async () => {
++  for (const mode of ["already-exited", "not-started"]) {
++    const h = harness();
++    if (mode === "already-exited") h.children[0].exit();
++    else { h.options.frontend = undefined; h.options.children = h.children.slice(1); }
++    const stop = stopServiceChildren(h.options);
++    assert.deepEqual(h.calls, ["forwarder:SIGTERM", "gateway:SIGTERM"]);
++    h.children[1].exit();
++    h.children[2].exit();
++    assert.deepEqual(await stop, { timedOut: false, forced: false });
++    assert.equal(h.timers.pending(), 0);
++    noListeners(h.children);
++  }
++});
++
++test("no children or only reaped children complete without timers or signals", async () => {
++  for (const children of [[], [Object.assign(new Child("reaped", []), { exitCode: 0 })]]) {
++    const timers = clock();
++    const stop = stopServiceChildren({ children, drainMs, flushMs, setTimer: timers.setTimer, clearTimer: timers.clearTimer });
++    assert.deepEqual(await stop, { timedOut: false, forced: false });
++    assert.equal(timers.created.length, 0);
++    assert.equal(timers.pending(), 0);
++    noListeners(children);
++  }
++});
++
++test("hung frontend and dependency waiters cannot extend the absolute deadline", async () => {
++  const h = harness(["frontend", "dependency"]);
++  let settled = false;
++  const stop = stopServiceChildren({ ...h.options, waitForExit: () => new Promise(() => {}) });
++  stop.then(() => { settled = true; });
++  await h.timers.advance(phaseMs - 1);
++  assert.deepEqual(h.calls, ["frontend:SIGTERM"]);
++  assert.equal(settled, false);
++  await h.timers.advance(1);
++  assert.deepEqual(h.calls, ["frontend:SIGTERM", "frontend:SIGKILL", "dependency:SIGTERM"]);
++  await h.timers.advance(phaseMs - 1);
++  assert.equal(settled, false);
++  await h.timers.advance(1);
++  assert.deepEqual(await stop, { timedOut: true, forced: true });
++  assert.equal(h.timers.now(), absoluteMs);
++  assert.deepEqual(h.calls, ["frontend:SIGTERM", "frontend:SIGKILL", "dependency:SIGTERM", "dependency:SIGKILL"]);
++  assert.equal(h.timers.pending(), 0);
++});
++
++test("the absolute backstop still works if a phase callback never progresses", async () => {
++  const h = harness(["frontend", "dependency"]);
++  const stop = stopServiceChildren({ ...h.options, waitForExit: () => new Promise(() => {}) });
++  assert.deepEqual(h.timers.created.map((timer) => timer.at), [absoluteMs, phaseMs]);
++  h.timers.suspend(h.timers.created[1]);
++  await h.timers.advance(absoluteMs);
++  assert.deepEqual(await stop, { timedOut: true, forced: true });
++  assert.deepEqual(h.calls, ["frontend:SIGTERM", "frontend:SIGKILL", "dependency:SIGKILL"]);
++  assert.equal(h.timers.pending(), 0);
++  assert.ok(h.timers.cleared.includes(h.timers.created[1].id));
++});
++
++test("injected exit observations are canceled and late resolutions cannot restart shutdown", async () => {
++  const h = harness(["frontend", "dependency"]);
++  const observers = [];
++  const stop = stopServiceChildren({ ...h.options, waitForExit(child, label, { signal }) {
++    return new Promise((resolve) => observers.push({ child, label, signal, resolve }));
++  } });
++  assert.deepEqual(observers.map(({ label }) => label), ["child", "child"]);
++  await h.timers.advance(absoluteMs);
++  assert.deepEqual(await stop, { timedOut: true, forced: true });
++  assert.ok(observers.every(({ signal }) => signal.aborted));
++  const stoppedCalls = [...h.calls];
++  for (const observer of observers) observer.resolve();
++  await flushPromises();
++  await h.timers.advance(absoluteMs);
++  assert.deepEqual(h.calls, stoppedCalls);
++  assert.equal(h.timers.pending(), 0);
++});
++
++test("a hung dependency gets its own bounded phase and cleaned exit listeners", async () => {
++  const h = harness(["frontend", "dependency"]);
++  const stop = stopServiceChildren(h.options);
++  await h.timers.advance(10);
++  h.children[0].exit();
++  await flushPromises();
++  await h.timers.advance(phaseMs);
++  assert.deepEqual(await stop, { timedOut: true, forced: true });
++  assert.equal(h.timers.now(), 10 + phaseMs);
++  assert.deepEqual(h.calls, ["frontend:SIGTERM", "dependency:SIGTERM", "dependency:SIGKILL"]);
++  assert.equal(h.timers.pending(), 0);
++  noListeners(h.children);
++  h.children[1].exit();
++  await h.timers.advance(absoluteMs);
++  assert.equal(h.calls.length, 3);
++});
++
++test("stop is idempotent, deduplicates handles, and captures no later foreign child", async () => {
++  const h = harness(["frontend", "dependency"]);
++  h.options.children.push(h.children[1]);
++  const stop = stopServiceChildren(h.options);
++  assert.equal(stopServiceChildren(h.options), stop);
++  const foreign = new Child("foreign", h.calls);
++  h.options.children.push(foreign);
++  assert.equal(stopServiceChildren(h.options), stop);
++  await h.timers.advance(absoluteMs);
++  assert.deepEqual(await stop, { timedOut: true, forced: true });
++  assert.deepEqual(h.calls, ["frontend:SIGTERM", "frontend:SIGKILL", "dependency:SIGTERM", "dependency:SIGKILL"]);
++  assert.equal(stopServiceChildren(h.options), stop);
++  assert.equal(foreign.listenerCount("exit"), 0);
++  assert.equal(h.timers.pending(), 0);
++});
++
++test("IPC stops connected Node children without abrupt SIGTERM and ignores duplicate acknowledgments", async () => {
++  const h = harness(["frontend", "dependency"]);
++  for (const child of h.children) child.connected = true;
++  const stop = stopServiceChildren(h.options);
++  assert.deepEqual(h.calls, ["frontend:IPC"]);
++  assert.deepEqual(h.children[0].messages, [{ type: "model-router:shutdown" }]);
++  h.children[0].sendCallbacks[0](null);
++  h.children[0].sendCallbacks[0](new Error("duplicate callback"));
++  assert.deepEqual(h.calls, ["frontend:IPC"]);
++  h.children[0].exit();
++  await flushPromises();
++  assert.deepEqual(h.calls, ["frontend:IPC", "dependency:IPC"]);
++  assert.deepEqual(h.children[1].messages, [{ type: "model-router:shutdown" }]);
++  h.children[1].sendCallbacks[0](null);
++  h.children[1].exit();
++  assert.deepEqual(await stop, { timedOut: false, forced: false });
++  assert.equal(h.timers.pending(), 0);
++  noListeners(h.children);
++});
++
++test("IPC failure falls back once, including thrown sends, while late callbacks never kill an exited child", async () => {
++  for (const mode of ["callback-error", "throw", "after-exit"]) {
++    const h = harness(["frontend"]);
++    const child = h.children[0];
++    child.connected = true;
++    if (mode === "throw") {
++      child.send = (_message, callback) => {
++        child.sendCallbacks.push(callback);
++        h.calls.push("frontend:IPC");
++        throw new Error("send failed");
++      };
++    }
++    const stop = stopServiceChildren(h.options);
++    if (mode === "after-exit") child.exit();
++    child.sendCallbacks[0](new Error("send failed"));
++    child.sendCallbacks[0](new Error("duplicate failure"));
++    assert.deepEqual(h.calls, mode === "after-exit" ? ["frontend:IPC"] : ["frontend:IPC", "frontend:SIGTERM"]);
++    child.exit();
++    assert.deepEqual(await stop, { timedOut: false, forced: false });
++    child.sendCallbacks[0](new Error("after shutdown"));
++    assert.equal(h.calls.length, mode === "after-exit" ? 1 : 2);
++    assert.equal(h.timers.pending(), 0);
++    noListeners(h.children);
++  }
++});
++
++test("IPC failure arriving after the backstop cannot add another signal to an unconfirmed child", async () => {
++  const h = harness(["frontend"]);
++  h.children[0].connected = true;
++  const stop = stopServiceChildren(h.options);
++  await h.timers.advance(absoluteMs);
++  assert.deepEqual(await stop, { timedOut: true, forced: true });
++  assert.deepEqual(h.calls, ["frontend:IPC", "frontend:SIGKILL"]);
++  h.children[0].sendCallbacks[0](new Error("late IPC failure"));
++  h.children[0].sendCallbacks[0](new Error("duplicate late failure"));
++  assert.deepEqual(h.calls, ["frontend:IPC", "frontend:SIGKILL"]);
++  assert.equal(h.timers.pending(), 0);
++  noListeners(h.children);
++});
++
++test("throwing signal callbacks and rejected exit observers still settle within the backstop", async () => {
++  for (const waitForExit of [() => { throw new Error("observer failed"); }, () => Promise.reject(new Error("observer rejected"))]) {
++    const h = harness(["frontend", "dependency"]);
++    const stop = stopServiceChildren({ ...h.options, waitForExit,
++      signalChild(child, signal) { h.calls.push(`${child.name}:${signal}`); throw new Error("signal failed"); } });
++    await h.timers.advance(absoluteMs);
++    assert.deepEqual(await stop, { timedOut: true, forced: true });
++    assert.deepEqual(h.calls, ["frontend:SIGTERM", "frontend:SIGKILL", "dependency:SIGTERM", "dependency:SIGKILL"]);
++    assert.equal(h.timers.pending(), 0);
++  }
++});
++
++test("failed spawns are observed without exit and are never mistaken for a running process error", async () => {
++  const h = harness(["frontend"]);
++  h.children[0].pid = undefined;
++  const stop = stopServiceChildren(h.options);
++  h.children[0].emit("error", new Error("spawn ENOENT"));
++  assert.deepEqual(await stop, { timedOut: false, forced: false });
++  assert.equal(h.timers.pending(), 0);
++  noListeners(h.children);
++
++  const running = harness(["frontend"]);
++  const runningStop = stopServiceChildren(running.options);
++  running.children[0].emit("error", new Error("running process error"));
++  await running.timers.advance(phaseMs - 1);
++  assert.deepEqual(running.calls, ["frontend:SIGTERM"]);
++  running.children[0].exit();
++  assert.deepEqual(await runningStop, { timedOut: false, forced: false });
++  assert.equal(running.timers.pending(), 0);
++});
++
++test("foreign frontend handles and invalid budgets are rejected before any signal or timer", () => {
++  const h = harness(["owned"]);
++  const foreign = new Child("foreign", h.calls);
++  assert.throws(() => stopServiceChildren({ ...h.options, frontend: foreign }), /must belong to the owned/);
++  for (const bad of [-1, Infinity, NaN, "20"]) {
++    assert.throws(() => stopServiceChildren({ ...h.options, drainMs: bad }), /finite nonnegative/);
++  }
++  assert.throws(() => stopServiceChildren({ ...h.options, drainMs: 2_147_483_647 }), /timer limit/);
++  assert.throws(() => stopServiceChildren({ children: [123] }), /ChildProcess handles/);
++  assert.throws(() => stopServiceChildren({ children: new Set() }), /owned child array/);
++  assert.equal(h.calls.length, 0);
++  assert.equal(h.timers.created.length, 0);
++});

@@ -1,0 +1,972 @@
+diff --git a/changelog.d/model-overlay-adoption.md b/changelog.d/model-overlay-adoption.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/model-overlay-adoption.md
+@@ -0,0 +1 @@
++- Model-overlay changes now prepare required dependencies and gateway inputs, restart and verify the Router's adopted execution-plan fingerprint, then publish installed-client model catalogs. Foreground or unknown service ownership fails closed; only a conclusively refused loopback port permits offline publication. Failed transactional updates restore exact prior files, adopt the previous routing plan, and republish it under an independent rollback deadline. Dependency-only preparation skips matching runtimes and unused Python and keeps successfully installed dependencies on rollback. Combined offline publication remains available for explicit tooling use.
+diff --git a/src/control.mjs b/src/control.mjs
+--- a/src/control.mjs
++++ b/src/control.mjs
+@@ -729,28 +731,18 @@ function refreshActiveTarget(target) {
+-// Active routers read provider selection on each request, so only their picker
+-// catalog needs refreshing. The full enable path is reserved for inactive targets.
+-async function applyProviderSelectionForTargets(selected, { activate = false } = {}) {
+-  const applied = [];
+-  const skipped = [];
+-  for (const target of selected) {
+-    if (!targetIsActive(target) && !activate) {
+-      skipped.push(target);
+-      continue;
+-    }
+-    if (targetIsActive(target)) {
+-      refreshActiveTarget(target);
+-    } else {
+-      // `bin/enable` is a POSIX shell script; spawning it on Windows failed
+-      // with ENOEXEC and reported it as a plain "apply failed". The shared
+-      // helper already knows each platform's checkout entry point and is unit
+-      // tested, so this branch is no longer a second untested copy.
+-      const { currentCheckoutInstaller } = await import("./update.mjs");
+-      const enable = currentCheckoutInstaller(process.platform, target, {
+-        posixScript: "enable",
+-      });
+-      const result = spawnSync(enable.command, enable.args, {
+-        cwd: REPO_ROOT,
+-        env: { ...process.env, MODEL_ROUTER_TARGET: target },
+-        stdio: "inherit",
+-      });
+-      if (result.status !== 0) throw new Error(`${target}: apply failed`);
+-    }
++// Readiness adoption precedes every installed client's publication. An
++// inactive client may then use the full enable installer when explicitly
++// requested; active clients are refreshed once by the shared publisher.
++async function applyProviderSelectionForTargets(selected, { activate = false, ...operation } = {}) {
++  const applied = selected.filter(targetIsActive);
++  const inactive = selected.filter((target) => !targetIsActive(target));
++  await applyModelOverlayPublication({ ...operation, restart: true });
++  if (!activate) return { applied, skipped: inactive };
++  for (const target of inactive) {
++    const { currentCheckoutInstaller } = await import("./update.mjs");
++    const enable = currentCheckoutInstaller(process.platform, target, { posixScript: "enable" });
++    const result = spawnSync(enable.command, enable.args, {
++      cwd: REPO_ROOT,
++      env: { ...process.env, MODEL_ROUTER_TARGET: target },
++      stdio: "inherit",
++      windowsHide: true,
++    });
++    if (result.status !== 0) throw new Error(`${target}: apply failed`);
+@@ -759 +751 @@ async function applyProviderSelectionForTargets(selected, { activate = false } =
+-  return { applied, skipped };
++  return { applied, skipped: [] };
+@@ -788,0 +781 @@ async function runSetApply(provider, desired) {
++    restart: true,
+@@ -791,2 +784,2 @@ async function runSetApply(provider, desired) {
+-    applyPublication: async () => {
+-      publication = await applyProviderSelectionForTargets(TARGETS, { activate });
++    applyPublication: async (operation) => {
++      publication = await applyProviderSelectionForTargets(TARGETS, { activate, ...operation });
+@@ -1440 +1499 @@ async function refreshModelSettingsCatalog() {
+-async function restartRouterForLocalRoutes({ signal, deadline } = {}) {
++async function restartRouterForLocalRoutes({ signal, deadline, expectedFingerprint } = {}) {
+@@ -1443 +1502 @@ async function restartRouterForLocalRoutes({ signal, deadline } = {}) {
+-  // performs. Foreground/dev routers have no service and are skipped.
++  // performs. A running foreground router must explicitly adopt the generation.
+@@ -1446 +1505 @@ async function restartRouterForLocalRoutes({ signal, deadline } = {}) {
+-  const restarted = await restartRouterServiceIfInstalled({ signal, deadline });
++  const restarted = await restartRouterServiceIfInstalled({ signal, deadline, expectedFingerprint });
+diff --git a/src/model-overlay-publication.mjs b/src/model-overlay-publication.mjs
+--- a/src/model-overlay-publication.mjs
++++ b/src/model-overlay-publication.mjs
+@@ -14,0 +15,3 @@ import { routerNodeBinary } from "./node-runtime.mjs";
++import { STATE_DIR } from "./paths.mjs";
++import { startupTimeoutMs } from "./startup-timeout.mjs";
++import { prepareRuntimeDependenciesFresh, RUNTIME_DEPENDENCY_PREPARATION_MS } from "./runtime-dependency-preparation.mjs";
+@@ -31,0 +35,5 @@ const CHILD_ARGUMENT = "--publish-in-fresh-process";
++const PREPARE_CHILD_ARGUMENT = "--prepare-in-fresh-process";
++const TARGETS_CHILD_ARGUMENT = "--publish-targets-in-fresh-process";
++const ADOPTED_CHILD_ARGUMENT = "--publish-adopted-in-fresh-process";
++const VERIFY_ADOPTED_CHILD_ARGUMENT = "--verify-adopted-in-fresh-process";
++const OVERLAY_PREPARE_OPERATION_MS = 30_000;
+@@ -77,7 +96,119 @@ function overlayRollbackDeadline(restart) {
+-  return operationDeadlineFromEnvironment({}, {
+-    timeoutMs: restart
+-      ? OVERLAY_RESTARTING_PUBLICATION_MS
+-      : OVERLAY_PUBLISH_OPERATION_MS,
+-    maximumMs: restart
+-      ? OVERLAY_RESTARTING_PUBLICATION_MS
+-      : OVERLAY_PUBLISH_OPERATION_MS,
++  return overlayPublicationDeadline(undefined, {}, { restart, restoreAllowanceMs });
++}
++
++function overlayRestoreAllowanceMs(snapshots) {
++  // File-array captures expose the number of prior private files that need
++  // hardening after restoration. Custom snapshot shapes cannot prove a file
++  // count; their callback retains a separate, explicitly bounded allowance.
++  if (!Array.isArray(snapshots) || snapshots.some((snapshot) =>
++    typeof snapshot?.path !== "string" || !path.isAbsolute(snapshot.path)
++      || typeof snapshot.existed !== "boolean")) return OVERLAY_UNKNOWN_RESTORE_OPERATION_MS;
++  const fileCount = snapshots.filter((snapshot) => snapshot?.existed === true).length;
++  return OVERLAY_RESTORE_OVERHEAD_MS
++    + fileCount * startupTimeoutMs("CODEX_ROUTER_WINDOWS_PRIVATE_SYNC_TIMEOUT_MS", 15_000);
++}
++
++async function freshRegistryExecutionPlan() {
++  const [registry, selection, execution, antigravity] = await Promise.all([
++    import("./model-registry.mjs"), import("./provider-selection.mjs"),
++    import("./route-execution-plan.mjs"), import("./antigravity-oauth-status.mjs"),
++  ]);
++  const enabled = new Set(selection.readProviderSelection());
++  // An explicit proof can be pending while the provider remains unselected.
++  // Preserve its temporary listener without enabling verified inactive routes.
++  const startup = antigravity.antigravityOAuthStartupState();
++  return execution.createExecutionPlan({
++    models: registry.MODELS,
++    providerForModel: registry.providerForModel,
++    routeEnabled: (model) => {
++      const provider = registry.RUNTIME_PROVIDERS.get(model.provider);
++      return provider?.generic === true ? provider.enabled !== false : enabled.has(model.provider);
++    },
++    pendingAntigravity: Boolean(startup.pendingActivationGeneration),
++  });
++}
++
++/** Prepare only gateway inputs and a nonsecret adoption identity. */
++export async function prepareModelOverlayPublication({
++  writeGateway,
++  executionPlan = freshRegistryExecutionPlan,
++  signal,
++  deadline,
++} = {}) {
++  const operationDeadline = overlayPublicationDeadline(deadline);
++  remainingOperationMs(operationDeadline, signal);
++  const plan = await executionPlan();
++  if (!/^[a-f0-9]{64}$/.test(plan?.fingerprint || "")) {
++    throw new Error("The model overlay has no valid execution-plan fingerprint.");
++  }
++  const write = writeGateway || (await import("./litellm-config.mjs")).writeLiteLlmConfig;
++  remainingOperationMs(operationDeadline, signal);
++  const gatewayPath = write();
++  remainingOperationMs(operationDeadline, signal);
++  return { gatewayPath, expectedFingerprint: plan.fingerprint };
++}
++
++/** Publish clients only after the fresh registry still matches preparation. */
++export async function publishModelOverlayTargets({
++  expectedFingerprint,
++  executionPlan = freshRegistryExecutionPlan,
++  refreshTargets,
++  signal,
++  deadline,
++} = {}) {
++  const operationDeadline = overlayPublicationDeadline(deadline);
++  remainingOperationMs(operationDeadline, signal);
++  const plan = await executionPlan();
++  if (!/^[a-f0-9]{64}$/.test(expectedFingerprint || "") || plan?.fingerprint !== expectedFingerprint) {
++    const error = new Error("Model routes changed after preparation; client publication was stopped before touching any client.");
++    error.code = "model_overlay_adoption_failed";
++    throw error;
++  }
++  const refresh = refreshTargets || (await import("./target-integration.mjs")).refreshTargetPickerIfInstalled;
++  remainingOperationMs(operationDeadline, signal);
++  const targetsRefreshed = await refresh({ signal, deadline: operationDeadline });
++  return { targetsRefreshed };
++}
++
++function adoptedOverlayDeadline(deadline, environment = process.env) {
++  return operationDeadlineFromEnvironment(
++    Number.isSafeInteger(deadline)
++      ? { ...environment, CODEX_ROUTER_OPERATION_DEADLINE_MS: String(deadline) }
++      : environment,
++    { timeoutMs: OVERLAY_PUBLISH_OPERATION_MS, maximumMs: OVERLAY_PUBLISH_OPERATION_MS },
++  );
++}
++
++/** Validate this process's registry without writing; offline profiles opt in. */
++export async function verifyAdoptedModelOverlayPublication({
++  allowOffline = false,
++  executionPlan = freshRegistryExecutionPlan,
++  verifyAdoption,
++  signal,
++  deadline,
++} = {}) {
++  const operationDeadline = adoptedOverlayDeadline(deadline);
++  remainingOperationMs(operationDeadline, signal);
++  const plan = await executionPlan();
++  const verify = verifyAdoption || (await import("./router-restart.mjs")).verifyRouterExecutionPlanAdoption;
++  await verify({ expectedFingerprint: plan?.fingerprint, allowOffline: allowOffline === true, signal, deadline: operationDeadline });
++  return { expectedFingerprint: plan.fingerprint };
++}
++
++/** Refresh catalogs for the routes a healthy running Router already adopted. */
++export async function publishAdoptedModelOverlayPublication({
++  executionPlan = freshRegistryExecutionPlan,
++  verifyAdoption,
++  refreshTargets,
++  signal,
++  deadline,
++} = {}) {
++  const operationDeadline = adoptedOverlayDeadline(deadline);
++  const { expectedFingerprint } = await verifyAdoptedModelOverlayPublication({
++    executionPlan, verifyAdoption, signal, deadline: operationDeadline,
++  });
++  // Use the same fresh process for verification and publication. The parent
++  // owns the model-overlay lock, so cooperating mutations cannot intervene.
++  const published = await publishModelOverlayTargets({
++    expectedFingerprint, executionPlan, refreshTargets,
++    signal, deadline: operationDeadline,
+@@ -84,0 +216 @@ function overlayRollbackDeadline(restart) {
++  return { expectedFingerprint, ...published };
+@@ -179 +320 @@ export function restoreModelOverlayFiles(
+- * Rebuild the shared routing plane, then every installed client's model list.
++ * Rebuild gateway inputs and clients together for explicit offline tooling.
+@@ -181,4 +322,3 @@ export function restoreModelOverlayFiles(
+- * This is exported for dependency-injected tests and for the fresh child below.
+- * Callers that have already loaded model-registry.mjs must use
+- * publishModelOverlayFresh(): user-model overlays are read at module load, so
+- * rebuilding in their process can silently publish the pre-mutation model set.
++ * A caller with a loaded registry must use the fresh-child form below to avoid
++ * publishing a pre-mutation snapshot. Live overlay mutations instead use
++ * applyModelOverlayPublication(), which verifies service adoption before clients.
+@@ -206,3 +346,2 @@ export async function rebuildModelOverlayPublication({
+- * Publish from a new Node process so the registry observes the overlay that was
+- * just committed to disk. The child also provides one fail-closed ordering
+- * point: the gateway is written before any Codex, DSH, or Gemini publication.
++ * Combined offline publication from a fresh registry snapshot. Live mutations
++ * must use the separate preparation/adoption/target stages in the finalizer.
+@@ -237,0 +377,54 @@ export async function publishModelOverlayFresh({
++async function runFreshOverlayStage(argument, {
++  run = runProcessTree,
++  sourceRoot = REPO_ROOT,
++  environment = process.env,
++  executable = routerNodeBinary(environment),
++  expectedFingerprint,
++  allowOffline = false,
++  signal,
++  deadline,
++} = {}) {
++  const maximumMs = argument === PREPARE_CHILD_ARGUMENT
++    ? OVERLAY_PREPARE_OPERATION_MS : OVERLAY_PUBLISH_OPERATION_MS;
++  const operationDeadline = operationDeadlineFromEnvironment(
++    Number.isSafeInteger(deadline)
++      ? { ...environment, CODEX_ROUTER_OPERATION_DEADLINE_MS: String(deadline) } : environment,
++    { timeoutMs: maximumMs, maximumMs },
++  );
++  const args = [SELF, argument];
++  if (argument === VERIFY_ADOPTED_CHILD_ARGUMENT && allowOffline === true) args.push("--allow-confirmed-offline");
++  if (argument === TARGETS_CHILD_ARGUMENT) {
++    if (!/^[a-f0-9]{64}$/.test(expectedFingerprint || "")) {
++      throw new Error("Client publication requires its prepared execution-plan fingerprint.");
++    }
++    args.push(expectedFingerprint);
++  }
++  const result = await runOperationProcessTree(executable, args, {
++    cwd: sourceRoot, env: environment, childEnvironment: { MODEL_ROUTER_TARGET: "codex" },
++    signal, deadline: operationDeadline, run, encoding: "utf8", windowsHide: true,
++  });
++  if (result?.status !== 0) {
++    throw new Error(String(result?.stderr || "").trim() || "The shared model-overlay stage could not complete.");
++  }
++  let prepared;
++  try { prepared = JSON.parse(result.stdout); } catch {
++    throw new Error("The shared model-overlay stage returned an invalid result.");
++  }
++  if (argument === PREPARE_CHILD_ARGUMENT && !/^[a-f0-9]{64}$/.test(prepared?.expectedFingerprint || "")) {
++    throw new Error("The prepared model overlay returned no valid execution-plan fingerprint.");
++  }
++  if ([ADOPTED_CHILD_ARGUMENT, VERIFY_ADOPTED_CHILD_ARGUMENT].includes(argument)
++      && !/^[a-f0-9]{64}$/.test(prepared?.expectedFingerprint || "")) {
++    throw new Error("The adopted model overlay returned no valid execution-plan fingerprint.");
++  }
++  return prepared;
++}
++
++export function prepareModelOverlayFresh(options = {}) {
++  return runFreshOverlayStage(PREPARE_CHILD_ARGUMENT, options);
++}
++
++export function publishModelOverlayTargetsFresh(options = {}) {
++  return runFreshOverlayStage(TARGETS_CHILD_ARGUMENT, options);
++}
++
+@@ -250 +476,4 @@ export async function applyModelOverlayPublication({
+-  publish = publishModelOverlayFresh,
++  prepareDependencies,
++  prepare,
++  publish,
++  verifyAdoption,
+@@ -256,0 +486,8 @@ export async function applyModelOverlayPublication({
++  // A legacy injected publisher is a test/tooling boundary; never introduce a
++  // real child write behind it. Full phase injection supplies prepare too.
++  // Production defaults always prepare and verify the adoption fingerprint.
++  const prepareRoutes = prepare || (publish ? async () => ({}) : prepareModelOverlayFresh);
++  const prepareDeps = prepareDependencies || (publish ? async () => ({}) : prepareRuntimeDependenciesFresh);
++  const publishTargets = publish || publishModelOverlayTargetsFresh;
++  let prepared;
++  let allowOffline = !restart;
+@@ -258 +494,0 @@ export async function applyModelOverlayPublication({
+-    let publishDeadline = operationDeadline;
+@@ -261,6 +497,12 @@ export async function applyModelOverlayPublication({
+-      publishDeadline = contractOperationDeadline(operationDeadline, {
+-        reserveMs: OVERLAY_SERVICE_RESTART_RESERVE_MS,
+-        message: "The model-overlay publication has no remaining service-restart epoch.",
+-      });
+-    } else remainingOperationMs(operationDeadline, signal);
+-    await publish({ signal, deadline: publishDeadline });
++    } else assertOfflinePublicationAllowance(operationDeadline, signal);
++    const dependencyDeadline = contractOperationDeadline(operationDeadline, {
++      reserveMs: OVERLAY_PREPARE_OPERATION_MS + OVERLAY_PUBLISH_OPERATION_MS
++        + (restart ? OVERLAY_SERVICE_RESTART_RESERVE_MS : 0),
++      message: "The model-overlay dependency preparation has no remaining adoption/publication epoch.",
++    });
++    await prepareDeps({ signal, deadline: dependencyDeadline });
++    const prepareDeadline = contractOperationDeadline(operationDeadline, {
++      reserveMs: OVERLAY_PUBLISH_OPERATION_MS + (restart ? OVERLAY_SERVICE_RESTART_RESERVE_MS : 0),
++      message: "The model-overlay preparation has no remaining adoption/publication epoch.",
++    });
++    prepared = await prepareRoutes({ signal, deadline: prepareDeadline });
+@@ -270,4 +511,0 @@ export async function applyModelOverlayPublication({
+-    // A restart is the commit point for the running service. Do not load an
+-    // overlay whose gateway/client publication did not finish; the completed
+-    // physical operation remains truthful and its warning tells the operator
+-    // that publication (and therefore restart) is still needed.
+@@ -277,2 +515,2 @@ export async function applyModelOverlayPublication({
+-  if (restart) {
+-    try {
++  try {
++    if (restart) {
+@@ -283,5 +521,11 @@ export async function applyModelOverlayPublication({
+-      assertServiceRestartAllowance(operationDeadline, signal);
+-      await reload({ signal, deadline: operationDeadline });
+-    } catch (error) {
+-      if (!warningOnly) throw error;
+-      warnings.restartError = errorMessage(error);
++      const restartDeadline = contractOperationDeadline(operationDeadline, {
++        reserveMs: OVERLAY_PUBLISH_OPERATION_MS,
++        message: "The model-overlay restart has no remaining client-publication epoch.",
++      });
++      assertServiceRestartAllowance(restartDeadline, signal);
++      const restarted = await reload({ signal, deadline: restartDeadline, expectedFingerprint: prepared?.expectedFingerprint });
++      allowOffline = restarted === false;
++    }
++    if (prepared?.expectedFingerprint !== undefined) {
++      const verify = verifyAdoption || (await import("./router-restart.mjs")).verifyRouterExecutionPlanAdoption;
++      await verify({ signal, deadline: operationDeadline, expectedFingerprint: prepared.expectedFingerprint, allowOffline });
+@@ -288,0 +533,12 @@ export async function applyModelOverlayPublication({
++  } catch (error) {
++    if (!warningOnly) throw error;
++    warnings.restartError = errorMessage(error);
++    return warnings;
++  }
++
++  try {
++    remainingOperationMs(operationDeadline, signal);
++    await publishTargets({ signal, deadline: operationDeadline, expectedFingerprint: prepared?.expectedFingerprint });
++  } catch (error) {
++    if (!warningOnly) throw error;
++    warnings.catalogError = errorMessage(error);
+@@ -417 +690 @@ export async function transactModelOverlayMutation({
+-      timeoutMs: rollbackReserveMs + 10_000,
++      timeoutMs: rollbackReserveMs + OVERLAY_OWNER_CLEANUP_RESERVE_MS,
+@@ -424,2 +697,3 @@ if (process.argv[1] && path.resolve(process.argv[1]) === SELF) {
+-  if (process.argv[2] !== CHILD_ARGUMENT) {
+-    console.error(`Usage: node ${path.basename(SELF)} ${CHILD_ARGUMENT}`);
++  const argument = process.argv[2];
++  if (![CHILD_ARGUMENT, PREPARE_CHILD_ARGUMENT, TARGETS_CHILD_ARGUMENT, ADOPTED_CHILD_ARGUMENT, VERIFY_ADOPTED_CHILD_ARGUMENT].includes(argument)) {
++    console.error(`Usage: node ${path.basename(SELF)} ${CHILD_ARGUMENT}|${PREPARE_CHILD_ARGUMENT}|${TARGETS_CHILD_ARGUMENT}|${ADOPTED_CHILD_ARGUMENT}|${VERIFY_ADOPTED_CHILD_ARGUMENT} [fingerprint|--allow-confirmed-offline]`);
+@@ -429 +703,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === SELF) {
+-    const result = await rebuildModelOverlayPublication();
++    const deadline = operationDeadlineFromEnvironment(process.env, {
++      timeoutMs: argument === PREPARE_CHILD_ARGUMENT ? OVERLAY_PREPARE_OPERATION_MS : OVERLAY_PUBLISH_OPERATION_MS,
++      maximumMs: argument === PREPARE_CHILD_ARGUMENT ? OVERLAY_PREPARE_OPERATION_MS : OVERLAY_PUBLISH_OPERATION_MS,
++    });
++    const result = argument === PREPARE_CHILD_ARGUMENT
++      ? await prepareModelOverlayPublication({ deadline })
++      : argument === TARGETS_CHILD_ARGUMENT
++        ? await publishModelOverlayTargets({ deadline, expectedFingerprint: process.argv[3] })
++        : argument === ADOPTED_CHILD_ARGUMENT
++          ? await publishAdoptedModelOverlayPublication({ deadline })
++          : argument === VERIFY_ADOPTED_CHILD_ARGUMENT
++            ? await verifyAdoptedModelOverlayPublication({ deadline, allowOffline: process.argv[3] === "--allow-confirmed-offline" })
++            : await rebuildModelOverlayPublication({ deadline });
+diff --git a/src/router-restart.mjs b/src/router-restart.mjs
+--- a/src/router-restart.mjs
++++ b/src/router-restart.mjs
+@@ -136 +136,2 @@ export async function routerServiceStatus({
+-      typeof parsed?.state !== "string"
++      typeof parsed?.state !== "string" ||
++      (parsed.statusUnknown !== undefined && typeof parsed.statusUnknown !== "boolean")
+@@ -143,0 +145,3 @@ export async function routerServiceStatus({
++      ...(parsed.statusUnknown === true || parsed.state === "unknown"
++        || (!parsed.installed && !parsed.loaded && parsed.state !== "stopped")
++        ? { statusUnknown: true } : {}),
+@@ -228,0 +233,55 @@ export function environmentPoolRemovalReminder(status) {
++function adoptionError(message) {
++  const error = new Error(message);
++  error.code = "model_overlay_adoption_failed";
++  return error;
++}
++
++async function probeRouterOwnership({ waitForHealth, signal, deadline }) {
++  assertOperationActive(signal, deadline);
++  const remaining = remainingOperationMs(deadline, signal);
++  const health = await waitForHealth({
++    timeoutMs: 0,
++    requestTimeoutMs: Math.max(1, Math.min(1_000, remaining ?? 1_000)),
++  });
++  assertOperationActive(signal, deadline);
++  return health;
++}
++
++/** Verify the registry generation a healthy running Router actually adopted. */
++export async function verifyRouterExecutionPlanAdoption({
++  expectedFingerprint,
++  allowOffline = true,
++  waitForHealth = waitForRouterHealth,
++  serviceStatus = routerServiceStatus,
++  signal,
++  deadline,
++} = {}) {
++  if (!/^[a-f0-9]{64}$/.test(expectedFingerprint || "")) {
++    throw adoptionError("A prepared model overlay has no valid execution-plan fingerprint.");
++  }
++  const health = await probeRouterOwnership({ waitForHealth, signal, deadline });
++  if (health?.ok === true && health.payload?.service === "codex-router") {
++    if (health.payload.executionPlan?.fingerprint !== expectedFingerprint) {
++      throw adoptionError(
++        "The running router has not adopted the prepared model routes; client publication was stopped. " +
++        `Restart it with \`${routerServiceRestartCommand()}\` before retrying.`,
++      );
++    }
++    return { adopted: true, offline: false };
++  }
++  if (allowOffline && health?.connectionRefused === true) {
++    const status = await serviceStatus({ signal, deadline });
++    assertOperationActive(signal, deadline);
++    if (status?.statusUnknown !== true && status?.installed === false && status?.loaded === false) {
++      // Confirm the port remains empty after the ownership probe; a failed or
++      // stopped installed job must never be reclassified as an offline setup.
++      const confirmed = await probeRouterOwnership({ waitForHealth, signal, deadline });
++      if (confirmed?.connectionRefused === true) return { adopted: false, offline: true };
++    }
++  }
++  throw adoptionError(
++    "The prepared model routes could not be verified on a healthy router; client publication was stopped. " +
++    "Repair or stop the router, then retry.",
++  );
++}
++
+@@ -231,0 +291,3 @@ export async function restartRouterServiceIfInstalled({
++  expectedFingerprint,
++  waitForHealth = waitForRouterHealth,
++  writeDiagnostics = (value) => process.stderr.write(value),
+@@ -236 +298 @@ export async function restartRouterServiceIfInstalled({
+-  if (!(await routerServiceStatus({
++  const status = await routerServiceStatus({
+@@ -241 +303,23 @@ export async function restartRouterServiceIfInstalled({
+-  })).installed) return false;
++  });
++  if (status.statusUnknown) {
++    throw adoptionError(
++      "The router service state could not be verified; client publication was stopped. " +
++      "Repair or stop the service, then retry.",
++    );
++  }
++  if (!status.installed) {
++    if (status.loaded) {
++      throw adoptionError("A loaded router job has no installed service definition and cannot safely adopt new routes.");
++    }
++    const health = await probeRouterOwnership({ waitForHealth, signal, deadline: operationDeadline });
++    if (health?.ok === true || health?.degradedPayload?.service === "codex-router") {
++      throw adoptionError(
++        "A foreground router is serving but cannot be reloaded by the background service; client publication was stopped. " +
++        "Stop the foreground router, apply the model change, then start it again.",
++      );
++    }
++    if (health?.connectionRefused !== true) {
++      throw adoptionError("The router process state could not be verified; only a confirmed empty loopback port is safe for offline publication.");
++    }
++    return false;
++  }
+@@ -248,7 +332,17 @@ export async function restartRouterServiceIfInstalled({
+-  const result = await invokeService(["restart"], {
+-    spawn,
+-    env,
+-    signal,
+-    deadline: operationDeadline,
+-    stdio: "inherit",
+-  });
++  const relay = (output) => {
++    for (const value of [output?.stdout, output?.stderr, !output?.stderr ? output?.error?.message : undefined]) {
++      if (typeof value === "string" && value) writeDiagnostics(value.endsWith("\n") ? value : `${value}\n`);
++    }
++  };
++  let result;
++  try {
++    // The caller may own a machine-readable stdout response (for example a
++    // provider removal). Service progress belongs to stderr at that boundary.
++    result = await invokeService(["restart"], {
++      spawn, env, signal, deadline: operationDeadline, stdio: "capture",
++    });
++  } catch (error) {
++    relay(error);
++    throw error;
++  }
++  relay(result);
+@@ -257 +351 @@ export async function restartRouterServiceIfInstalled({
+-    throw new Error(
++    const error = new Error(
+@@ -259,0 +354 @@ export async function restartRouterServiceIfInstalled({
++      result.error ? { cause: result.error } : undefined,
+@@ -260,0 +356,15 @@ export async function restartRouterServiceIfInstalled({
++    error.status = result.status ?? result.error?.status;
++    error.stdout = result.stdout ?? result.error?.stdout ?? "";
++    error.stderr = result.stderr ?? result.error?.stderr ?? "";
++    error.output = result.output || result.error?.output || [null, error.stdout, error.stderr];
++    if (result.signal || result.error?.signal) error.signal = result.signal || result.error.signal;
++    throw error;
++  }
++  if (expectedFingerprint !== undefined) {
++    await verifyRouterExecutionPlanAdoption({
++      expectedFingerprint,
++      allowOffline: false,
++      waitForHealth,
++      signal,
++      deadline: operationDeadline,
++    });
+diff --git a/test/model-overlay-publication-phases.test.mjs b/test/model-overlay-publication-phases.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/model-overlay-publication-phases.test.mjs
+@@ -0,0 +1,219 @@
++import assert from "node:assert/strict";
++import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import test from "node:test";
++import { fileURLToPath } from "node:url";
++
++import { applyModelOverlayPublication, prepareModelOverlayPublication, prepareModelOverlayFresh,
++  publishModelOverlayTargets, publishModelOverlayTargetsFresh, transactModelOverlayMutation } from "../src/model-overlay-publication.mjs";
++import { userModelEntry } from "../src/user-models.mjs";
++import { verifyRouterExecutionPlanAdoption } from "../src/router-restart.mjs";
++
++const CANDIDATE = "a".repeat(64);
++const OLD = "b".repeat(64);
++const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++
++test("routing preparation writes no client catalogs and returns its adoption identity", async () => {
++  const events = [];
++  const result = await prepareModelOverlayPublication({
++    executionPlan: () => { events.push("plan"); return { fingerprint: CANDIDATE }; },
++    writeGateway: () => { events.push("gateway"); return "/synthetic/litellm.yaml"; },
++  });
++  assert.deepEqual(events, ["plan", "gateway"]);
++  assert.deepEqual(result, { gatewayPath: "/synthetic/litellm.yaml", expectedFingerprint: CANDIDATE });
++});
++
++test("publication follows dependency preparation, gateway preparation, adoption, and verification", async () => {
++  const events = [];
++  const deadlines = {};
++  const result = await applyModelOverlayPublication({ restart: true,
++    prepareDependencies: async ({ deadline }) => { events.push("dependencies"); deadlines.dependencies = deadline; },
++    prepare: async ({ deadline }) => { events.push("prepare"); deadlines.prepare = deadline; return { expectedFingerprint: CANDIDATE }; },
++    restartService: async ({ deadline, expectedFingerprint }) => {
++      assert.equal(expectedFingerprint, CANDIDATE); events.push("adopt"); deadlines.adopt = deadline; return true;
++    },
++    verifyAdoption: async ({ expectedFingerprint, allowOffline }) => {
++      assert.equal(expectedFingerprint, CANDIDATE); assert.equal(allowOffline, false); events.push("verify");
++    },
++    publish: async ({ deadline, expectedFingerprint }) => {
++      assert.equal(expectedFingerprint, CANDIDATE); events.push("clients"); deadlines.publish = deadline;
++    },
++  });
++  assert.deepEqual(result, {});
++  assert.deepEqual(events, ["dependencies", "prepare", "adopt", "verify", "clients"]);
++  assert.equal(deadlines.prepare - deadlines.dependencies, 30_000);
++  assert.equal(deadlines.adopt - deadlines.prepare, 340_000);
++  assert.equal(deadlines.publish - deadlines.adopt, 300_000);
++});
++
++test("a prepared registry change cannot advertise routes after a stale or failed adoption", async () => {
++  for (const phase of ["restart", "verify"]) {
++    const events = [];
++    await assert.rejects(applyModelOverlayPublication({ restart: true,
++      prepareDependencies: async () => {},
++      prepare: async () => ({ expectedFingerprint: CANDIDATE }),
++      restartService: async () => { events.push("restart"); if (phase === "restart") throw new Error("restart failed"); },
++      verifyAdoption: async () => { events.push("verify"); throw new Error("old registry still serving"); },
++      publish: async () => assert.fail("unadopted model must never reach a client picker"),
++    }), phase === "restart" ? /restart failed/ : /old registry still serving/);
++    assert.deepEqual(events, phase === "restart" ? ["restart"] : ["restart", "verify"]);
++  }
++});
++
++test("fresh registry mismatch fails before touching the first installed client", async () => {
++  await assert.rejects(publishModelOverlayTargets({ expectedFingerprint: CANDIDATE,
++    executionPlan: () => ({ fingerprint: OLD }),
++    refreshTargets: () => assert.fail("drifting registry must not publish clients"),
++  }), { code: "model_overlay_adoption_failed" });
++  const result = await publishModelOverlayTargets({ expectedFingerprint: CANDIDATE,
++    executionPlan: () => ({ fingerprint: CANDIDATE }), refreshTargets: () => true });
++  assert.deepEqual(result, { targetsRefreshed: true });
++});
++
++test("dependency failure is a truthful completed-operation warning and blocks every later phase", async () => {
++  const result = await applyModelOverlayPublication({ restart: true, warningOnly: true,
++    prepareDependencies: async () => { throw new Error("gateway dependency preparation failed"); },
++    prepare: async () => assert.fail("failed dependencies cannot prepare routes"),
++    restartService: async () => assert.fail("failed dependencies cannot restart"),
++    publish: async () => assert.fail("failed dependencies cannot publish"),
++  });
++  assert.deepEqual(result, { catalogError: "gateway dependency preparation failed" });
++});
++
++test("without a requested restart, prepared routes still require verified adoption or offline state", async () => {
++  const events = [];
++  await applyModelOverlayPublication({
++    prepareDependencies: async () => {}, prepare: async () => ({ expectedFingerprint: CANDIDATE }),
++    verifyAdoption: async ({ allowOffline }) => {
++      assert.equal(allowOffline, true); events.push("verify"); return { adopted: false, offline: true };
++    },
++    publish: async () => events.push("clients"),
++    restartService: async () => assert.fail("explicitly offline publication cannot request a restart"),
++  });
++  assert.deepEqual(events, ["verify", "clients"]);
++});
++
++test("a managed router dying after restart cannot become an offline publication", async () => {
++  await assert.rejects(applyModelOverlayPublication({ restart: true,
++    prepareDependencies: async () => {}, prepare: async () => ({ expectedFingerprint: CANDIDATE }),
++    restartService: async () => true,
++    verifyAdoption: (options) => verifyRouterExecutionPlanAdoption({ ...options,
++      waitForHealth: async () => ({ ok: false, connectionRefused: true }),
++      serviceStatus: async () => assert.fail("managed restart cannot fall back to offline ownership"),
++    }),
++    publish: async () => assert.fail("dead managed service cannot advertise clients"),
++  }), { code: "model_overlay_adoption_failed" });
++  const events = [];
++  await applyModelOverlayPublication({ restart: true,
++    prepareDependencies: async () => {}, prepare: async () => ({ expectedFingerprint: CANDIDATE }),
++    restartService: async () => false,
++    verifyAdoption: (options) => verifyRouterExecutionPlanAdoption({ ...options,
++      waitForHealth: async () => ({ ok: false, connectionRefused: true }),
++      serviceStatus: async () => ({ installed: false, loaded: false }),
++    }),
++    publish: async () => events.push("clients:offline"),
++  });
++  assert.deepEqual(events, ["clients:offline"]);
++});
++
++test("failed partial client publication restores exact files, adopts old routes, then republishes", async (t) => {
++  const directory = mkdtempSync(path.join(os.tmpdir(), "overlay-adoption-rollback-"));
++  t.after(() => rmSync(directory, { recursive: true, force: true }));
++  const statePath = path.join(directory, "models.json");
++  const createdPath = path.join(directory, "created.json");
++  const previous = Buffer.from([0, 255, 13, 10, 77]);
++  writeFileSync(statePath, previous);
++  const caller = new AbortController();
++  const events = [];
++  let state = "old";
++  let running = "old";
++  let client = "old";
++  await assert.rejects(transactModelOverlayMutation({ files: [statePath, createdPath], lock: false,
++    signal: caller.signal, restart: true,
++    mutate: () => { state = "new"; writeFileSync(statePath, "new"); writeFileSync(createdPath, "created"); events.push("mutate:new"); },
++    restore: async (snapshots) => {
++      const { restoreModelOverlayFiles } = await import("../src/model-overlay-publication.mjs");
++      restoreModelOverlayFiles(snapshots); state = "old"; events.push("restore:old");
++    },
++    applyPublication: (options) => applyModelOverlayPublication({ ...options,
++      prepareDependencies: async ({ signal }) => { if (state === "old") assert.equal(signal, undefined); events.push(`dependencies:${state}`); },
++      prepare: async () => { events.push(`prepare:${state}`); return { expectedFingerprint: state === "new" ? CANDIDATE : OLD }; },
++      restartService: async () => { running = state; events.push(`adopt:${state}`); return true; },
++      verifyAdoption: async ({ expectedFingerprint }) => assert.equal(expectedFingerprint, running === "new" ? CANDIDATE : OLD),
++      publish: async () => {
++        assert.equal(running, state); client = state; events.push(`clients:${state}`);
++        if (state === "new") { caller.abort(new Error("caller cancelled")); throw new Error("second client publication failed"); }
++      },
++    }),
++  }), /second client publication failed/);
++  assert.deepEqual(readFileSync(statePath), previous);
++  assert.equal(existsSync(createdPath), false);
++  assert.equal(running, "old");
++  assert.equal(client, "old");
++  assert.deepEqual(events, ["mutate:new", "dependencies:new", "prepare:new", "adopt:new", "clients:new",
++    "restore:old", "dependencies:old", "prepare:old", "adopt:old", "clients:old"]);
++});
++
++test("prepare and targets use separate bounded fresh children with the expected identity", async () => {
++  const invocations = [];
++  const run = async (command, args, options) => {
++    invocations.push({ command, args, options });
++    return { status: 0, stdout: args[1] === "--prepare-in-fresh-process"
++      ? JSON.stringify({ expectedFingerprint: CANDIDATE, gatewayPath: "/synthetic/litellm.yaml" })
++      : JSON.stringify({ targetsRefreshed: true }) };
++  };
++  const prepared = await prepareModelOverlayFresh({ executable: "/runtime/node", sourceRoot: "/synthetic/router", environment: {}, run });
++  await publishModelOverlayTargetsFresh({ executable: "/runtime/node", sourceRoot: "/synthetic/router", environment: {}, run,
++    expectedFingerprint: prepared.expectedFingerprint });
++  assert.deepEqual(invocations.map((call) => call.args[1]), ["--prepare-in-fresh-process", "--publish-targets-in-fresh-process"]);
++  assert.equal(invocations[1].args[2], CANDIDATE);
++  for (const call of invocations) {
++    assert.equal(call.options.windowsHide, true);
++    assert.equal(call.options.env.MODEL_ROUTER_TARGET, "codex");
++    assert.equal(Number(call.options.env.CODEX_ROUTER_OPERATION_DEADLINE_MS), call.options.deadline - 10_000);
++  }
++});
++
++test("real fresh children reject a changed endpoint before creating any client catalog", async (t) => {
++  const directory = mkdtempSync(path.join(os.tmpdir(), "overlay-fresh-registry-"));
++  const home = path.join(directory, "codex");
++  const state = path.join(directory, "state");
++  // The executable's filesystem effects are limited to this synthetic root.
++  for (const target of [home, state]) {
++    assert.equal(path.relative(directory, target).startsWith(".."), false);
++    mkdirSync(target, { recursive: true });
++  }
++  t.after(() => rmSync(directory, { recursive: true, force: true }));
++  const registryPath = path.join(directory, "registry.json");
++  const userPath = path.join(directory, "user-models.json");
++  const genericPath = path.join(directory, "generic-providers.json");
++  const provider = { id: "custom", displayName: "Custom", kind: "openai-compatible",
++    ownedBy: "custom", authMode: "per-model", perModelEndpoint: true };
++  const entry = { ...userModelEntry({ providerId: "custom", upstreamId: "fresh-proof", priority: 100 }),
++    listed: false,
++    endpoint: { baseUrl: "http://127.0.0.1:9999/v1", keyless: true, protocol: "openai-responses" } };
++  const writeRegistry = (baseUrl) => writeFileSync(registryPath, JSON.stringify({
++    version: 1, providers: [provider], models: [{ ...entry, endpoint: { ...entry.endpoint, baseUrl } }],
++  }));
++  writeRegistry(entry.endpoint.baseUrl);
++  writeFileSync(userPath, JSON.stringify({ version: 1, models: [] }));
++  writeFileSync(genericPath, JSON.stringify({ version: 1, providers: [] }));
++  writeFileSync(path.join(state, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["custom"] }));
++  const environment = { ...process.env, CODEX_HOME: home, HOME: directory, USERPROFILE: directory,
++    MODEL_ROUTER_STATE_DIR: state, CODEX_ROUTER_STATE_DIR: state, CODEX_ROUTER_SOURCE_ROOT: ROOT,
++    MODEL_ROUTER_REGISTRY: registryPath, MODEL_ROUTER_USER_MODELS: userPath,
++    MODEL_ROUTER_GENERIC_PROVIDERS: genericPath, CODEX_ROUTER_NO_DISCOVERY: "1" };
++  const prepared = await prepareModelOverlayFresh({ sourceRoot: ROOT, executable: process.execPath, environment });
++  assert.match(prepared.expectedFingerprint, /^[a-f0-9]{64}$/);
++  assert.equal(prepared.gatewayPath, path.join(state, "litellm.yaml"));
++  assert.equal(existsSync(prepared.gatewayPath), true);
++  assert.equal(existsSync(path.join(home, "config.toml")), false);
++  writeRegistry("http://127.0.0.1:9998/v1");
++  await assert.rejects(publishModelOverlayTargetsFresh({ sourceRoot: ROOT, executable: process.execPath,
++    environment, expectedFingerprint: prepared.expectedFingerprint }), /changed after preparation/);
++  for (const catalog of ["merged-models.json", "dsh-models.json", "gemini-models.json", "cursor-models.json"]) {
++    assert.equal(existsSync(path.join(state, catalog)), false);
++  }
++  assert.equal(existsSync(path.join(home, "config.toml")), false);
++});
+diff --git a/test/model-overlay-publication.test.mjs b/test/model-overlay-publication.test.mjs
+--- a/test/model-overlay-publication.test.mjs
++++ b/test/model-overlay-publication.test.mjs
+@@ -203 +203 @@ test("rollback restores durable overlay state even after the deadline expires",
+-test("synchronous mutations propagate publication errors before restart", async () => {
++test("synchronous mutations propagate client publication errors after adoption", async () => {
+@@ -216 +216 @@ test("synchronous mutations propagate publication errors before restart", async
+-  assert.deepEqual(events, ["publish"]);
++  assert.deepEqual(events, ["restart", "publish"]);
+@@ -264 +264 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
+-  const operationDeadline = startedAt + 30 * 60_000;
++  const operationDeadline = startedAt + 45 * 60_000;
+@@ -294,2 +294,2 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
+-          assert.ok(options.deadline >= startedAt + 630_000);
+-          assert.ok(options.deadline <= startedAt + 640_100);
++          assert.ok(options.deadline >= startedAt + 1_260_000);
++          assert.ok(options.deadline <= startedAt + 1_270_100);
+@@ -297,0 +298 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
++          state.running = "new";
+@@ -299 +300 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
+-          events.push("publish:new:gateway", "publish:new:codex");
++          events.push("prepare:new:gateway", "restart:new", "publish:new:codex");
+@@ -308,2 +309,6 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
+-        assert.ok(options.deadline <= Date.now() + 640_000);
+-        for (const target of ["gateway", "codex", "dsh", "gemini"]) {
++        assert.ok(options.deadline <= Date.now() + 1_270_000);
++        state.gateway = state.durable;
++        events.push(`prepare:${state.durable}:gateway`);
++        state.running = state.durable;
++        events.push(`restart:${state.durable}`);
++        for (const target of ["codex", "dsh", "gemini"]) {
+@@ -313,2 +317,0 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
+-        state.running = state.durable;
+-        events.push(`restart:${state.durable}`);
+@@ -330 +333,2 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
+-    "publish:new:gateway",
++    "prepare:new:gateway",
++    "restart:new",
+@@ -333 +337,2 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
+-    "publish:old:gateway",
++    "prepare:old:gateway",
++    "restart:old",
+@@ -337 +341,0 @@ test("deadline failure rolls partial publication back in a non-caller-cancellabl
+-    "restart:old",
+@@ -349,0 +354 @@ test("restart-bearing forward publication preserves distinct publish and readine
++      prepare: async ({ deadline }) => { deadlines.prepare = deadline; return {}; },
+@@ -354 +359,2 @@ test("restart-bearing forward publication preserves distinct publish and readine
+-  assert.equal(deadlines.restart - deadlines.publish, 340_000);
++  assert.equal(deadlines.restart - deadlines.prepare, 340_000);
++  assert.equal(deadlines.publish - deadlines.restart, 300_000);
+@@ -372,0 +379 @@ test("rollback receives the same complete publish and readiness epochs as forwar
++          prepare: async ({ deadline }) => { phase.prepareDeadline = deadline; return {}; },
+@@ -387 +394 @@ test("rollback receives the same complete publish and readiness epochs as forwar
+-    assert.equal(phase.restartDeadline - phase.publishDeadline, 340_000);
++    assert.equal(phase.restartDeadline - phase.prepareDeadline, 340_000);
+@@ -397 +404 @@ test("an impossible inherited restart deadline is refused before overlay mutatio
+-      deadline: Date.now() + 20 * 60_000,
++      deadline: Date.now() + 40 * 60_000,
+@@ -439 +446 @@ test(
+-      "    deadline: Date.now() + 9 * 60_000,",
++      "    deadline: Date.now() + 35 * 60_000,",
+@@ -506 +513 @@ test(
+-      "    deadline: Date.now() + 9 * 60_000,",
++      "    deadline: Date.now() + 35 * 60_000,",
+@@ -561 +568 @@ test("restart timeout republishes and restarts the prior overlay", async () => {
+-  const operationDeadline = Date.now() + 30 * 60_000;
++  const operationDeadline = Date.now() + 45 * 60_000;
+@@ -572,0 +580 @@ test("restart timeout republishes and restarts the prior overlay", async () => {
++        prepare: async () => { events.push(`prepare:${durable}`); return {}; },
+@@ -579 +587 @@ test("restart timeout republishes and restarts the prior overlay", async () => {
+-          if (publication === 1) {
++          if (durable === "new") {
+@@ -591 +599 @@ test("restart timeout republishes and restarts the prior overlay", async () => {
+-    "publish:new",
++    "prepare:new",
+@@ -593 +601 @@ test("restart timeout republishes and restarts the prior overlay", async () => {
+-    "publish:old",
++    "prepare:old",
+@@ -594,0 +603 @@ test("restart timeout republishes and restarts the prior overlay", async () => {
++    "publish:old",
+@@ -598 +607 @@ test("restart timeout republishes and restarts the prior overlay", async () => {
+-test("completed operations warn and skip restart when publication fails", async () => {
++test("completed operations warn and skip restart when preparation fails", async () => {
+@@ -602,3 +611,3 @@ test("completed operations warn and skip restart when publication fails", async
+-    publish: async () => {
+-      events.push("publish");
+-      throw new Error("target publication failed");
++    prepare: async () => {
++      events.push("prepare");
++      throw new Error("gateway preparation failed");
+@@ -605,0 +615 @@ test("completed operations warn and skip restart when publication fails", async
++    publish: async () => assert.fail("failed preparation cannot publish clients"),
+@@ -610 +620 @@ test("completed operations warn and skip restart when publication fails", async
+-  assert.deepEqual(events, ["publish"]);
++  assert.deepEqual(events, ["prepare"]);
+@@ -612 +622 @@ test("completed operations warn and skip restart when publication fails", async
+-    catalogError: "target publication failed",
++    catalogError: "gateway preparation failed",
+@@ -631 +641 @@ test("warning-only completion treats an impossible inherited restart epoch as a
+-test("completed operations retain a post-publication restart failure as a warning", async () => {
++test("completed operations retain an adoption failure as a warning without publishing", async () => {
+@@ -643 +653 @@ test("completed operations retain a post-publication restart failure as a warnin
+-  assert.deepEqual(events, ["publish", "restart"]);
++  assert.deepEqual(events, ["restart"]);
+@@ -664 +674 @@ test("a completed local pull reports publication failure without becoming failed
+-  assert.deepEqual(events, ["download", "overlay", "publish"]);
++  assert.deepEqual(events, ["download", "overlay", "restart", "publish"]);
+diff --git a/test/router-restart.test.mjs b/test/router-restart.test.mjs
+--- a/test/router-restart.test.mjs
++++ b/test/router-restart.test.mjs
+@@ -11,0 +12 @@ import {
++  verifyRouterExecutionPlanAdoption,
+@@ -211 +212 @@ test("environment-backed removal reminders cover managed, unknown, and foregroun
+-test("restart is skipped when no background service is installed", async () => {
++test("restart is skipped only for a known absent service and conclusively refused port", async () => {
+@@ -215 +216 @@ test("restart is skipped when no background service is installed", async () => {
+-    return NOT_INSTALLED_STATUS;
++    return ABSENT_STATUS;
+@@ -217 +218,2 @@ test("restart is skipped when no background service is installed", async () => {
+-  assert.equal(await restartRouterServiceIfInstalled({ spawn }), false);
++  assert.equal(await restartRouterServiceIfInstalled({ spawn,
++    waitForHealth: async () => ({ ok: false, connectionRefused: true }) }), false);
+@@ -220,0 +223,91 @@ test("restart is skipped when no background service is installed", async () => {
++test("an unknown background service cannot be mistaken for offline publication", async () => {
++  await assert.rejects(restartRouterServiceIfInstalled({
++    spawn: () => NOT_INSTALLED_STATUS,
++    waitForHealth: async () => assert.fail("unknown service status must fail before health probing"),
++  }), { code: "model_overlay_adoption_failed" });
++});
++
++test("foreground and ambiguous router ownership fail closed instead of skipping reload", async () => {
++  for (const health of [
++    { ok: true, payload: { service: "codex-router" } },
++    { ok: false, degradedPayload: { service: "codex-router", degraded: ["gateway"] } },
++    { ok: false, connectionRefused: false, error: "socket reset" },
++    { ok: false, error: "request timed out" },
++  ]) {
++    const actions = [];
++    await assert.rejects(restartRouterServiceIfInstalled({
++      spawn: (_command, args) => { actions.push(args.at(-1)); return ABSENT_STATUS; },
++      waitForHealth: async () => health,
++    }), { code: "model_overlay_adoption_failed" });
++    assert.deepEqual(actions, ["status"]);
++  }
++  await assert.rejects(restartRouterServiceIfInstalled({
++    spawn: () => ({ status: 0, stdout: JSON.stringify({ installed: false, loaded: true, state: "running" }) }),
++    waitForHealth: async () => assert.fail("an orphaned service must not become an offline assumption"),
++  }), /loaded router job/);
++});
++
++test("restart success requires adoption of the prepared fingerprint when supplied", async () => {
++  const expectedFingerprint = "a".repeat(64);
++  const actions = [];
++  const result = await restartRouterServiceIfInstalled({
++    expectedFingerprint,
++    spawn: (_command, args) => {
++      actions.push(args.at(-1));
++      return args.at(-1) === "status" ? INSTALLED_STATUS : { status: 0, stdout: "" };
++    },
++    waitForHealth: async (options) => {
++      actions.push("adoption");
++      assert.equal(options.timeoutMs, 0);
++      assert.ok(options.requestTimeoutMs > 0 && options.requestTimeoutMs <= 1_000);
++      return { ok: true, payload: { service: "codex-router", executionPlan: { fingerprint: expectedFingerprint } } };
++    },
++  });
++  assert.equal(result, true);
++  assert.deepEqual(actions, ["status", "restart", "adoption"]);
++});
++
++test("healthy stale, incomplete, degraded, and absent post-restart snapshots refuse publication", async () => {
++  for (const health of [
++    { ok: true, payload: { service: "codex-router", executionPlan: { fingerprint: "b".repeat(64) } } },
++    { ok: true, payload: { service: "codex-router" } },
++    { ok: false, degradedPayload: { service: "codex-router", executionPlan: { fingerprint: "a".repeat(64) } } },
++    { ok: false, connectionRefused: true },
++  ]) {
++    await assert.rejects(restartRouterServiceIfInstalled({
++      expectedFingerprint: "a".repeat(64),
++      spawn: (_command, args) => args.at(-1) === "status" ? INSTALLED_STATUS : { status: 0, stdout: "" },
++      waitForHealth: async () => health,
++    }), { code: "model_overlay_adoption_failed" });
++  }
++});
++
++test("adoption allows only confirmed absent offline state, never an unidentified healthy service", async () => {
++  const expectedFingerprint = "a".repeat(64);
++  assert.deepEqual(await verifyRouterExecutionPlanAdoption({ expectedFingerprint,
++    serviceStatus: async () => ({ installed: false, loaded: false }),
++    waitForHealth: async () => ({ ok: false, connectionRefused: true }) }), { adopted: false, offline: true });
++  await assert.rejects(verifyRouterExecutionPlanAdoption({ expectedFingerprint, allowOffline: false,
++    waitForHealth: async () => ({ ok: false, connectionRefused: true }) }), { code: "model_overlay_adoption_failed" });
++  await assert.rejects(verifyRouterExecutionPlanAdoption({ expectedFingerprint,
++    waitForHealth: async () => ({ ok: true, payload: { service: "foreign-service", executionPlan: { fingerprint: expectedFingerprint } } }) }),
++  { code: "model_overlay_adoption_failed" });
++  for (const status of [
++    { installed: true, loaded: false },
++    { installed: false, loaded: true },
++    { installed: false, loaded: false, statusUnknown: true },
++    {},
++  ]) {
++    await assert.rejects(verifyRouterExecutionPlanAdoption({ expectedFingerprint,
++      serviceStatus: async () => status,
++      waitForHealth: async () => ({ ok: false, connectionRefused: true }) }),
++    { code: "model_overlay_adoption_failed" });
++  }
++  let reads = 0;
++  await assert.rejects(verifyRouterExecutionPlanAdoption({ expectedFingerprint,
++    serviceStatus: async () => ({ installed: false, loaded: false }),
++    waitForHealth: async () => ++reads === 1 ? { ok: false, connectionRefused: true } : { ok: false, error: "ambiguous" } }),
++  { code: "model_overlay_adoption_failed" });
++  assert.equal(reads, 2);
++});
++

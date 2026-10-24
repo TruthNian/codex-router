@@ -1362,15 +1362,12 @@
       "remainingSourceFiles": [
         "src/caller-key-rotation.mjs",
         "src/catalog.mjs",
-        "src/codex-default-model.mjs",
         "src/config-manager.mjs",
         "src/dsh-config-manager.mjs",
         "src/file-security.mjs",
         "src/kimi-oauth-session.mjs",
         "src/legacy-migration.mjs",
         "src/litellm-config.mjs",
-        "src/local-models.mjs",
-        "src/model-picker-state.mjs",
         "src/native-catalog-source.mjs",
         "src/provider-credential-store.mjs",
         "src/provider-credentials.mjs",
@@ -1379,7 +1376,7 @@
         "src/secret.mjs",
         "src/vertex-state.mjs"
       ],
-      "extractionNotes": "Split this broad topic by coherent caller groups. First extraction only migrates codex-agent-catalog.mjs to the existing main primitive. Bigint ownership and exclusive cleanup foundations are already in main via merged PR 1009; do not resubmit them. Remaining source files are candidates requiring individual review, not automatically necessary changes. Keep backup 24 open until every remaining delta has a disposition.",
+      "extractionNotes": "Partial topic: agent-definition writer PR 1070 and model-selection settings PR 1071 are independently extracted. Remaining source files still require fresh review and explicit disposition; existing primitive foundations are already in main via PR 1009. Do not close backup 24 or mark the whole topic complete merely because these parts pass CI.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -1387,6 +1384,15 @@
           "url": "https://github.com/duolahypercho/codex-router/pull/1070",
           "head": "cb4b66bafad935db4d9a56a392611b129ecbcdaa",
           "status": "ci_passed_waiting_merge",
+          "backupPr": 24,
+          "sourceTopic": "private-writers"
+        },
+        "model_selection_private_writers": {
+          "topic": "private-writers/model-selection",
+          "pr": 1071,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1071",
+          "head": "dbeb8885c3a1d20be7185867ec220563c6f251ed",
+          "status": "ci_running",
           "backupPr": 24,
           "sourceTopic": "private-writers"
         }
@@ -2275,6 +2281,15 @@
       "url": "https://github.com/duolahypercho/codex-router/pull/1070",
       "head": "cb4b66bafad935db4d9a56a392611b129ecbcdaa",
       "status": "ci_passed_waiting_merge",
+      "backupPr": 24,
+      "sourceTopic": "private-writers"
+    },
+    "private-writers/model-selection": {
+      "topic": "private-writers/model-selection",
+      "pr": 1071,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1071",
+      "head": "dbeb8885c3a1d20be7185867ec220563c6f251ed",
+      "status": "ci_running",
       "backupPr": 24,
       "sourceTopic": "private-writers"
     }

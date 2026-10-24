@@ -1,0 +1,110 @@
+diff --git a/apps/macos/ModelRouterTray/Sources/ModelRouterTrayApp.swift b/apps/macos/ModelRouterTray/Sources/ModelRouterTrayApp.swift
+--- a/apps/macos/ModelRouterTray/Sources/ModelRouterTrayApp.swift
++++ b/apps/macos/ModelRouterTray/Sources/ModelRouterTrayApp.swift
+@@ -721,0 +722,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
++    if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
++      NSLog("[macos-launch] native host did finish launching")
++    }
+@@ -766,0 +770,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
++    if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
++      NSLog("[macos-launch] native host received reopen")
++    }
+@@ -876,0 +883,3 @@ enum ControlCenterLauncher {
++    if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
++      NSLog("[macos-launch] embedded Control Center launch requested")
++    }
+@@ -928 +937,9 @@ enum ControlCenterLauncher {
+-      guard let error else { return }
++      guard let error else {
++        if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
++          NSLog("[macos-launch] LaunchServices completed embedded launch")
++        }
++        return
++      }
++      if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
++        NSLog("[macos-launch] LaunchServices error details: %@", String(reflecting: error as NSError))
++      }
+@@ -1507,0 +1525,3 @@ final class RouterStore: ObservableObject {
++    if ProcessInfo.processInfo.environment["CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS"] == "1" {
++      NSLog("[macos-launch] embedded launch failed: %@", detail)
++    }
+@@ -4168,8 +4188,10 @@ final class RouterScriptWatchdog: @unchecked Sendable {
+-  /// Electron's `CATALOG_MUTATION_TIMEOUT_MS` (1_320_000). A restart-bearing
+-  /// curation reserves two complete 640s forward/rollback epochs and keeps the
+-  /// remaining owner margin for process-tree cleanup and UI reporting.
+-  static let catalogMutationTimeout: TimeInterval = 1_320
+-  /// Curation's internal transaction expires before its 1,320s UI owner.
+-  static let catalogPublicationOperationTimeout: TimeInterval = 1_280
+-  /// Generic control owns one more nested tree around the 1,280s transaction.
+-  static let catalogControlOperationTimeout: TimeInterval = 1_300
++  /// Electron's `CATALOG_MUTATION_TIMEOUT_MS` (45 minutes plus 20 seconds).
++  /// Dependency preparation, adoption, publication and independent rollback
++  /// share a finite transaction; the UI leaves the Node owner cleanup time.
++  static let catalogMutationTimeout: TimeInterval = 2_720
++  /// Direct curation uses the backend's complete 45-minute transaction cap.
++  static let catalogPublicationOperationTimeout: TimeInterval = 2_700
++  /// The bin/control owner keeps ten seconds beyond this 45-minute child
++  /// transaction. operationOwnerTimeout exports that owner deadline so a
++  /// bounded UI child does not add another process-tree cleanup contraction.
++  static let catalogControlOperationTimeout: TimeInterval = 2_700
+@@ -4215,0 +4238 @@ final class RouterScriptWatchdog: @unchecked Sendable {
++      "key-pool",
+@@ -4221,0 +4245 @@ final class RouterScriptWatchdog: @unchecked Sendable {
++      "generic-providers",
+diff --git a/apps/macos/ModelRouterTray/Tests/ProviderCatalogTests.swift b/apps/macos/ModelRouterTray/Tests/ProviderCatalogTests.swift
+--- a/apps/macos/ModelRouterTray/Tests/ProviderCatalogTests.swift
++++ b/apps/macos/ModelRouterTray/Tests/ProviderCatalogTests.swift
+@@ -63 +63 @@ struct ProviderCatalogTests {
+-    #expect(source.contains("const CATALOG_MUTATION_TIMEOUT_MS = 1_320_000;"))
++    #expect(source.contains("const CATALOG_MUTATION_TIMEOUT_MS = 45 * 60_000 + 20_000;"))
+@@ -70,3 +70,3 @@ struct ProviderCatalogTests {
+-    #expect(RouterScriptWatchdog.catalogMutationTimeout == 1_320)
+-    #expect(RouterScriptWatchdog.catalogPublicationOperationTimeout == 1_280)
+-    #expect(RouterScriptWatchdog.catalogControlOperationTimeout == 1_300)
++    #expect(RouterScriptWatchdog.catalogMutationTimeout == 45 * 60 + 20)
++    #expect(RouterScriptWatchdog.catalogPublicationOperationTimeout == 45 * 60)
++    #expect(RouterScriptWatchdog.catalogControlOperationTimeout == 45 * 60)
+@@ -80 +80 @@ struct ProviderCatalogTests {
+-        == 1_320
++        == RouterScriptWatchdog.catalogMutationTimeout
+@@ -93 +93 @@ struct ProviderCatalogTests {
+-        == 1_300
++        == RouterScriptWatchdog.catalogControlOperationTimeout
+@@ -105,0 +106,31 @@ struct ProviderCatalogTests {
++    #expect(
++      RouterScriptWatchdog.operationOwnerTimeout(arguments: ["credential", "deepseek"])
++        == RouterScriptWatchdog.catalogControlOperationTimeout + 10
++    )
++    #expect(
++      RouterScriptWatchdog.operationOwnerTimeout(arguments: ["credential", "deepseek"])
++        < RouterScriptWatchdog.catalogMutationTimeout
++    )
++  }
++
++  @Test("catalog command classification matches control, including key pools and custom providers")
++  func catalogCommandsUseCompleteTransactionBudgets() {
++    for command in [
++      "set-apply", "credential", "key-pool", "auth-mode", "subagents", "picker",
++      "vision-bridge", "local-models", "signed-routing", "generic-providers",
++    ] {
++      #expect(RouterScriptWatchdog.isCatalogMutation(arguments: [command]))
++      #expect(
++        RouterScriptWatchdog.controlTimeout(arguments: [command])
++          == RouterScriptWatchdog.catalogMutationTimeout
++      )
++      #expect(
++        RouterScriptWatchdog.operationTimeout(arguments: [command])
++          == RouterScriptWatchdog.catalogControlOperationTimeout
++      )
++    }
++    for arguments in [[], ["providers", "--json"], ["key-pool-unrelated"], ["generic-providers-unrelated"]] {
++      #expect(!RouterScriptWatchdog.isCatalogMutation(arguments: arguments))
++      #expect(RouterScriptWatchdog.controlTimeout(arguments: arguments) == 900)
++      #expect(RouterScriptWatchdog.operationTimeout(arguments: arguments) == 840)
++    }
+diff --git a/changelog.d/macos-launch-failure-diagnostics.md b/changelog.d/macos-launch-failure-diagnostics.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/macos-launch-failure-diagnostics.md
+@@ -0,0 +1 @@
++- Add opt-in native macOS launch diagnostics and a targeted manual lifecycle CI scope, retaining launch and termination checks while exposing the stage and LaunchServices failure when an embedded Control Center never opens.

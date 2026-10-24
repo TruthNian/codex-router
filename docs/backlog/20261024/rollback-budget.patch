@@ -1,0 +1,366 @@
+diff --git a/apps/control-center/electron/command-runner.mjs b/apps/control-center/electron/command-runner.mjs
+--- a/apps/control-center/electron/command-runner.mjs
++++ b/apps/control-center/electron/command-runner.mjs
+@@ -19,4 +19,3 @@ const DEFAULT_TIMEOUT_MS = 30_000;
+-// A restart-bearing overlay transaction owns two 640-second publication
+-// epochs plus nested process-tree cleanup. Keep a finite ceiling beyond the
+-// 1,320-second catalog UI owner instead of truncating it to the old 11 minutes.
+-const MAX_TIMEOUT_MS = 22 * 60_000;
++// The runner's finite ceiling preserves the catalog owner's dependency,
++// adoption and independent rollback budgets plus process-tree cleanup.
++const MAX_TIMEOUT_MS = 46 * 60_000;
+@@ -35 +34 @@ const OWNER_SIGNAL_BARRIER_PREFIX = "barrier-";
+-const MAX_OWNER_SIGNAL_BARRIER_MS = 11 * 60_000;
++const MAX_OWNER_SIGNAL_BARRIER_MS = 23 * 60_000;
+diff --git a/apps/control-center/electron/ipc.mjs b/apps/control-center/electron/ipc.mjs
+--- a/apps/control-center/electron/ipc.mjs
++++ b/apps/control-center/electron/ipc.mjs
+@@ -171,5 +171,3 @@ const SESSION_LIST_LIMIT = 500;
+-// A restart-bearing model-overlay mutation owns two complete 640-second
+-// epochs: each has five minutes for publication followed by the service's
+-// status/platform/readiness envelope. The runner and control owner retain
+-// their process-tree cleanup margins outside the 1,280-second transaction.
+-const CATALOG_MUTATION_TIMEOUT_MS = 1_320_000;
++// Dependency preparation, adoption, publication and rollback are bounded;
++// retain the control owner's cleanup margin outside its 45-minute ceiling.
++const CATALOG_MUTATION_TIMEOUT_MS = 45 * 60_000 + 20_000;
+diff --git a/changelog.d/model-overlay-budget.md b/changelog.d/model-overlay-budget.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/model-overlay-budget.md
+@@ -0,0 +1 @@
++- Model overlay transactions retain a 45-minute ceiling with a 60-second mutation allowance checked when synchronous I/O returns and snapshot-based file restoration allowances, preserving complete preparation, restart readiness, publication and rollback budgets while rejecting transactions that cannot fit before changing state.
+diff --git a/src/control.mjs b/src/control.mjs
+--- a/src/control.mjs
++++ b/src/control.mjs
+@@ -95,0 +97 @@ const restartBearingOverlayOperation = new Set([
++  "key-pool",
+@@ -109,2 +111,2 @@ const selfReplacingControl =
+-// Restart-bearing overlay transactions may use two complete 640-second
+-// forward/rollback epochs. The control owner retains another ten seconds to
++// Restart-bearing overlay transactions may prepare missing dependencies and
++// use complete forward/rollback readiness epochs. The owner retains ten seconds to
+@@ -115 +117 @@ const maximumControlOperationMs = boundedAntigravityOperation
+-    ? 1_310_000
++    ? 45 * 60_000 + 10_000
+diff --git a/src/desktop-commands.mjs b/src/desktop-commands.mjs
+--- a/src/desktop-commands.mjs
++++ b/src/desktop-commands.mjs
+@@ -14,4 +14,3 @@ const SERVICE_START_TIMEOUT_MS = 350_000;
+-// Two complete 640-second overlay epochs plus nested owner cleanup. A nominal
+-// five-minute UI timeout deterministically truncated LiteLLM's own five-minute
+-// readiness allowance after publication and service-status overhead.
+-const CATALOG_MUTATION_TIMEOUT_MS = 1_320_000;
++// Dependency preparation, adoption and client publication each have bounded
++// epochs. The outer desktop owner also preserves control/tree cleanup margins.
++const CATALOG_MUTATION_TIMEOUT_MS = 45 * 60_000 + 20_000;
+diff --git a/src/model-overlay-publication.mjs b/src/model-overlay-publication.mjs
+--- a/src/model-overlay-publication.mjs
++++ b/src/model-overlay-publication.mjs
+@@ -33,3 +41,2 @@ const OVERLAY_PUBLISH_OPERATION_MS = 5 * 60_000;
+-// Publishing and restarting are sequential. Reserve the restart's complete
+-// status/owner/platform/readiness envelope plus handoff margin instead of
+-// handing both phases the same nominal five-minute parent deadline.
++// Prepare, adopt, and client publication are sequential. Give preparation its
++// own finite envelope and preserve complete restart and publication epochs.
+@@ -39 +46 @@ const OVERLAY_RESTARTING_PUBLICATION_MS =
+-  OVERLAY_PUBLISH_OPERATION_MS + OVERLAY_SERVICE_RESTART_RESERVE_MS;
++  RUNTIME_DEPENDENCY_PREPARATION_MS + OVERLAY_PREPARE_OPERATION_MS + OVERLAY_PUBLISH_OPERATION_MS + OVERLAY_SERVICE_RESTART_RESERVE_MS;
+@@ -41,2 +48,10 @@ const OVERLAY_RESTARTING_PUBLICATION_MINIMUM_MS =
+-  OVERLAY_PUBLISH_OPERATION_MS + ROUTER_SERVICE_RESTART_MINIMUM_MS;
+-const DEFAULT_OVERLAY_TRANSACTION_MS = 2 * OVERLAY_RESTARTING_PUBLICATION_MS;
++  RUNTIME_DEPENDENCY_PREPARATION_MS + OVERLAY_PREPARE_OPERATION_MS + OVERLAY_PUBLISH_OPERATION_MS + ROUTER_SERVICE_RESTART_MINIMUM_MS;
++const OVERLAY_OFFLINE_PUBLICATION_MINIMUM_MS =
++  RUNTIME_DEPENDENCY_PREPARATION_MS + OVERLAY_PREPARE_OPERATION_MS + OVERLAY_PUBLISH_OPERATION_MS;
++const OVERLAY_OFFLINE_PUBLICATION_MS = OVERLAY_OFFLINE_PUBLICATION_MINIMUM_MS + 10_000;
++const OVERLAY_MUTATION_OPERATION_MS = 60_000;
++const OVERLAY_RESTORE_OVERHEAD_MS = 10_000;
++const OVERLAY_UNKNOWN_RESTORE_OPERATION_MS = 60_000;
++const OVERLAY_ROLLBACK_OWNER_MAX_MS = 23 * 60_000;
++const OVERLAY_OWNER_CLEANUP_RESERVE_MS = 10_000;
++const DEFAULT_OVERLAY_TRANSACTION_MS = 45 * 60_000;
+@@ -48 +63 @@ function overlayPublicationDeadline(
+-  { restart = false } = {},
++  { restart = false, restoreAllowanceMs = 0 } = {},
+@@ -53 +68 @@ function overlayPublicationDeadline(
+-  const maximumMs = restart
++  const publicationMs = restart
+@@ -55 +70,5 @@ function overlayPublicationDeadline(
+-    : OVERLAY_PUBLISH_OPERATION_MS;
++    : OVERLAY_OFFLINE_PUBLICATION_MS;
++  const maximumMs = publicationMs + Math.max(0, Math.min(
++    Number.isSafeInteger(restoreAllowanceMs) ? restoreAllowanceMs : 0,
++    OVERLAY_ROLLBACK_OWNER_MAX_MS - publicationMs - OVERLAY_OWNER_CLEANUP_RESERVE_MS,
++  ));
+@@ -72 +91 @@ function overlayTransactionDeadline(deadline, environment = process.env) {
+-function overlayRollbackDeadline(restart) {
++function overlayRollbackDeadline(restart, restoreAllowanceMs) {
+@@ -102,0 +235,9 @@ function assertRestartingPublicationAllowance(deadline, signal) {
++function assertOfflinePublicationAllowance(deadline, signal) {
++  const remaining = remainingOperationMs(deadline, signal);
++  if (remaining !== undefined && remaining < OVERLAY_OFFLINE_PUBLICATION_MINIMUM_MS) {
++    const error = new Error("The model-overlay deadline cannot preserve dependency preparation and client publication.");
++    error.code = "router_operation_timeout";
++    throw error;
++  }
++}
++
+@@ -300,0 +557 @@ export async function restorePublishedModelOverlay({
++  restoreAllowanceMs = 0,
+@@ -302 +559 @@ export async function restorePublishedModelOverlay({
+-  const operationDeadline = overlayPublicationDeadline(deadline, process.env, { restart });
++  const operationDeadline = overlayPublicationDeadline(deadline, process.env, { restart, restoreAllowanceMs });
+@@ -308,0 +566 @@ export async function restorePublishedModelOverlay({
++  const publicationDeadline = overlayPublicationDeadline(operationDeadline, process.env, { restart });
+@@ -314 +572 @@ export async function restorePublishedModelOverlay({
+-    deadline: operationDeadline,
++    deadline: publicationDeadline,
+@@ -327,2 +585,2 @@ export function aggregateRollbackError(operationError, rollbackError) {
+- * Mutate state, publish it, and restart only after publication succeeds.
+- * Any failure restores the exact prior state and republishes/restarts that
++ * Mutate state, prepare and adopt it, then publish clients.
++ * Any failure restores the exact prior state and prepares/adopts/republishes that
+@@ -362 +620,2 @@ export async function transactModelOverlayMutation({
+-    const rollbackReserveMs = restartRequested
++    const restoreAllowanceMs = overlayRestoreAllowanceMs(snapshots);
++    const rollbackPublicationMs = restartRequested
+@@ -364,5 +623,12 @@ export async function transactModelOverlayMutation({
+-      : OVERLAY_PUBLISH_OPERATION_MS;
+-    // Restart-bearing forward and rollback phases each own a complete
+-    // five-minute publication budget followed by a complete service-restart
+-    // budget. Contract the caller before mutation, never after it has changed
+-    // durable state.
++      : OVERLAY_OFFLINE_PUBLICATION_MS;
++    const rollbackReserveMs = rollbackPublicationMs + restoreAllowanceMs;
++    const publicationMinimumMs = restartRequested
++      ? OVERLAY_RESTARTING_PUBLICATION_MINIMUM_MS
++      : OVERLAY_OFFLINE_PUBLICATION_MINIMUM_MS;
++    if (rollbackReserveMs + OVERLAY_OWNER_CLEANUP_RESERVE_MS > OVERLAY_ROLLBACK_OWNER_MAX_MS) {
++      const error = new Error("The model-overlay transaction cannot preserve its bounded file-restoration and rollback owner allowance.");
++      error.code = "router_operation_timeout";
++      throw error;
++    }
++    // Contract the caller before mutation, reserving an independent complete
++    // prepare/adopt/publish rollback rather than sharing an expired deadline.
+@@ -373,2 +639,4 @@ export async function transactModelOverlayMutation({
+-    if (restartRequested) {
+-      assertRestartingPublicationAllowance(forwardDeadline, signal);
++    if (remainingOperationMs(forwardDeadline, signal) < OVERLAY_MUTATION_OPERATION_MS + publicationMinimumMs) {
++      const error = new Error("The model-overlay transaction cannot preserve publication alongside mutation and exact file-restoration allowances.");
++      error.code = "router_operation_timeout";
++      throw error;
+@@ -381 +649,2 @@ export async function transactModelOverlayMutation({
+-        remainingOperationMs(forwardDeadline, forwardSignal);
++        const mutationDeadline = Math.min(forwardDeadline, Date.now() + OVERLAY_MUTATION_OPERATION_MS);
++        remainingOperationMs(mutationDeadline, forwardSignal);
+@@ -383 +652,4 @@ export async function transactModelOverlayMutation({
+-        remainingOperationMs(forwardDeadline, forwardSignal);
++        remainingOperationMs(mutationDeadline, forwardSignal, {
++          message: "The model-overlay mutation exceeded its bounded allowance; restoring the previous state.",
++        });
++        const publicationDeadline = overlayPublicationDeadline(forwardDeadline, process.env, { restart: restartRequested });
+@@ -389 +661 @@ export async function transactModelOverlayMutation({
+-          deadline: forwardDeadline,
++          deadline: publicationDeadline,
+@@ -394 +666 @@ export async function transactModelOverlayMutation({
+-          const rollbackDeadline = overlayRollbackDeadline(restartRequested);
++          const rollbackDeadline = overlayRollbackDeadline(restartRequested, restoreAllowanceMs);
+@@ -406,0 +679 @@ export async function transactModelOverlayMutation({
++            restoreAllowanceMs,
+diff --git a/src/process-tree.mjs b/src/process-tree.mjs
+--- a/src/process-tree.mjs
++++ b/src/process-tree.mjs
+@@ -33 +33 @@ const OWNER_SIGNAL_BARRIER_PREFIX = "barrier-";
+-const MAX_OWNER_SIGNAL_BARRIER_MS = 11 * 60_000;
++const MAX_OWNER_SIGNAL_BARRIER_MS = 23 * 60_000;
+diff --git a/test/desktop-commands.test.mjs b/test/desktop-commands.test.mjs
+--- a/test/desktop-commands.test.mjs
++++ b/test/desktop-commands.test.mjs
+@@ -45 +45 @@ test("desktop settings commands preserve the Windows and macOS tray contract", (
+-    timeoutMs: 1_320_000,
++    timeoutMs: 45 * 60_000 + 20_000,
+@@ -75 +75 @@ test("desktop credential commands rely on the control plane's atomic publication
+-    timeoutMs: 1_320_000,
++    timeoutMs: 45 * 60_000 + 20_000,
+@@ -80 +80 @@ test("desktop credential commands rely on the control plane's atomic publication
+-    timeoutMs: 1_320_000,
++    timeoutMs: 45 * 60_000 + 20_000,
+diff --git a/test/model-overlay-publication-budget.test.mjs b/test/model-overlay-publication-budget.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/model-overlay-publication-budget.test.mjs
+@@ -0,0 +1,174 @@
++import assert from "node:assert/strict";
++import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import path from "node:path";
++import os from "node:os";
++import test from "node:test";
++
++import { applyModelOverlayPublication, captureModelOverlayFiles, restoreModelOverlayFiles,
++  transactModelOverlayMutation } from "../src/model-overlay-publication.mjs";
++
++function fixtures(t, count) {
++  const directory = mkdtempSync(path.join(process.env.MODEL_ROUTER_STATE_DIR || os.tmpdir(), "overlay-budget-"));
++  mkdirSync(directory, { recursive: true });
++  t.after(() => rmSync(directory, { recursive: true, force: true }));
++  const files = Array.from({ length: count }, (_, index) => path.join(directory, `private-${index}.json`));
++  for (let index = 0; index < files.length; index += 1) writeFileSync(files[index], `old-${index}\n`);
++  return files;
++}
++
++function fakeClock(t) {
++  let current = Date.now();
++  const start = current;
++  t.mock.method(Date, "now", () => current);
++  return { start, advance: (milliseconds) => { current += milliseconds; }, now: () => current };
++}
++
++function publicationPhase(events, clock, fail = false) {
++  return (options) => applyModelOverlayPublication({ ...options,
++    prepareDependencies: async ({ deadline }) => {
++      assert.ok(deadline - clock.now() >= 600_000, "the dependency child retains its full epoch");
++      events.push("dependencies");
++    },
++    prepare: async ({ deadline }) => {
++      assert.ok(deadline - clock.now() >= 30_000);
++      events.push("gateway");
++      return {};
++    },
++    restartService: async ({ deadline }) => {
++      assert.ok(deadline - clock.now() >= 330_000, "status, ownership and health allowances remain complete");
++      events.push("restart");
++      return true;
++    },
++    publish: async ({ deadline }) => {
++      assert.ok(deadline - clock.now() >= 300_000);
++      events.push("clients");
++      if (fail) throw new Error("partial client publication failed");
++    },
++  });
++}
++
++test("a 30-second mutation preserves full adoption and publication within the 45-minute ceiling", async (t) => {
++  const files = fixtures(t, 6);
++  const clock = fakeClock(t);
++  const events = [];
++  await transactModelOverlayMutation({ files, lock: false, restart: true,
++    deadline: clock.start + 45 * 60_000,
++    mutate: async () => {
++      clock.advance(30_000);
++      for (const file of files) writeFileSync(file, "new\n");
++      events.push("mutate");
++    },
++    applyPublication: publicationPhase(events, clock),
++  });
++  assert.deepEqual(events, ["mutate", "dependencies", "gateway", "restart", "clients"]);
++  for (const file of files) assert.equal(readFileSync(file, "utf8"), "new\n");
++});
++
++test("six 15-second private restorations retain the complete independent rollback publication", async (t) => {
++  const files = fixtures(t, 6);
++  const prior = files.map((file) => readFileSync(file));
++  const clock = fakeClock(t);
++  const events = [];
++  let publication = 0;
++  await assert.rejects(transactModelOverlayMutation({ capture: () => captureModelOverlayFiles(files), lock: false, restart: true,
++    deadline: clock.start + 45 * 60_000,
++    mutate: async () => {
++      clock.advance(30_000);
++      for (const file of files) writeFileSync(file, "new\n");
++      events.push("mutate");
++    },
++    restore: (snapshots) => restoreModelOverlayFiles(snapshots, {
++      protect: (file) => {
++        assert.ok(files.includes(file));
++        events.push("protect");
++        clock.advance(15_000);
++      },
++    }),
++    applyPublication: (options) => {
++      publication += 1;
++      if (publication === 2) assert.equal(options.signal, undefined);
++      return publicationPhase(events, clock, publication === 1)(options);
++    },
++  }), /partial client publication failed/);
++  assert.equal(publication, 2);
++  assert.deepEqual(files.map((file) => readFileSync(file)), prior);
++  assert.equal(events.filter((event) => event === "protect").length, 6);
++  assert.deepEqual(events.slice(-4), ["dependencies", "gateway", "restart", "clients"]);
++  assert.equal(clock.now() - clock.start, 120_000);
++});
++
++test("an expired mutation restores every changed byte before independent rollback publication", async (t) => {
++  const files = fixtures(t, 2);
++  const created = path.join(path.dirname(files[0]), "created.json");
++  const prior = files.map((file) => readFileSync(file));
++  const clock = fakeClock(t);
++  const events = [];
++  await assert.rejects(transactModelOverlayMutation({ files: [...files, created], lock: false, restart: true,
++    mutate: async () => {
++      for (const file of [...files, created]) writeFileSync(file, "partial\n");
++      clock.advance(61_000);
++      events.push("mutate");
++    },
++    restore: (snapshots) => restoreModelOverlayFiles(snapshots, {
++      protect: () => { clock.advance(15_000); events.push("protect"); },
++    }),
++    applyPublication: (options) => {
++      assert.equal(options.signal, undefined, "only rollback may run after mutation expires");
++      return publicationPhase(events, clock)(options);
++    },
++  }), { code: "router_operation_timeout" });
++  assert.deepEqual(files.map((file) => readFileSync(file)), prior);
++  assert.equal(existsSync(created), false);
++  assert.deepEqual(events, ["mutate", "protect", "protect", "dependencies", "gateway", "restart", "clients"]);
++});
++
++test("insufficient caller time is rejected before changing a captured private file", async (t) => {
++  const files = fixtures(t, 6);
++  const prior = files.map((file) => readFileSync(file));
++  const clock = fakeClock(t);
++  await assert.rejects(transactModelOverlayMutation({ files, lock: false, restart: true,
++    deadline: clock.start + 2_680_000,
++    mutate: () => assert.fail("the required 2690-second transaction cannot fit"),
++    applyPublication: () => assert.fail("no publication may precede a refused mutation"),
++  }), { code: "router_operation_timeout" });
++  assert.deepEqual(files.map((file) => readFileSync(file)), prior);
++});
++
++test("file-array capture callbacks count existing files and reject excessive restore allowance", async (t) => {
++  const files = fixtures(t, 7);
++  await assert.rejects(transactModelOverlayMutation({ lock: false, restart: true,
++    capture: () => captureModelOverlayFiles(files),
++    mutate: () => assert.fail("seven per-file ACL operations cannot fit the rollback owner allowance"),
++  }), { code: "router_operation_timeout" });
++});
++
++test("custom snapshot arrays retain a bounded unknown restoration allowance", async (t) => {
++  const clock = fakeClock(t);
++  let state = "old";
++  let calls = 0;
++  await assert.rejects(transactModelOverlayMutation({ lock: false, restart: true,
++    capture: () => [{ customState: state }],
++    mutate: () => { state = "new"; clock.advance(20_000); },
++    restore: (snapshots) => { state = snapshots[0].customState; clock.advance(45_000); },
++    applyPublication: (options) => {
++      calls += 1;
++      assert.ok(options.deadline - clock.now() >= 1_260_000);
++      if (calls === 1) throw new Error("custom forward failure");
++    },
++  }), /custom forward failure/);
++  assert.equal(state, "old");
++  assert.equal(calls, 2);
++});
++
++test("an oversized configured per-file ACL timeout is refused before mutation", async (t) => {
++  const files = fixtures(t, 1);
++  const previous = process.env.CODEX_ROUTER_WINDOWS_PRIVATE_SYNC_TIMEOUT_MS;
++  process.env.CODEX_ROUTER_WINDOWS_PRIVATE_SYNC_TIMEOUT_MS = "900000";
++  t.after(() => {
++    if (previous === undefined) delete process.env.CODEX_ROUTER_WINDOWS_PRIVATE_SYNC_TIMEOUT_MS;
++    else process.env.CODEX_ROUTER_WINDOWS_PRIVATE_SYNC_TIMEOUT_MS = previous;
++  });
++  await assert.rejects(transactModelOverlayMutation({ files, lock: false, restart: true,
++    mutate: () => assert.fail("an explicit timeout cannot silently overrun the rollback owner"),
++  }), { code: "router_operation_timeout" });
++});

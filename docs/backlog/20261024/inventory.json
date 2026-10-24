@@ -281,7 +281,7 @@
       },
       "upstreamPr": 1069,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1069",
-      "promotionStatus": "ci_running",
+      "promotionStatus": "ci_passed_waiting_merge",
       "ciFollowUp": {
         "head": "e454b39f7e778db022880857da7f67f450bd0be4",
         "run": 40115130585,
@@ -295,7 +295,10 @@
         "negativeControl": "Old allocator fails the exhaustive actual-Fetch regression with bad port; owned listener on 6566 returns HTTP 200 via http.get but Fetch rejects before connection.",
         "positiveControl": "All 7757 pool addresses pass actual Fetch policy without sockets; 65 related cases pass with no skips, including all 53 empty-completion cases and 9 Router/API cases.",
         "evidence": "direct-ci-failure-analysis.md"
-      }
+      },
+      "prState": "CLOSED",
+      "closedAt": "2026-10-24T18:47:34Z",
+      "ciResult": "12 SUCCESS and 2 conditional SKIPPED on corrected exact head aa3ea31c610a8953ec2050ed8a160a751d3bad00"
     },
     {
       "id": "selected-services",
@@ -2230,7 +2233,7 @@
       "pr": 1069,
       "url": "https://github.com/duolahypercho/codex-router/pull/1069",
       "head": "aa3ea31c610a8953ec2050ed8a160a751d3bad00",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 11
     }
   }

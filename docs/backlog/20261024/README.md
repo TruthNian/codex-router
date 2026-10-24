@@ -16,7 +16,7 @@ this inventory, in addition to the existing tool-history PRs #4–#6.
 | Routed failover delivery evidence | [#8](https://github.com/TruthNian/codex-router/pull/8) | generation-redirect |
 | Reject API and vision generation redirects | [#9 (closed)](https://github.com/TruthNian/codex-router/pull/9) | none recorded |
 | Vision retry delivery and completion semantics | [#10](https://github.com/TruthNian/codex-router/pull/10) | routed-delivery, generation-redirect |
-| Use direct Responses routes while retaining compatibility | [#11](https://github.com/TruthNian/codex-router/pull/11) | none recorded |
+| Use direct Responses routes while retaining compatibility | [#11 (closed)](https://github.com/TruthNian/codex-router/pull/11) | none recorded |
 | Start services from the selected execution plan | [#12](https://github.com/TruthNian/codex-router/pull/12) | direct-responses |
 | Prepare only selected runtime dependencies | [#13](https://github.com/TruthNian/codex-router/pull/13) | selected-services |
 | Scope doctor to selected provider readiness | [#14](https://github.com/TruthNian/codex-router/pull/14) | selected-services |
@@ -100,4 +100,4 @@ Keep this inventory available until every item has an explicit disposition.
 | cache-version-metadata | [#1063](https://github.com/duolahypercho/codex-router/pull/1063) | `955645840771efbb0e689d395d753e9168143d19` | ci_passed_waiting_merge |
 | retention-clock | [#1067](https://github.com/duolahypercho/codex-router/pull/1067) | `2029173a65ab9a7dcc05cc028ee7086640ae82a8` | ci_passed_waiting_merge |
 | manual-ci-scope | [#1068](https://github.com/duolahypercho/codex-router/pull/1068) | `3b29062c03c43721e4934e873b3596182e5f7e43` | ci_passed_waiting_merge |
-| direct-responses | [#1069](https://github.com/duolahypercho/codex-router/pull/1069) | `aa3ea31c610a8953ec2050ed8a160a751d3bad00` | ci_running |
+| direct-responses | [#1069](https://github.com/duolahypercho/codex-router/pull/1069) | `aa3ea31c610a8953ec2050ed8a160a751d3bad00` | ci_passed_waiting_merge |

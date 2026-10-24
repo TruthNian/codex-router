@@ -1,0 +1,15 @@
+diff --git a/changelog.d/windows-private-helper-appdata.md b/changelog.d/windows-private-helper-appdata.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/windows-private-helper-appdata.md
+@@ -0,0 +1 @@
++- Preserve AppData runtime directories when launching Windows private-file helpers so PowerShell module caches stay in the selected profile. Provider credentials remain excluded, and synchronous and asynchronous writes retain owner-only ACL checks.
+diff --git a/src/file-security.mjs b/src/file-security.mjs
+--- a/src/file-security.mjs
++++ b/src/file-security.mjs
+@@ -103,0 +105,5 @@ function windowsPowerShellEnvironment(paths) {
++      // Windows PowerShell caches module discovery below LOCALAPPDATA. Losing
++      // these public runtime paths redirects its cache into the working tree
++      // instead of the caller's real or isolated profile.
++      "APPDATA",
++      "LOCALAPPDATA",

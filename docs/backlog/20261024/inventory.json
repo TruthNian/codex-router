@@ -1383,13 +1383,12 @@
         "src/file-security.mjs",
         "src/kimi-oauth-session.mjs",
         "src/legacy-migration.mjs",
-        "src/litellm-config.mjs",
         "src/native-catalog-source.mjs",
         "src/provider-credential-store.mjs",
         "src/provider-credentials.mjs",
         "src/secret.mjs"
       ],
-      "extractionNotes": "Partial topic: agent definitions PR 1070, model selections PR 1071, harness documents PR 1072 and provider configuration PR 1073 are independently extracted. Eleven remaining writer source-file candidates need review and explicit disposition; this is not a count of required PRs. The excluded provider-selection read-interface fragment remains in the immutable backup 24 patch and is explicitly mapped to adopted-catalog for dependency/boundary review. Keep backup 24 open. Shared primitive foundations are merged via PR 1009; deferred parser observations remain separate.",
+      "extractionNotes": "Partial topic: agent definitions #1070, model selections #1071, harness documents #1072, provider configuration #1073 and gateway configuration #1074 are independently extracted. Ten remaining writer source-file candidates need review and explicit disposition; this is not a count of required PRs. The excluded provider-selection read-interface fragment remains in immutable backup #24 and is explicitly mapped to adopted-catalog for dependency/boundary review. Keep backup #24 open. Shared primitive foundations are merged via #1009; deferred parser observations remain separate.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -1424,6 +1423,15 @@
           "url": "https://github.com/duolahypercho/codex-router/pull/1073",
           "head": "150c03b8bbe09f635b04dcf620afe279ba7cd1f9",
           "status": "ci_passed_waiting_merge",
+          "backupPr": 24,
+          "sourceTopic": "private-writers"
+        },
+        "gateway_config_private_writer": {
+          "topic": "private-writers/gateway-config",
+          "pr": 1074,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1074",
+          "head": "3e6b1652b5e25b458ec11acf663acf0c6db12454",
+          "status": "ci_running",
           "backupPr": 24,
           "sourceTopic": "private-writers"
         }
@@ -2366,6 +2374,15 @@
       "url": "https://github.com/duolahypercho/codex-router/pull/1073",
       "head": "150c03b8bbe09f635b04dcf620afe279ba7cd1f9",
       "status": "ci_passed_waiting_merge",
+      "backupPr": 24,
+      "sourceTopic": "private-writers"
+    },
+    "private-writers/gateway-config": {
+      "topic": "private-writers/gateway-config",
+      "pr": 1074,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1074",
+      "head": "3e6b1652b5e25b458ec11acf663acf0c6db12454",
+      "status": "ci_running",
       "backupPr": 24,
       "sourceTopic": "private-writers"
     }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { callerBaseUrl } from "../src/caller-auth.mjs";
 import { openPort } from "./port-pool.mjs";
+import { setupFixtureEnvironment } from "./fixtures/setup-environment.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INTERNAL_KEY = "test-internal-service-key-with-sufficient-length";
@@ -2242,11 +2243,24 @@ function compactSuccessJson() {
 }
 
 async function oversizedWindowsExcept(keepSlugs = []) {
-  const { LISTED_MODELS } = await import("../src/model-registry.mjs");
-  const keep = new Set(keepSlugs);
-  return LISTED_MODELS.filter(
-    (model) => !keep.has(model.slug) && Number(model.contextWindow) >= 434983,
-  ).map((model) => model.slug);
+  // Match the child's pristine registry, rather than the operator's possibly
+  // filtered registry (for example, with the compatibility layer disabled).
+  const directory = mkdtempSync(path.join(os.tmpdir(), "failover-catalog-"));
+  try {
+    const output = execFileSync(process.execPath, ["--input-type=module", "-e", `
+      import { LISTED_MODELS } from "./src/model-registry.mjs";
+      const keep = new Set(JSON.parse(process.argv[1]));
+      process.stdout.write(JSON.stringify(LISTED_MODELS.filter(model =>
+        !keep.has(model.slug) && Number(model.contextWindow) >= 434983,
+      ).map(model => model.slug)));
+    `, JSON.stringify(keepSlugs)], {
+      cwd: root, env: setupFixtureEnvironment(directory, directory),
+      encoding: "utf8", timeout: 30_000, windowsHide: true,
+    });
+    return JSON.parse(output);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 test("compact overflow hops to a larger same-family window without cooldown", async () => {

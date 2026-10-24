@@ -1956,7 +1956,7 @@
       "publishedHead": "5f72f1ba0da9264bed539efc0431cfbfa4e0fa99",
       "isDraft": true,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1064",
-      "promotionStatus": "ci_running"
+      "promotionStatus": "ci_passed_waiting_merge"
     },
     {
       "id": "retention-clock",
@@ -2103,7 +2103,7 @@
       "pr": 1064,
       "url": "https://github.com/duolahypercho/codex-router/pull/1064",
       "head": "b9e54fc6b201e68ab5212b279162434561dc8ee7",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 29
     }
   }

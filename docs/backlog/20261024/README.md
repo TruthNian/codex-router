@@ -95,4 +95,4 @@ Keep this inventory available until every item has an explicit disposition.
 
 | Topic | Upstream PR | Exact published head | Status |
 |---|---|---|---|
-| catalog-fixture-isolation | [#1064](https://github.com/duolahypercho/codex-router/pull/1064) | `b9e54fc6b201e68ab5212b279162434561dc8ee7` | ci_running |
+| catalog-fixture-isolation | [#1064](https://github.com/duolahypercho/codex-router/pull/1064) | `b9e54fc6b201e68ab5212b279162434561dc8ee7` | ci_passed_waiting_merge |

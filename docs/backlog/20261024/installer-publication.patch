@@ -1,0 +1,465 @@
+diff --git a/bin/enable b/bin/enable
+--- a/bin/enable
++++ b/bin/enable
+@@ -88,0 +89 @@ node src/provider-selection.mjs ensure-configured >/dev/null
++"$repo_dir/bin/install" --dependencies-only
+@@ -89,0 +91,16 @@ node src/secret.mjs ensure
++# Preserve integrations found before this run. A failed preparation must not
++# uninstall the operator's existing client route or background service.
++config_was_enabled=false
++service_was_installed=false
++case "$target" in
++  codex) config_status_pattern='"mode": "router"' ;;
++  dsh) config_status_pattern='"routeInstalled": true' ;;
++  cursor) config_status_pattern='"appConfigured": true' ;;
++  *) config_status_pattern='"installed": true' ;;
++esac
++if node "$config_manager" status | grep -q "$config_status_pattern"; then
++  config_was_enabled=true
++fi
++if node src/service.mjs status | grep -q '"installed": true'; then
++  service_was_installed=true
++fi
+@@ -91,0 +109,2 @@ service_installed=false
++adoption_pending=false
++readiness_timeout=false
+@@ -92,0 +112 @@ rollback() {
++  if [ "$readiness_timeout" = true ]; then return; fi
+@@ -98 +118 @@ rollback() {
+-  elif [ "$adopt_native_catalog" = true ]; then
++  elif [ "$adoption_pending" = true ]; then
+@@ -104,0 +125 @@ if [ "$adopt_native_catalog" = true ]; then
++  adoption_pending=true
+@@ -105,0 +127,20 @@ fi
++# Service readiness must precede any catalog or client publication. Gateway
++# configuration is runtime preparation and needs no application mutation.
++gateway_required=$(node src/runtime-dependency-requirements.mjs --gateway-required)
++case "$gateway_required" in
++  required|unused) ;;
++  *) echo "Could not determine runtime dependency requirements." >&2; exit 1 ;;
++esac
++if [ "$gateway_required" = required ]; then
++  node src/litellm-config.mjs
++fi
++if [ "$service_was_installed" != true ]; then service_installed=true; fi
++service_status=0
++node src/service.mjs install || service_status=$?
++if [ "$service_status" -eq 75 ]; then
++  readiness_timeout=true
++  echo "The service is still starting; application routes have not been published. Re-run enable after it becomes healthy." >&2
++  exit 75
++fi
++if [ "$service_status" -ne 0 ]; then exit "$service_status"; fi
++node src/wait-health.mjs
+@@ -112 +152,0 @@ fi
+-node src/litellm-config.mjs
+@@ -135 +175 @@ fi
+-config_enabled=true
++if [ "$config_was_enabled" != true ]; then config_enabled=true; fi
+@@ -141,3 +180,0 @@ fi
+-service_installed=true
+-node src/service.mjs install
+-node src/wait-health.mjs
+diff --git a/bin/install b/bin/install
+--- a/bin/install
++++ b/bin/install
+@@ -18,0 +19 @@ prepare_only=false
++dependencies_only=false
+@@ -31,0 +33 @@ for argument in "$@"; do
++    --dependencies-only) dependencies_only=true ;;
+@@ -35 +37 @@ for argument in "$@"; do
+-    *) echo "Usage: $0 [--prepare-only] [--migrate-known] [--adopt-native-catalog] [--force-deps]" >&2; exit 2 ;;
++    *) echo "Usage: $0 [--prepare-only|--dependencies-only] [--migrate-known] [--adopt-native-catalog] [--force-deps]" >&2; exit 2 ;;
+@@ -46 +48 @@ done
+-if [ "$prepare_only" != true ]; then
++if [ "$prepare_only" != true ] && [ "$dependencies_only" != true ]; then
+@@ -50,0 +53,5 @@ fi
++if [ "$dependencies_only" = true ] && { [ "$prepare_only" = true ] || [ "$migrate_known" = true ] || [ "$adopt_native_catalog" = true ]; }; then
++  echo "--dependencies-only cannot prepare generated files, migrate, or adopt a native catalog." >&2
++  exit 2
++fi
++
+@@ -94 +101 @@ case "$platform" in
+-    if [ "$prepare_only" != true ]; then
++    if [ "$prepare_only" != true ] && [ "$dependencies_only" != true ]; then
+@@ -143,6 +150,4 @@ codex_home=${CODEX_HOME:-$HOME/.codex}
+-mkdir -p "$codex_home"
+-if [ "$migrate_known" = true ]; then
+-  node src/legacy-migration.mjs apply --yes >/dev/null
+-else
+-  if [ "$adopt_native_catalog" = true ]; then
+-    node src/legacy-migration.mjs assert-clear --adopt-native-catalog >/dev/null
++if [ "$dependencies_only" != true ]; then
++  mkdir -p "$codex_home"
++  if [ "$migrate_known" = true ]; then
++    node src/legacy-migration.mjs apply --yes >/dev/null
+@@ -150 +155,8 @@ else
+-    node src/legacy-migration.mjs assert-clear >/dev/null
++    if [ "$adopt_native_catalog" = true ]; then
++      node src/legacy-migration.mjs assert-clear --adopt-native-catalog >/dev/null
++    else
++      node src/legacy-migration.mjs assert-clear >/dev/null
++    fi
++  fi
++  if [ "$prepare_only" != true ]; then
++    node src/provider-selection.mjs ensure-configured >/dev/null
+@@ -152,3 +163,0 @@ else
+-fi
+-if [ "$prepare_only" != true ]; then
+-  node src/provider-selection.mjs ensure-configured >/dev/null
+@@ -209,4 +218,13 @@ ensure_uv_venv() {
+-compatibility_required=$(node src/compatibility-layer-state.mjs required)
+-case "$compatibility_required" in required|unused) ;; *) echo "Could not read compatibility policy." >&2; exit 1 ;; esac
+-if [ "$compatibility_required" = unused ]; then
+-  echo "Compatibility layer disabled; skipping Python dependencies and probes (including forced repair)."
++# --force-deps is the explicit full repair contract, even for an idle or
++# Responses-only installation. Ordinary preparation follows the actual routes.
++gateway_required=$(node src/compatibility-layer-state.mjs required)
++case "$gateway_required" in required|unused) ;; *) echo "Could not read compatibility policy." >&2; exit 1 ;; esac
++if [ "$gateway_required" = required ] && [ "$force_deps" != true ]; then
++  gateway_required=$(node src/runtime-dependency-requirements.mjs --gateway-required)
++fi
++case "$gateway_required" in
++  required|unused) ;;
++  *) echo "Could not determine runtime dependency requirements." >&2; exit 1 ;;
++esac
++if [ "$gateway_required" = unused ]; then
++  echo "Selected routes do not need LiteLLM; skipping Python dependency installation and probes."
+@@ -255,0 +274,5 @@ fi
++if [ "$dependencies_only" = true ]; then
++  echo "Runtime dependencies are prepared; provider selection and application configuration were not changed."
++  exit 0
++fi
++
+@@ -370,0 +394,36 @@ fi
++if [ "$gateway_required" = required ]; then
++  node src/litellm-config.mjs
++fi
++if [ "$prepare_only" = true ]; then
++  echo "Dependencies and local Codex router files are prepared. Application configuration was not changed."
++  exit 0
++fi
++
++# Record before the service starts, not after. The generated state above was
++# written by this checkout, so ownership is already this checkout's in fact;
++# the manifest is provenance for exactly that -- which checkout owns the state,
++# and the proxy environment a later repair must restore -- and the desktop app
++# resolves its source root from the field. The service itself needs the record
++# in place first: start.mjs rewrites the gateway config on every boot and
++# refuses while the manifest still names another checkout, so recording after
++# `service.mjs install` -- a step that contains the health wait -- let an
++# install over a foreign-owned state directory crash-loop for the whole
++# readiness budget while the ownership transfer it needed never ran.
++node src/install-manifest.mjs record >/dev/null
++service_installed=true
++service_status=0
++node src/service.mjs install || service_status=$?
++if [ "$service_status" -eq 75 ]; then
++  # Installed and running, just not healthy yet. Stop here without rolling
++  # anything back: the service keeps starting, and the operator re-checks
++  # rather than reinstalling. Skipping wait-health matters -- it would spend a
++  # second full budget and fail the same way on the same cold start.
++  readiness_timeout=true
++  echo "The background service is installed and still starting; the router did not answer within the health wait."
++  echo "Check './bin/status' in a few minutes. Do not re-run the installer -- nothing was rolled back."
++  exit "$service_status"
++elif [ "$service_status" -ne 0 ]; then
++  exit "$service_status"
++fi
++node src/wait-health.mjs
++
+@@ -384 +442,0 @@ fi
+-node src/litellm-config.mjs
+@@ -408,5 +465,0 @@ fi
+-if [ "$prepare_only" = true ]; then
+-  echo "Dependencies and local Codex router files are prepared. Application configuration was not changed."
+-  exit 0
+-fi
+-
+@@ -423,27 +475,0 @@ fi
+-# Record before the service starts, not after. The generated state above was
+-# written by this checkout, so ownership is already this checkout's in fact;
+-# the manifest is provenance for exactly that -- which checkout owns the state,
+-# and the proxy environment a later repair must restore -- and the desktop app
+-# resolves its source root from the field. The service itself needs the record
+-# in place first: start.mjs rewrites the gateway config on every boot and
+-# refuses while the manifest still names another checkout, so recording after
+-# `service.mjs install` -- a step that contains the health wait -- let an
+-# install over a foreign-owned state directory crash-loop for the whole
+-# readiness budget while the ownership transfer it needed never ran.
+-node src/install-manifest.mjs record >/dev/null
+-service_installed=true
+-service_status=0
+-node src/service.mjs install || service_status=$?
+-if [ "$service_status" -eq 75 ]; then
+-  # Installed and running, just not healthy yet. Stop here without rolling
+-  # anything back: the service keeps starting, and the operator re-checks
+-  # rather than reinstalling. Skipping wait-health matters -- it would spend a
+-  # second full budget and fail the same way on the same cold start.
+-  readiness_timeout=true
+-  echo "The background service is installed and still starting; the router did not answer within the health wait."
+-  echo "Check './bin/status' in a few minutes. Do not re-run the installer -- nothing was rolled back."
+-  exit "$service_status"
+-elif [ "$service_status" -ne 0 ]; then
+-  exit "$service_status"
+-fi
+-node src/wait-health.mjs
+diff --git a/changelog.d/installer-publication-order.md b/changelog.d/installer-publication-order.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/installer-publication-order.md
+@@ -0,0 +1 @@
++- Prepare installs without publishing client routes, and publish them only after the adopted service is healthy; a failed enable operation preserves existing client and service installations.
+diff --git a/docs/INSTALL.md b/docs/INSTALL.md
+--- a/docs/INSTALL.md
++++ b/docs/INSTALL.md
+@@ -20 +20 @@ Required software:
+-- `uv`, or Python 3.10+ with `venv`
++- `uv`, or Python 3.10+ with `venv`, when a selected callable route needs the LiteLLM gateway
+@@ -22 +22 @@ Required software:
+-- At least one Kimi OAuth, Kimi API, or DeepSeek API credential
++- A native ChatGPT session or the credential required by the selected provider; keyless local routes retain their own runtime prerequisites
+@@ -328 +328 @@ Setup performs these operations in order:
+-4. Installs locked Node dependencies and pinned LiteLLM in `.venv`.
++4. Installs locked Node dependencies, plus pinned LiteLLM in `.venv` only when the execution plan needs it.
+@@ -330,10 +330,11 @@ Setup performs these operations in order:
+-6. Captures the native Codex model catalog and adds only selected provider models.
+-7. Generates gateway routes from the split registry tree under `config/`.
+-8. Adds the marked capability-bearing base URL and catalog block. When the user
+-   has not set an agent concurrency limit, it also configures six spawned-agent
+-   slots so native Kimi/Grok/GPT collaboration does not remain on Codex's small
+-   v2 default. Existing `[agents]` limits are preserved.
+-9. Protects the Codex config and its backup for the current user.
+-10. Installs the platform's per-user background service.
+-11. Waits for every local layer to report its expected service identity.
+-12. Records the installed commit and provider selection.
++6. Captures the native Codex model catalog when applicable.
++7. Generates gateway routes from `config/` when the execution plan needs them.
++   PrepareOnly ends here, before service adoption or client publication.
++8. Records checkout ownership and installation provenance before service startup.
++9. Installs the platform's per-user background service.
++10. Waits for the selected dependencies and Router readiness.
++11. Publishes selected model catalogs and the client's routing configuration.
++    Codex config and its backup receive current-user protection. When the user
++    has not set an agent concurrency limit, installation also configures six
++    spawned-agent slots; existing `[agents]` limits are preserved.
++12. Rebuilds an already installed desktop companion when supported.
+diff --git a/install.ps1 b/install.ps1
+--- a/install.ps1
++++ b/install.ps1
+@@ -4,0 +5 @@ param(
++  [switch]$DependenciesOnly,
+@@ -33,0 +35,3 @@ $ErrorActionPreference = "Stop"
++if ($DependenciesOnly -and (-not $CheckoutInstall -or $PrepareOnly -or $MigrateKnown -or $AdoptNativeCatalog)) {
++  throw "-DependenciesOnly requires -CheckoutInstall and cannot prepare generated files, migrate, or adopt a native catalog."
++}
+@@ -296,24 +300,26 @@ try {
+-  # Each manager reports enablement under its own name: the Codex manager
+-  # publishes a routing mode, DSH reports whether its route reached the
+-  # settings document, Gemini whether its catalog is published.
+-  $ConfigWasEnabled = switch ($Target) {
+-    "dsh" { (Get-InstallerStateField @($ConfigManager, "status") "routeInstalled") -eq $true }
+-    "gemini" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
+-    "cursor" { (Get-InstallerStateField @($ConfigManager, "status") "appConfigured") -eq $true }
+-    "claude" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
+-    "openclaw" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
+-    default { (Get-InstallerStateField @($ConfigManager, "status") "mode") -eq "router" }
+-  }
+-  $ServiceWasInstalled = (Get-InstallerStateField @("src\service.mjs", "status") "installed") -eq $true
+-  $TrayWasInstalled = (Get-InstallerStateField @("src\tray-service.mjs", "status") "installed") -eq $true
+-  if ($Target -eq "codex") {
+-    $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
+-    New-Item -ItemType Directory -Force -Path $CodexHome | Out-Null
+-    $LegacyArguments = @("src\legacy-migration.mjs", "assert-clear")
+-    if ($AdoptNativeCatalog) { $LegacyArguments += "--adopt-native-catalog" }
+-    & node @LegacyArguments | Out-Null
+-    if ($LASTEXITCODE -ne 0) { throw "Resolve the detected older router before installing." }
+-  }
+-  if (-not $PrepareOnly) {
+-    & node src/provider-selection.mjs ensure-configured | Out-Null
+-    if ($LASTEXITCODE -ne 0) { throw "Configure at least one provider before installing." }
++  if (-not $DependenciesOnly) {
++    # Each manager reports enablement under its own name: the Codex manager
++    # publishes a routing mode, DSH reports whether its route reached the
++    # settings document, Gemini whether its catalog is published.
++    $ConfigWasEnabled = switch ($Target) {
++      "dsh" { (Get-InstallerStateField @($ConfigManager, "status") "routeInstalled") -eq $true }
++      "gemini" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
++      "cursor" { (Get-InstallerStateField @($ConfigManager, "status") "appConfigured") -eq $true }
++      "claude" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
++      "openclaw" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
++      default { (Get-InstallerStateField @($ConfigManager, "status") "mode") -eq "router" }
++    }
++    $ServiceWasInstalled = (Get-InstallerStateField @("src\service.mjs", "status") "installed") -eq $true
++    $TrayWasInstalled = (Get-InstallerStateField @("src\tray-service.mjs", "status") "installed") -eq $true
++    if ($Target -eq "codex") {
++      $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
++      New-Item -ItemType Directory -Force -Path $CodexHome | Out-Null
++      $LegacyArguments = @("src\legacy-migration.mjs", "assert-clear")
++      if ($AdoptNativeCatalog) { $LegacyArguments += "--adopt-native-catalog" }
++      & node @LegacyArguments | Out-Null
++      if ($LASTEXITCODE -ne 0) { throw "Resolve the detected older router before installing." }
++    }
++    if (-not $PrepareOnly) {
++      & node src/provider-selection.mjs ensure-configured | Out-Null
++      if ($LASTEXITCODE -ne 0) { throw "Configure at least one provider before installing." }
++    }
+@@ -346,3 +352,9 @@ try {
+-  $CompatibilityRequired = (& node src/compatibility-layer-state.mjs required | Select-Object -Last 1)
+-  if ($LASTEXITCODE -ne 0 -or $CompatibilityRequired -notin @("required", "unused")) {
+-    throw "Could not read compatibility policy."
++  # Explicit repair rebuilds both trees; normal preparation follows requestable
++  # routes, without probing credentials or filtering hidden models.
++  $GatewayRequired = (& node src/compatibility-layer-state.mjs required | Select-Object -Last 1)
++  if ($LASTEXITCODE -ne 0 -or $GatewayRequired -notin @("required", "unused")) { throw "Could not read compatibility policy." }
++  if ($GatewayRequired -eq "required" -and -not $ForceDeps) {
++    $GatewayRequired = (& node src/runtime-dependency-requirements.mjs --gateway-required | Select-Object -Last 1)
++    if ($LASTEXITCODE -ne 0 -or $GatewayRequired -notin @("required", "unused")) {
++      throw "Could not determine runtime dependency requirements."
++    }
+@@ -350,2 +362,2 @@ try {
+-  if ($CompatibilityRequired -eq "unused") {
+-    Write-Host "Compatibility layer disabled; skipping Python dependencies and probes (including forced repair)."
++  if ($GatewayRequired -eq "unused") {
++    Write-Host "Selected routes do not need LiteLLM; skipping Python dependency installation and probes."
+@@ -434,0 +447,5 @@ try {
++  if ($DependenciesOnly) {
++    Write-Host "Runtime dependencies are prepared; provider selection and application configuration were not changed."
++    return
++  }
++
+@@ -470,0 +488,39 @@ try {
++  if ($GatewayRequired -eq "required") {
++    & node src/litellm-config.mjs
++    if ($LASTEXITCODE -ne 0) { throw "Gateway configuration generation failed." }
++  }
++  if ($PrepareOnly) {
++    Write-Host "Dependencies and generated files are prepared; application configuration was not changed."
++    # Return from the script instead of terminating the caller's PowerShell
++    # host. The outer finally still has to restore the caller environment, and
++    # an invoked prepare-only install must hand control back so its caller can
++    # observe that restoration.
++    return
++  }
++
++  # Record before the service starts, not after. The manifest is provenance for
++  # the install that just happened -- which checkout owns the state, and the
++  # proxy environment a later repair must restore -- and the service itself
++  # needs the record in place first: start.mjs rewrites the gateway config on
++  # every boot and refuses while the manifest still names another checkout, so
++  # recording after `service.mjs install` -- a step that contains the health
++  # wait -- let an install over a foreign-owned state directory crash-loop for
++  # the whole readiness budget while the ownership transfer never ran.
++  & node src/install-manifest.mjs record | Out-Null
++  if ($LASTEXITCODE -ne 0) { throw "Install-manifest recording failed." }
++  $ServiceInstalled = $true
++  & node src/service.mjs install
++  if ($LASTEXITCODE -eq 75) {
++    # Installed and running, just not healthy yet. Stop without rolling
++    # anything back: the service keeps starting and the operator re-checks
++    # rather than reinstalling. Skipping wait-health matters -- it would spend
++    # a second full budget and fail the same way on the same cold start.
++    $ReadinessTimedOut = $true
++    Write-Host "The background service is installed and still starting; the router did not answer within the health wait."
++    Write-Host "Check './codex-router.ps1 status' in a few minutes. Do not re-run the installer -- nothing was rolled back."
++    throw "The router is still starting."
++  }
++  if ($LASTEXITCODE -ne 0) { throw "Background-service installation failed." }
++  & node src/wait-health.mjs
++  if ($LASTEXITCODE -ne 0) { throw "The router did not become healthy." }
++
+@@ -485,2 +540,0 @@ try {
+-  & node src/litellm-config.mjs
+-  if ($LASTEXITCODE -ne 0) { throw "Gateway configuration generation failed." }
+@@ -514,9 +567,0 @@ try {
+-  if ($PrepareOnly) {
+-    Write-Host "Dependencies and generated files are prepared; application configuration was not changed."
+-    # Return from the script instead of terminating the caller's PowerShell
+-    # host. The outer finally still has to restore the caller environment, and
+-    # an invoked prepare-only install must hand control back so its caller can
+-    # observe that restoration.
+-    return
+-  }
+-
+@@ -534,25 +578,0 @@ try {
+-  # Record before the service starts, not after. The manifest is provenance for
+-  # the install that just happened -- which checkout owns the state, and the
+-  # proxy environment a later repair must restore -- and the service itself
+-  # needs the record in place first: start.mjs rewrites the gateway config on
+-  # every boot and refuses while the manifest still names another checkout, so
+-  # recording after `service.mjs install` -- a step that contains the health
+-  # wait -- let an install over a foreign-owned state directory crash-loop for
+-  # the whole readiness budget while the ownership transfer never ran.
+-  & node src/install-manifest.mjs record | Out-Null
+-  if ($LASTEXITCODE -ne 0) { throw "Install-manifest recording failed." }
+-  $ServiceInstalled = $true
+-  & node src/service.mjs install
+-  if ($LASTEXITCODE -eq 75) {
+-    # Installed and running, just not healthy yet. Stop without rolling
+-    # anything back: the service keeps starting and the operator re-checks
+-    # rather than reinstalling. Skipping wait-health matters -- it would spend
+-    # a second full budget and fail the same way on the same cold start.
+-    $ReadinessTimedOut = $true
+-    Write-Host "The background service is installed and still starting; the router did not answer within the health wait."
+-    Write-Host "Check './codex-router.ps1 status' in a few minutes. Do not re-run the installer -- nothing was rolled back."
+-    throw "The router is still starting."
+-  }
+-  if ($LASTEXITCODE -ne 0) { throw "Background-service installation failed." }
+-  & node src/wait-health.mjs
+-  if ($LASTEXITCODE -ne 0) { throw "The router did not become healthy." }
+diff --git a/test/installer-scripts.test.mjs b/test/installer-scripts.test.mjs
+--- a/test/installer-scripts.test.mjs
++++ b/test/installer-scripts.test.mjs
+@@ -243,0 +244 @@ case "\${1:-}" in
++  src/runtime-dependency-requirements.mjs) printf 'required\n'; exit 0 ;;
+@@ -316,0 +318,3 @@ fi
++if [ "\${1:-}" = src/runtime-dependency-requirements.mjs ]; then
++  printf 'required\\n'
++fi
+@@ -331 +335 @@ fi
+-        [path.join(root, "bin", "install"), ["--prepare-only"], "<src/catalog.mjs>"],
++        [path.join(root, "bin", "install"), ["--prepare-only"], "<src/secret.mjs><ensure>"],
+@@ -388,0 +393,3 @@ fi
++if [ "\${1:-}" = src/runtime-dependency-requirements.mjs ]; then
++  printf 'required\\n'
++fi
+@@ -1016 +1023 @@ test("the foreign-state override is scoped to a full ownership-transferring inst
+-  // install -- a prepare-only run must meet the guard like any other writer.
++  // install -- neither preparation phase transfers state ownership.
+@@ -1027 +1034 @@ test("the foreign-state override is scoped to a full ownership-transferring inst
+-    /if \[ "\$prepare_only" != true \]; then\n  MODEL_ROUTER_ALLOW_FOREIGN_STATE=1\n  export MODEL_ROUTER_ALLOW_FOREIGN_STATE\nfi/,
++    /if \[ "\$prepare_only" != true \] && \[ "\$dependencies_only" != true \]; then\n  MODEL_ROUTER_ALLOW_FOREIGN_STATE=1\n  export MODEL_ROUTER_ALLOW_FOREIGN_STATE\nfi/,
+@@ -1045,0 +1053,3 @@ test("the foreign-state override is scoped to a full ownership-transferring inst
++  const dependencyReturnIndex = windows.search(/if \(\$DependenciesOnly\) \{\r?\n\s*Write-Host "Runtime dependencies/);
++  assert.ok(dependencyReturnIndex !== -1 && dependencyReturnIndex < setIndex,
++    "dependency-only returns before the ownership override");
+@@ -1084,0 +1095 @@ test("Windows prepare-only restores the caller foreign-state override live", {
++        'if /I "%~1"=="src/runtime-dependency-requirements.mjs" (echo required& exit /b 0)',
+diff --git a/test/packaged-install.test.mjs b/test/packaged-install.test.mjs
+--- a/test/packaged-install.test.mjs
++++ b/test/packaged-install.test.mjs
+@@ -11,0 +12 @@ import {
++  statSync,
+@@ -91 +92,10 @@ function fakeSourceRoot() {
+-    if (existsSync(target)) symlinkSync(target, path.join(fake, entry));
++    if (!existsSync(target)) continue;
++    const destination = path.join(fake, entry);
++    if (process.platform === "win32") {
++      // Directory junctions and ordinary file copies need no symlink privilege.
++      // A fixture must not turn a healthy install into an administrator-only test.
++      if (statSync(target).isDirectory()) symlinkSync(target, destination, "junction");
++      else copyFileSync(target, destination);
++    } else {
++      symlinkSync(target, destination);
++    }
+@@ -103 +113 @@ function fakeSourceRoot() {
+-    // Python; link the first launcher that passes the exact production probe.
++    // Python; make a real isolated venv from a launcher that passes the probe.
+@@ -117 +127,6 @@ function fakeSourceRoot() {
+-    symlinkSync(python, `${venvPython}.exe`, "file");
++    const venv = spawnSync(python, ["-m", "venv", "--without-pip", path.join(fake, ".venv")], {
++      encoding: "utf8",
++      timeout: 30_000,
++      windowsHide: true,
++    });
++    assert.equal(venv.status, 0, `isolated Python venv could not be created: ${venv.stderr}`);

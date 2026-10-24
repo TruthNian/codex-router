@@ -1478,7 +1478,10 @@
           "ci": "running on exact published head; actual fork runtime dispatch already passed all seven jobs"
         },
         "base": "9945d74354ab07942f171be329cf81c9478fc5e2"
-      }
+      },
+      "upstreamPr": 1068,
+      "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1068",
+      "promotionStatus": "ci_running"
     },
     {
       "id": "runtime-fixtures",
@@ -2173,6 +2176,14 @@
       "head": "2029173a65ab9a7dcc05cc028ee7086640ae82a8",
       "status": "ci_passed_waiting_merge",
       "backupPr": 30
+    },
+    "manual-ci-scope": {
+      "topic": "manual-ci-scope",
+      "pr": 1068,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1068",
+      "head": "3b29062c03c43721e4934e873b3596182e5f7e43",
+      "status": "ci_running",
+      "backupPr": 27
     }
   }
 }

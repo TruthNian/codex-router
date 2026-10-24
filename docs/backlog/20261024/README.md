@@ -99,3 +99,4 @@ Keep this inventory available until every item has an explicit disposition.
 | generation-redirect | [#1065](https://github.com/duolahypercho/codex-router/pull/1065) | `3acbe3e752fd15bb1efd8c0c2e7ca1e972cd3c2b` | ci_passed_waiting_merge |
 | cache-version-metadata | [#1063](https://github.com/duolahypercho/codex-router/pull/1063) | `955645840771efbb0e689d395d753e9168143d19` | ci_passed_waiting_merge |
 | retention-clock | [#1067](https://github.com/duolahypercho/codex-router/pull/1067) | `2029173a65ab9a7dcc05cc028ee7086640ae82a8` | ci_passed_waiting_merge |
+| manual-ci-scope | [#1068](https://github.com/duolahypercho/codex-router/pull/1068) | `3b29062c03c43721e4934e873b3596182e5f7e43` | ci_running |

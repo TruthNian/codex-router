@@ -1358,7 +1358,40 @@
       "pr": 24,
       "url": "https://github.com/TruthNian/codex-router/pull/24",
       "publishedHead": "6eaa21eb98417b090025be9947c303e02ff5e2f2",
-      "isDraft": true
+      "isDraft": true,
+      "remainingSourceFiles": [
+        "src/caller-key-rotation.mjs",
+        "src/catalog.mjs",
+        "src/codex-default-model.mjs",
+        "src/config-manager.mjs",
+        "src/dsh-config-manager.mjs",
+        "src/file-security.mjs",
+        "src/kimi-oauth-session.mjs",
+        "src/legacy-migration.mjs",
+        "src/litellm-config.mjs",
+        "src/local-models.mjs",
+        "src/model-picker-state.mjs",
+        "src/native-catalog-source.mjs",
+        "src/provider-credential-store.mjs",
+        "src/provider-credentials.mjs",
+        "src/provider-selection.mjs",
+        "src/routed-harness-document.mjs",
+        "src/secret.mjs",
+        "src/vertex-state.mjs"
+      ],
+      "extractionNotes": "Split this broad topic by coherent caller groups. First extraction only migrates codex-agent-catalog.mjs to the existing main primitive. Bigint ownership and exclusive cleanup foundations are already in main via merged PR 1009; do not resubmit them. Remaining source files are candidates requiring individual review, not automatically necessary changes. Keep backup 24 open until every remaining delta has a disposition.",
+      "upstreamParts": {
+        "agent_catalog_private_writer": {
+          "topic": "private-writers/agent-catalog",
+          "pr": 1070,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1070",
+          "head": "cb4b66bafad935db4d9a56a392611b129ecbcdaa",
+          "status": "ci_running",
+          "backupPr": 24,
+          "sourceTopic": "private-writers"
+        }
+      },
+      "promotionStatus": "partially_promoted"
     },
     {
       "id": "request-timing",
@@ -2235,6 +2268,15 @@
       "head": "aa3ea31c610a8953ec2050ed8a160a751d3bad00",
       "status": "ci_passed_waiting_merge",
       "backupPr": 11
+    },
+    "private-writers/agent-catalog": {
+      "topic": "private-writers/agent-catalog",
+      "pr": 1070,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1070",
+      "head": "cb4b66bafad935db4d9a56a392611b129ecbcdaa",
+      "status": "ci_running",
+      "backupPr": 24,
+      "sourceTopic": "private-writers"
     }
   }
 }

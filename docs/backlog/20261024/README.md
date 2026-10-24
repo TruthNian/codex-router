@@ -101,3 +101,6 @@ Keep this inventory available until every item has an explicit disposition.
 | retention-clock | [#1067](https://github.com/duolahypercho/codex-router/pull/1067) | `2029173a65ab9a7dcc05cc028ee7086640ae82a8` | ci_passed_waiting_merge |
 | manual-ci-scope | [#1068](https://github.com/duolahypercho/codex-router/pull/1068) | `3b29062c03c43721e4934e873b3596182e5f7e43` | ci_passed_waiting_merge |
 | direct-responses | [#1069](https://github.com/duolahypercho/codex-router/pull/1069) | `aa3ea31c610a8953ec2050ed8a160a751d3bad00` | ci_passed_waiting_merge |
+| private-writers/agent-catalog | [#1070](https://github.com/duolahypercho/codex-router/pull/1070) | `cb4b66bafad935db4d9a56a392611b129ecbcdaa` | ci_running |
+
+**Partial topic `private-writers`:** backup #24 remains open for the remaining consumers. Individual parts above do not complete this topic. `remainingSourceFiles` and `upstreamParts` in inventory.json preserve the extraction boundary.

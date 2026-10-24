@@ -1943,7 +1943,7 @@
       ],
       "status": "focused_extraction_verified_locally_not_new_upstream_authorization",
       "localTests": 60,
-      "upstreamPr": null,
+      "upstreamPr": 1064,
       "upstreamPrerequisites": [],
       "candidateDependencies": [],
       "intent": "Preserve this exact small extraction and its existing local evidence. CI on other snapshots is not this patch CI.",
@@ -1954,7 +1954,9 @@
       "pr": 29,
       "url": "https://github.com/TruthNian/codex-router/pull/29",
       "publishedHead": "5f72f1ba0da9264bed539efc0431cfbfa4e0fa99",
-      "isDraft": true
+      "isDraft": true,
+      "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1064",
+      "promotionStatus": "ci_running"
     },
     {
       "id": "retention-clock",
@@ -2094,5 +2096,15 @@
   },
   "initialIndexCommit": "7477d0367237b7b88cbc29016bcbff1796b0579a",
   "archiveStatus": "24 feature/fix archives plus one inventory PR published and remote heads verified; existing fork PRs 4-6 retained",
-  "promotionGate": "Archive existence does not authorize blind patch application. Inspect actual main, identify a coherent diff, verify every prerequisite merged, review and validate it, then submit one upstream PR after previous CI is stable."
+  "promotionGate": "Archive existence does not authorize blind patch application. Inspect actual main, identify a coherent diff, verify every prerequisite merged, review and validate it, then submit one upstream PR after previous CI is stable.",
+  "promotions": {
+    "catalog-fixture-isolation": {
+      "topic": "catalog-fixture-isolation",
+      "pr": 1064,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1064",
+      "head": "b9e54fc6b201e68ab5212b279162434561dc8ee7",
+      "status": "ci_running",
+      "backupPr": 29
+    }
+  }
 }

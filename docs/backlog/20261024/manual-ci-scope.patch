@@ -1,0 +1,146 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -5 +5 @@ name: CI
+-    branches: [main]
++    branches: [main, personal]
+@@ -7 +7,7 @@ name: CI
+-  workflow_dispatch: {}
++  workflow_dispatch:
++    inputs:
++      scope:
++        description: Checks to run
++        type: choice
++        default: all
++        options: [all, runtime, macos-unified, macos-events]
+@@ -13,0 +20 @@ jobs:
++    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == 'runtime' || inputs.scope == ''
+@@ -76,0 +84 @@ jobs:
++    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == 'runtime' || inputs.scope == ''
+@@ -124 +132 @@ jobs:
+-    if: github.event_name == 'workflow_dispatch'
++    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'all' || inputs.scope == '')
+@@ -137,0 +146 @@ jobs:
++    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'all' || inputs.scope == 'runtime' || inputs.scope == ''
+@@ -326,0 +336,17 @@ jobs:
++  macos-native-watch:
++    name: macOS native watch diagnostics
++    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'macos-events'
++    runs-on: macos-latest
++    timeout-minutes: 5
++    steps:
++      - uses: actions/checkout@v7
++      - uses: actions/setup-node@v7
++        with:
++          node-version: "24"
++          cache: npm
++      - run: npm ci --ignore-scripts --no-audit --no-fund
++      - name: Verify startup reconciliation and actual atomic file replacement
++        run: node --import ./test/fixtures/isolated-runtime-environment.mjs --test test/native-catalog-events.test.mjs test/native-catalog-watch.test.mjs
++      - name: Probe atomic replacement with raw and canonical watch paths
++        run: node --import ./test/fixtures/isolated-runtime-environment.mjs scripts/diagnose-native-watch.mjs
++
+@@ -327,0 +354 @@ jobs:
++    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'macos-events'
+@@ -396,0 +424 @@ jobs:
++          CODEX_ROUTER_MACOS_LAUNCH_DIAGNOSTICS: "1"
+@@ -488,0 +517,4 @@ jobs:
++          smoke_runs=1
++          [ "${{ inputs.scope }}" != macos-unified ] || smoke_runs=5
++          for smoke_attempt in $(seq 1 "$smoke_runs"); do
++          printf 'Native lifecycle attempt %s/%s\n' "$smoke_attempt" "$smoke_runs"
+@@ -493,0 +526,7 @@ jobs:
++            if [ "$cleanup_status" -ne 0 ]; then
++              printf '\nNative macOS launch diagnostics:\n' >&2
++              cat "$log" >&2 || true
++              /bin/ps -axo pid,ppid,stat,comm | /usr/bin/grep -E 'ModelRouterTray|Control Center|Codex Router' >&2 || true
++              /usr/bin/log show --last 3m --style compact --info \
++                --predicate 'process == "ModelRouterTray" OR process == "Codex Router"' 2>/dev/null | tail -n 80 >&2 || true
++            fi
+@@ -538,0 +578,2 @@ jobs:
++          /usr/bin/grep '\[macos-launch\]' "$log" || true
++          done
+diff --git a/changelog.d/macos-native-watch-diagnostics.md b/changelog.d/macos-native-watch-diagnostics.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/macos-native-watch-diagnostics.md
+@@ -0,0 +1 @@
++- Add an isolated manual macOS filesystem-watch diagnostic that compares canonical and aliased temporary paths and records real event delivery around atomic account-file replacement.
+diff --git a/changelog.d/manual-runtime-ci-scope.md b/changelog.d/manual-runtime-ci-scope.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/manual-runtime-ci-scope.md
+@@ -0,0 +1 @@
++- Allow manual runtime CI to run all three platform test suites and desktop checks without repeating the separate, unchanged Homebrew source-install checks. Full manual CI keeps the installer checks, and native-watch diagnostics distinguish delivered OS events from startup reconciliation.
+diff --git a/scripts/diagnose-native-watch.mjs b/scripts/diagnose-native-watch.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/diagnose-native-watch.mjs
+@@ -0,0 +1,67 @@
++import assert from "node:assert/strict";
++import { spawnSync } from "node:child_process";
++import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, watch, writeFileSync } from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++import { subscribeNativeCatalogEvents } from "../src/native-catalog-events.mjs";
++
++const results = [];
++const childMode = process.argv[2];
++if (!childMode) {
++  for (let round = 1; round <= 5; round += 1) {
++    for (const mode of ["raw-immediate", "canonical-immediate", "raw-settled"]) {
++      const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), mode, String(round)], {
++        encoding: "utf8", windowsHide: true, timeout: 10_000,
++      });
++      assert.ifError(child.error);
++      assert.equal(child.status, 0, child.stderr);
++      results.push(...JSON.parse(child.stdout).results);
++    }
++  }
++} else {
++    const mode = childMode;
++    assert(["raw-immediate", "canonical-immediate", "raw-settled"].includes(mode));
++    const round = Number(process.argv[3]);
++    const allocated = mkdtempSync(path.join(os.tmpdir(), "native-watch-diagnostic-"));
++    const root = mode === "canonical-immediate" ? realpathSync(allocated) : allocated;
++    const authPath = path.join(root, "auth.json");
++    writeFileSync(authPath, "synthetic before");
++    let identity = "before";
++    const started = Date.now();
++    const trace = [];
++    let complete;
++    const observed = new Promise((resolve) => { complete = resolve; });
++    const stop = subscribeNativeCatalogEvents((event) => complete(event), {
++      authPath, binaryRoots: [], resolveBinary: () => undefined, readBinaryIdentity: () => undefined,
++      readAccountIdentity: async () => { trace.push({ at: Date.now() - started, read: identity }); return identity; },
++      discoveryOff: () => false, debounceMs: 20,
++      watch(directory, flags, callback) {
++        trace.push({ at: Date.now() - started, watch: directory, canonical: realpathSync(directory) });
++        const handle = watch(directory, flags, (kind, filename) => {
++          trace.push({ at: Date.now() - started, kind, filename: filename == null ? null : String(filename) });
++          callback(kind, filename);
++        });
++        handle.on("error", (error) => trace.push({ at: Date.now() - started, error: error.code }));
++        return handle;
++      },
++    });
++    let timer;
++    try {
++      await new Promise((resolve) => setImmediate(resolve));
++      if (mode === "raw-settled") await new Promise((resolve) => setTimeout(resolve, 200));
++      writeFileSync(`${authPath}.replacement`, "synthetic after");
++      identity = "after";
++      trace.push({ at: Date.now() - started, replace: true });
++      renameSync(`${authPath}.replacement`, authPath);
++      const event = await Promise.race([observed, new Promise((resolve) => { timer = setTimeout(() => resolve(undefined), 2000); })]);
++      results.push({ mode, round, observed: event?.accountChanged === true,
++        nativeCallbacks: trace.filter((entry) => entry.kind).length, milliseconds: Date.now() - started, trace });
++    } finally {
++      clearTimeout(timer); stop();
++      assert.equal(path.dirname(allocated), path.resolve(os.tmpdir()));
++      assert(path.basename(allocated).startsWith("native-watch-diagnostic-"));
++      rmSync(allocated, { recursive: true, force: true });
++    }
++}
++console.log(JSON.stringify({ platform: process.platform, node: process.version, libuv: process.versions.uv, results }, null, 2));

@@ -64,7 +64,7 @@ function blockFor(entry) {
   // those blocks first, then divide the remainder between ordinary consumers.
   const reservations = files.map((file) => {
     const source = readFileSync(path.join(TEST_DIR, file), "utf8");
-    const hint = source.match(/^\/\/ port-pool block-size: (\d+)$/m);
+    const hint = source.match(/^\/\/ port-pool block-size: ([^\r\n]*)$/m);
     if (!hint) return undefined;
     const size = Number(hint[1]);
     if (!Number.isSafeInteger(size) || size < MIN_BLOCK || size > MAX_BLOCK) {

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "providers": [
+    {
+      "id": "atlascloud",
+      "displayName": "Atlas Cloud",
+      "kind": "openai-compatible",
+      "ownedBy": "atlascloud",
+      "baseUrl": "https://api.atlascloud.ai/v1",
+      "baseUrlEnv": "ATLASCLOUD_API_BASE_URL",
+      "credential": {
+        "environment": [
+          "ATLASCLOUD_API_KEY"
+        ],
+        "file": "atlascloud-api-key.secret",
+        "legacyFiles": [],
+        "keychainServices": [
+          "codex-router-atlascloud"
+        ],
+        "prompt": "Atlas Cloud API key"
+      }
+    }
+  ]
+}

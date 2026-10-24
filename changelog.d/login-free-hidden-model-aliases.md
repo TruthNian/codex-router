@@ -1,0 +1,1 @@
+- **Login-free native aliases now follow the model picker selection.** Hidden or unselected external models no longer take native GPT slots before the picker overlay runs. A hidden paid preset could previously receive a native slug and serve requests to that slug, even when only free routes were selected. Canonical routes and legacy picker visibility remain available as before.

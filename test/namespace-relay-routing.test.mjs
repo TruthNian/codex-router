@@ -3439,3 +3439,38 @@ test("Console Go Muse Contributor routes carry Codex handoffs as user messages",
     "an untouched Console Go route keeps the collaboration item",
   );
 });
+
+
+test("local custom tool rejection preserves its cause and prevents automatic replay with or without response metadata", async () => {
+  for (const trusted of [true, false]) {
+    for (const argumentsText of [JSON.stringify({ content: "second" }), '{"content":"first"} trailing', JSON.stringify({ content: null })]) {
+      const result = await scenario(true, {
+        model: "zai-coding/glm-5.3-flash",
+        requestPayload: (stream, model) => ({ model, stream, input: "Apply a synthetic patch.", tools: [{ type: "custom", name: "apply_patch" }] }),
+        sseBody: () => [
+          sseEvent({ type: "response.created", ...(trusted ? { sequence_number: 0 } : {}), response: {
+            id: "resp_rejected", ...(trusted ? { model: "zai-coding-glm-5-3-flash", created_at: 1791840000 } : {}), status: "in_progress", output: [],
+          } }),
+          sseEvent({ type: "response.output_item.added", sequence_number: 1, output_index: 0, item: {
+            type: "custom_tool_call", id: "call_rejected", call_id: "call_rejected", name: "apply_patch", input: "", status: "in_progress",
+          } }),
+          sseEvent({ type: "response.function_call_arguments.delta", sequence_number: 2, output_index: 0, item_id: "call_rejected", delta: JSON.stringify({ content: "first" }) }),
+          sseEvent({ type: "response.function_call_arguments.done", sequence_number: 3, output_index: 0, item_id: "call_rejected", arguments: argumentsText }),
+          sseEvent({ type: "response.output_item.done", sequence_number: 4, output_index: 0, item: {
+            type: "custom_tool_call", id: "call_rejected", call_id: "call_rejected", name: "apply_patch", input: "second", status: "completed",
+          } }),
+          sseEvent({ type: "response.completed", sequence_number: 5, response: { id: "resp_rejected", output: [] } }),
+        ].join(""),
+      });
+      const events = result.clientBody.split(/\r?\n/).filter((line) => line.startsWith("data: {")).map((line) => JSON.parse(line.slice(6)));
+      assert.equal(result.gatewayBodies.length, 1, "the Router must not replay a committed request");
+      const failures = events.filter((event) => event.type === "response.failed");
+      assert.equal(failures.length, 1, `one terminal rejection is required (trusted=${trusted})`);
+      assert.equal(failures[0].code, "ERR_NAMESPACE_RELAY_COMMITTED_STREAM");
+      assert.equal(failures[0].response.error.code, "invalid_prompt");
+      assert.match(failures[0].response.error.message, /custom tool argument deltas disagree|invalid custom tool arguments done/);
+      assert.equal(events.some((event) => event.type === "response.output_item.done" || event.type === "response.completed"), false, "unsafe input cannot complete or execute");
+      if (!trusted) assert.equal(Object.hasOwn(failures[0].response, "created_at"), false, "missing identity must not be invented");
+    }
+  }
+});

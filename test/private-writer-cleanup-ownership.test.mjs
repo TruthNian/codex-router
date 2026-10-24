@@ -33,7 +33,29 @@ const rename = fs.renameSync;
 let unrelatedTemporary;
 let retainedTemporary;
 let parentRedirected = false;
+let replacementInjected = false;
 const originalError = new Error("injected replacement boundary failure");
+if (race === "precision") {
+  // Distinct 64-bit file IDs can round to the same JavaScript Number. Exercise
+  // the writer's actual ownership capture and cleanup, not a synthetic witness.
+  const ownedInode = 2n ** 60n;
+  const foreignInode = ownedInode + 1n;
+  assert.equal(Number(ownedInode), Number(foreignInode));
+  const fstat = fs.fstatSync;
+  const lstat = fs.lstatSync;
+  fs.fstatSync = (descriptor, options) => {
+    const metadata = fstat(descriptor, options);
+    metadata.ino = options?.bigint ? ownedInode : Number(ownedInode);
+    return metadata;
+  };
+  fs.lstatSync = (file, options) => {
+    const metadata = lstat(file, options);
+    const inode = replacementInjected ? foreignInode : ownedInode;
+    metadata.ino = options?.bigint ? inode : Number(inode);
+    return metadata;
+  };
+  syncBuiltinESMExports();
+}
 function redirect(temporary) {
   if (race === "parent") {
     unrelatedTemporary = path.join(foreign, path.basename(temporary));
@@ -51,25 +73,28 @@ function redirect(temporary) {
     rename(foreignSource, temporary);
     unrelatedTemporary = temporary;
   }
+  replacementInjected = true;
   throw originalError;
 }
 let error;
 try {
-  if (kind === "async") {
+  if (kind === "async" || kind === "sync") {
     fs.renameSync = (temporary, destination) => {
       if (destination === target) redirect(temporary);
       return rename(temporary, destination);
     };
     syncBuiltinESMExports();
-    try { await security.writePrivateFileAsync(target, newBytes); } catch (cause) { error = cause; }
+    try {
+      if (kind === "async") await security.writePrivateFileAsync(target, newBytes);
+      else security.writePrivateFile(target, newBytes);
+    } catch (cause) { error = cause; }
   } else {
     const protect = (temporary) => {
       security.protectPrivateFile(temporary);
       redirect(temporary);
     };
     try {
-      if (kind === "copy") atomicPrivateCopy(source, target, { protect });
-      else security.writePrivateFile(target, newBytes, { protect });
+      atomicPrivateCopy(source, target, { protect });
     } catch (cause) { error = cause; }
   }
   assert.equal(error, originalError, "cleanup must retain the operation's original error");
@@ -89,7 +114,7 @@ try {
 `;
 
 for (const kind of ["sync", "copy", "async"]) {
-  for (const race of ["parent", "leaf"]) {
+  for (const race of ["parent", "leaf", "precision"]) {
     test(`${kind} cleanup preserves unrelated files after a ${race} path replacement`, () => {
       const scratch = mkdtempSync(path.join(os.tmpdir(), "private-cleanup-identity-"));
       assert.equal(path.dirname(scratch), path.resolve(os.tmpdir()));
@@ -99,6 +124,10 @@ for (const kind of ["sync", "copy", "async"]) {
         && !/(?:KEY|TOKEN|SECRET|PROXY)/i.test(name)
       )));
       Object.assign(env, {
+        HOME: scratch, USERPROFILE: scratch,
+        APPDATA: path.join(scratch, "appdata"), LOCALAPPDATA: path.join(scratch, "localappdata"),
+        KIMI_CODE_HOME: path.join(scratch, "kimi"), GROK_HOME: path.join(scratch, "grok"),
+        GROK_AUTH_PATH: path.join(scratch, "grok", "auth.json"),
         CODEX_HOME: path.join(scratch, "codex"),
         MODEL_ROUTER_STATE_DIR: path.join(scratch, "state"),
         CODEX_ROUTER_STATE_DIR: path.join(scratch, "state"),

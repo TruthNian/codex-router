@@ -1,0 +1,1 @@
+- Integrate upstream routing, private-file ownership, macOS lifecycle and dependency fixes while preserving local recovery, model policy, catalog refresh and compatibility-layer settings; isolate model-discovery fixtures from the installed compatibility policy.

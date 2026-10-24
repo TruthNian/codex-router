@@ -14,7 +14,9 @@ const [root, entry] = process.argv.slice(1);
 process.argv[1] = path.join(root, "test", entry);
 const { freePort } = await import(pathToFileURL(path.join(root, "test", "port-pool.mjs")));
 const ports = [];
-const needed = entry === "routing.test.mjs" ? 200 : 75;
+// Undeclared consumers are guaranteed the pool's 32-port minimum, not a
+// fixed share that shrinks as unrelated test files are added.
+const needed = entry === "routing.test.mjs" ? 200 : 32;
 for (let index = 0; index < needed; index += 1) ports.push(await freePort());
 assert.equal(new Set(ports).size, needed);
 // Use the production kernel bind helper with a concurrently owned fixture

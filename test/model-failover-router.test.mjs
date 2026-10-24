@@ -2112,6 +2112,49 @@ test("a streamed function_call with unterminated JSON is failed and the completi
   }
 });
 
+test("invalid function arguments after visible output terminate without retry or failover", async () => {
+  let attempts = 0;
+  const gw = await gateway(async (request, response) => {
+    await bodyJson(request);
+    attempts += 1;
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    const prelude = [
+      { type: "response.created", response: { id: "r-tool" } },
+      { type: "response.output_item.added", output_index: 0, item: {
+        id: "msg-visible", type: "message", role: "assistant", content: [], status: "in_progress",
+      } },
+      { type: "response.output_text.delta", output_index: 0, content_index: 0,
+        item_id: "msg-visible", delta: "Visible output before invalid tool." },
+      { type: "response.output_item.done", output_index: 0, item: {
+        id: "msg-visible", type: "message", role: "assistant", status: "completed",
+        content: [{ type: "output_text", text: "Visible output before invalid tool." }],
+      } },
+    ];
+    response.end(prelude.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") +
+      toolCallSse("exec_command", '{"cmd":"unterminated').replace(/^event: response.created\ndata: [^\n]+\n\n/, ""));
+  });
+  const routerPort = await openPort();
+  const child = run(routerEnv(gw.port, routerPort));
+  try {
+    await waitFor(`http://127.0.0.1:${routerPort}/health`, child);
+    const result = await readRouted(routerPort, TURN_BODY);
+    assert.equal(result.status, 200, "the visible response has committed headers");
+    assert.equal(attempts, 1, "committed output must not be regenerated or failed over");
+    assert.match(result.body, /Visible output before invalid tool/);
+    const events = result.body.split(/\r?\n/).filter((line) => line.startsWith("data: {")).map((line) => JSON.parse(line.slice(6)));
+    const failures = events.filter((event) => event.type === "response.failed");
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].code, "invalid_function_call_arguments");
+    assert.equal(failures[0].response.error.code, "invalid_prompt");
+    assert.equal(events.some((event) => event.type === "response.completed" ||
+      (event.type === "response.output_item.done" && event.item?.type === "function_call")), false);
+    assert.doesNotMatch(child.testErrors(), /failover|invalid function_call arguments; retrying/);
+  } finally {
+    await stopChild(child);
+    await closeServer(gw.server);
+  }
+});
+
 test("a streamed function_call with unterminated JSON retries onto a valid call", async () => {
   let attempts = 0;
   const gw = await gateway(async (request, response) => {

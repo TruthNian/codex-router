@@ -56,6 +56,7 @@ jobs:
           AINETCAFE_API_KEY: ${{ secrets.AINETCAFE_API_KEY }}
           AIMLAPI_API_KEY: ${{ secrets.AIMLAPI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ATLASCLOUD_API_KEY: ${{ secrets.ATLASCLOUD_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           CHUTES_API_KEY: ${{ secrets.CHUTES_API_KEY }}
           CLINE_API_KEY: ${{ secrets.CLINE_API_KEY }}

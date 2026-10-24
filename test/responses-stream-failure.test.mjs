@@ -424,3 +424,20 @@ test("unmarked SSE retains its exact generic error frame and JSON gains no frame
   assert.equal(json.body(), "");
   assert.equal(json.writableEnded, true);
 });
+
+
+test("ending a locally rejected stream retains the typed terminal for complete and missing metadata", () => {
+  for (const trusted of [true, false]) {
+    const target = response();
+    markResponsesStream(target);
+    const observer = observe(target, trusted ? [frame(created())] : [frame({ type: "response.reasoning_summary_text.delta", delta: "synthetic prelude" })]);
+    endStreamedResponse(target, { code: "ERR_NAMESPACE_RELAY_COMMITTED_STREAM", message: "Local tool validation rejected the call.", localRejection: true });
+    const failure = events(target.body()).at(-1);
+    assert.equal(failure.type, "response.failed");
+    assert.equal(failure.code, "ERR_NAMESPACE_RELAY_COMMITTED_STREAM");
+    assert.equal(failure.response.error.code, "invalid_prompt");
+    assert.equal(target.writableEnded, true);
+    if (!trusted) assert.equal(Object.hasOwn(failure.response, "id"), false);
+    observer.destroy();
+  }
+});

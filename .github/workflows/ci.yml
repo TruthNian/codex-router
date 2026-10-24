@@ -109,7 +109,7 @@ jobs:
       - name: Set up Homebrew
         id: set-up-homebrew
         if: steps.changed.outputs.run == 'true'
-        uses: Homebrew/actions/setup-homebrew@eb02c69dbabdb66ff183c614f4ce7ab3c077592c # 2026.10.12.1
+        uses: Homebrew/actions/setup-homebrew@4790763c0a3ba4036f72634dc079c4a7dfcd4878 # 2026.10.19.1
       - name: Cache Homebrew Bundler RubyGems
         id: cache-homebrew-gems
         if: steps.changed.outputs.run == 'true'
@@ -138,7 +138,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Set up Homebrew
-        uses: Homebrew/actions/setup-homebrew@eb02c69dbabdb66ff183c614f4ce7ab3c077592c # 2026.10.12.1
+        uses: Homebrew/actions/setup-homebrew@4790763c0a3ba4036f72634dc079c4a7dfcd4878 # 2026.10.19.1
       - name: Build and test the formula from source
         run: packaging/homebrew/check-core-readiness.sh --install
 
@@ -430,14 +430,11 @@ jobs:
           log="$RUNNER_TEMP/model-router-macos-smoke.log"
 
           query_lifecycle() {
-            # Starting Electron just to read state registers a short-lived GUI
-            # process while NSWorkspace is opening the same bundle. Its exit
-            # can race LaunchServices Apple Event delivery (procNotFound/-600).
-            # Observe the same state and PID checks without launching the app.
-            node --input-type=module -e '
-              import { lifecycleStatePath, queryLifecycleState } from "./apps/control-center/electron/lifecycle-state.mjs";
-              process.stdout.write(`${JSON.stringify(queryLifecycleState(lifecycleStatePath()))}\n`);
-            '
+            # A GUI query helper registers as this same macOS application. If
+            # it overlaps NSWorkspace.openApplication, LaunchServices can fail
+            # the real window launch. Observe the existing record without
+            # starting another application, using the exact same validator.
+            node scripts/query-control-center-lifecycle.mjs
           }
 
           wait_for_lifecycle() {

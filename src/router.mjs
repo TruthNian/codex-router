@@ -5995,6 +5995,7 @@ async function handleResponses(request, response, requestUrl) {
       writeStreamErrorEvent(response, {
         code: INVALID_FUNCTION_CALL_ARGUMENTS_CODE,
         message: error.message,
+        localRejection: true,
       });
       if (!response.writableEnded && !response.destroyed) response.end();
       recordTurnUsage({
@@ -6920,14 +6921,17 @@ const server = http.createServer((request, response) => {
       });
     } else {
       // The body is already streaming, so there is no status left to change.
-      // Destroying here reset the socket and cost the chunked terminator,
-      // which the client reported only as a decode failure. The event code
-      // stays `local_router_stream_failed`: a diagnosed cause is extra detail
-      // about the same failure, not a different one for a client to branch on.
+      // Preserve local safety rejections as terminal failures, rather than
+      // treating them as transport failures eligible for automatic replay.
+      // Ordinary transport failures retain their retryable classification.
+      const localRejection = error?.code === "ERR_NAMESPACE_RELAY_COMMITTED_STREAM";
       endStreamedResponse(response, {
-        message: transport
-          ? `The local router lost the upstream response stream: ${transport.cause}.${transport.hint}`
-          : undefined,
+        ...(localRejection ? { code: error.code, localRejection: true } : {}),
+        message: localRejection
+          ? error.message
+          : transport
+            ? `The local router lost the upstream response stream: ${transport.cause}.${transport.hint}`
+            : undefined,
       });
     }
   });

@@ -799,13 +799,13 @@ function publishStagedSkill(staged, target, publicationToken, { onPublicationCla
       flag: "wx",
     });
     onPublicationClaimed?.({ target });
-    // The root is already exclusively claimed by mkdir above. Newer Node
-    // versions reject that existing directory when errorOnExist is true;
-    // copy its children instead, retaining no-replace checks for every entry.
+    // Copy each entry from staged.content into target individually to avoid
+    // Node.js version differences in cpSync errorOnExist behavior when the
+    // target directory already exists (created above with the marker file).
     for (const entry of readdirSync(staged.content)) {
-      cpSync(path.join(staged.content, entry), path.join(target, entry), {
-        recursive: true, force: false, errorOnExist: true,
-      });
+      const sourcePath = path.join(staged.content, entry);
+      const targetPath = path.join(target, entry);
+      cpSync(sourcePath, targetPath, { recursive: true, force: false, errorOnExist: true });
     }
     const stagedDigest = directoryDigest(staged.content);
     const targetDigest = directoryDigest(target, { ignoreRootEntries: [PUBLISH_MARKER] });

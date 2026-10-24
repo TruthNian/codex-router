@@ -41,18 +41,20 @@ function fixture(t, { ordinary = 60, reserved = 1, size = 256 } = {}) {
 }
 
 test("adding consumers cannot shrink a declared large block or overlap ordinary allocations", (t) => {
-  const draw = fixture(t);
-  const large = draw("aaa-large-0.test.mjs", 200);
-  assert.equal(large.status, 0, large.stderr);
-  const ordinary = draw("ordinary-0.test.mjs", 75);
-  assert.equal(ordinary.status, 0, ordinary.stderr);
-  const ports = [...JSON.parse(large.stdout), ...JSON.parse(ordinary.stdout)];
-  assert.equal(new Set(ports).size, 275);
-  for (const port of ports) assert(port >= 5_000 && port < 32_768 && (port < 10_000 || port >= 30_000));
+  for (const [ordinaryCount, needed] of [[60, 75], [230, 32]]) {
+    const draw = fixture(t, { ordinary: ordinaryCount });
+    const large = draw("aaa-large-0.test.mjs", 200);
+    assert.equal(large.status, 0, large.stderr);
+    const ordinary = draw("ordinary-0.test.mjs", needed);
+    assert.equal(ordinary.status, 0, ordinary.stderr);
+    const ports = [...JSON.parse(large.stdout), ...JSON.parse(ordinary.stdout)];
+    assert.equal(new Set(ports).size, 200 + needed);
+    for (const port of ports) assert(port >= 5_000 && port < 32_768 && (port < 10_000 || port >= 30_000));
+  }
 });
 
 test("invalid explicit capacity fails instead of escaping the bounded pool", (t) => {
-  for (const size of [0, 257]) {
+  for (const size of [0, 257, -1, 32.5, "invalid", ""]) {
     const result = fixture(t, { size })("aaa-large-0.test.mjs", 1);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /invalid test port block size/);

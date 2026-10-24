@@ -306,7 +306,8 @@ function writeAndClosePrivateDescriptor(descriptor, contents, sync, ownership) {
   let writeFailed = false;
   let writeError;
   try {
-    ownership.identity = fstatSync(descriptor);
+    // Platform file IDs can exceed Number's exact integer range.
+    ownership.identity = fstatSync(descriptor, { bigint: true });
     writeFileSync(descriptor, contents, { encoding: "utf8" });
     if (sync) fsyncSync(descriptor);
   } catch (error) {
@@ -328,7 +329,7 @@ function writeAndClosePrivateDescriptor(descriptor, contents, sync, ownership) {
 export function removeOwnedPrivateTemporary(temporary, identity) {
   let metadata;
   try {
-    metadata = lstatSync(temporary);
+    metadata = lstatSync(temporary, { bigint: true });
   } catch (error) {
     if (error?.code === "ENOENT") return false;
     throw error;

@@ -273,7 +273,6 @@ jobs:
           set -euo pipefail
           app="$RUNNER_TEMP/Codex Router.app"
           outer="$app/Contents/MacOS/ModelRouterTray"
-          embedded="$app/Contents/Resources/Control Center.app/Contents/MacOS/Codex Router"
           log="$RUNNER_TEMP/model-router-macos-signed-smoke.log"
           "$outer" --supervised > "$log" 2>&1 &
           pid=$!
@@ -294,16 +293,7 @@ jobs:
           /usr/bin/open "$app"
           ready=false
           for _ in {1..120}; do
-            state=$(node -e '
-              const { execFileSync } = require("node:child_process");
-              const env = { ...process.env };
-              delete env.ELECTRON_RUN_AS_NODE;
-              try {
-                process.stdout.write(execFileSync(process.argv[1], ["--query-lifecycle"], {
-                  env, timeout: 10000, killSignal: "SIGKILL", encoding: "utf8",
-                }));
-              } catch { process.exit(1); }
-            ' "$embedded" 2>/dev/null || true)
+            state=$(node scripts/query-control-center-lifecycle.mjs 2>/dev/null || true)
             if node -e '
               try {
                 const state = JSON.parse(process.argv[1]);

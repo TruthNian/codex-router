@@ -396,6 +396,8 @@ async function verifySignedOutTurn(binary, { initialProvider = "openai" } = {}) 
     }
     assert.equal(requests[0].body.model, model);
     assert.match(JSON.stringify(notifications), new RegExp(MARKER));
+    assert.equal(notifications.find((entry) => entry.method === "turn/completed")?.params?.turn?.status, "completed");
+    assert.equal(notifications.some((entry) => entry.method === "error"), false, "the turn must not recover through an automatic retry");
   } finally {
     for (const socket of upgradedSockets) socket.destroy();
     await new Promise((resolve) => server.close(resolve));

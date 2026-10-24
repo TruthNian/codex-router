@@ -1636,14 +1636,16 @@ async function handleSubagents(action, value, flag, rest = []) {
     const slug = String(value || "").trim();
     if (!slug) throw new Error("Usage: control subagents explain <model-slug> [--json]");
     const [
-      { MODELS },
+      { MODELS, RUNTIME_PROVIDERS },
       { readProviderSelection, canonicalProviderId },
+      { genericProviderConfigured },
       { readHiddenModels },
       { explainSubagentRoute, formatSubagentExplanation },
       { CODEX_AGENTS_DIR },
     ] = await Promise.all([
       import("./model-registry.mjs"),
       import("./provider-selection.mjs"),
+      import("./generic-provider-readiness.mjs"),
       import("./model-picker-state.mjs"),
       import("./subagent-explain.mjs"),
       import("./paths.mjs"),
@@ -1652,7 +1654,9 @@ async function handleSubagents(action, value, flag, rest = []) {
     const explanation = explainSubagentRoute({
       slug,
       models: MODELS,
-      providerEnabled: (providerId) => selected.has(canonicalProviderId(providerId)),
+      providerEnabled: (providerId) => RUNTIME_PROVIDERS.get(providerId)?.generic === true
+        ? genericProviderConfigured(providerId)
+        : selected.has(canonicalProviderId(providerId)),
       hidden: readHiddenModels(),
       reasoningLevels: await modelReasoningLevels(slug),
       agentsDir: CODEX_AGENTS_DIR,

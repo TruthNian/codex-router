@@ -1,0 +1,1 @@
+- Fix an intermittent native macOS app startup-check failure: CI, signed-release smoke checks, and tray rebuilds now query the existing lifecycle state through Node with Electron's shared validator instead of launching GUI query processes that can collide with a real LaunchServices open request. Keep the existing readiness, exact-identity, and shutdown checks.

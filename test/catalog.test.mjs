@@ -38,6 +38,7 @@ import {
   routedModel,
 } from "../src/catalog.mjs";
 import { sidecarSearchAvailable } from "../src/search-capability.mjs";
+import { userModelEntry } from "../src/user-models.mjs";
 
 const template = {
   slug: "gpt-5.5",
@@ -843,6 +844,44 @@ test("login-free catalog keeps overflow models visible under their own slugs", (
   const bySlug = new Map(models.map((model) => [model.slug, model]));
   assert.equal(bySlug.get("kimi-oauth/kimi-for-coding").visibility, "list");
   assert.equal(bySlug.get("grok-oauth/grok-4.5").visibility, "hide");
+});
+
+test("login-free aliases skip hidden routes before assigning native slots", () => {
+  const paid = { ...grok, slug: "openrouter/claude-fable-5.1" };
+  const selected = { ...grok, slug: "openrouter/selected:free", displayName: "Selected free model" };
+  const { models, aliases } = buildLoginFreeCatalog(
+    { models: [template] },
+    [paid, selected],
+    { hiddenModels: new Set([paid.slug]) },
+  );
+
+  assert.deepEqual(aliases, { "gpt-5.5": selected.slug });
+  assert.equal(models.find((model) => model.slug === "gpt-5.5").display_name, selected.displayName);
+  assert.ok(models.some((model) => model.slug === paid.slug), "retain canonical routes for the picker overlay");
+});
+
+test("login-free aliases honour explicit selections, including an empty selection", () => {
+  const paid = { ...grok, slug: "openrouter/claude-fable-5.1" };
+  const selected = { ...grok, slug: "openrouter/selected:free" };
+  const native = { models: [template] };
+  const routes = [paid, selected];
+
+  assert.deepEqual(
+    buildLoginFreeCatalog(native, routes, { visibleModels: new Set([selected.slug]) }).aliases,
+    { "gpt-5.5": selected.slug },
+  );
+  assert.deepEqual(
+    buildLoginFreeCatalog(native, routes, { visibleModels: new Set() }).aliases,
+    {},
+  );
+  assert.deepEqual(
+    buildLoginFreeCatalog(native, routes, {
+      visibleModels: new Set([selected.slug]),
+      hiddenModels: new Set([selected.slug]),
+    }).aliases,
+    {},
+    "a hidden decision wins over a conflicting positive selection",
+  );
 });
 
 function withCredentialEnvironment(kimiHome, run) {
@@ -1708,6 +1747,67 @@ test(
     }
   },
 );
+
+test("catalog publication assigns login-free slots only to selected routes and preserves signed-in natives", { timeout: 60_000 }, () => {
+  const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-router-selected-alias-"));
+  const stateDir = path.join(codexHome, "router-state");
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const config = 'model = "gpt-5.6-sol"\n';
+  const selectedSlug = "openrouter/selected:free";
+  const paidSlug = "openrouter/claude-fable-5.1";
+  const put = (name, value) => writeFileSync(
+    path.join(stateDir, name), `${JSON.stringify(value)}\n`, { mode: 0o600 },
+  );
+  writeFileSync(path.join(codexHome, "config.toml"), config, { mode: 0o600 });
+  writeFileSync(path.join(stateDir, "openrouter-api-key.secret"), "test-key\n", { mode: 0o600 });
+  put("enabled-providers.json", { version: 1, providers: ["openrouter"] });
+  put("user-models.json", { version: 1, models: [userModelEntry({
+    providerId: "openrouter",
+    upstreamId: "selected:free",
+    priority: 100,
+    metadata: { displayName: "Selected free model", isFree: true },
+  })] });
+  put("model-picker.json", {
+    version: 1, hidden: [paidSlug], visible: [selectedSlug], seeded: [paidSlug, selectedSlug],
+  });
+
+  try {
+    const env = {
+      ...process.env,
+      CODEX_BIN: writeCatalogCodexStub(codexHome),
+      CODEX_HOME: codexHome,
+      CODEX_ROUTER_STATE_DIR: stateDir,
+      MODEL_ROUTER_STATE_DIR: stateDir,
+      MODEL_ROUTER_TARGET: "codex",
+    };
+    const publish = (loginFree) => {
+      const result = spawnSync(process.execPath, [path.join(repoRoot, "src", "catalog.mjs"), "--refresh-native"], {
+        cwd: repoRoot, encoding: "utf8", env: { ...env, MODEL_ROUTER_LOGIN_FREE: loginFree },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(readFileSync(path.join(stateDir, "merged-models.json"), "utf8")).models;
+    };
+    const aliased = publish("1");
+    assert.deepEqual(
+      JSON.parse(readFileSync(path.join(stateDir, "native-aliases.json"), "utf8")).aliases,
+      { "gpt-5.6-sol": selectedSlug },
+    );
+    assert.equal(aliased.find((model) => model.slug === "gpt-5.6-sol").display_name, "Selected free model");
+    assert.equal(aliased.find((model) => model.slug === "gpt-5.6-sol").visibility, "list");
+    assert.equal(aliased.find((model) => model.slug === paidSlug).visibility, "hide");
+
+    const signedIn = publish("0");
+    assert.deepEqual(
+      JSON.parse(readFileSync(path.join(stateDir, "native-aliases.json"), "utf8")).aliases,
+      {},
+    );
+    assert.equal(signedIn.find((model) => model.slug === "gpt-5.6-sol").display_name, "GPT-5.6 Sol");
+    assert.equal(signedIn.find((model) => model.slug === "gpt-5.6-sol").visibility, "list");
+    assert.equal(readFileSync(path.join(codexHome, "config.toml"), "utf8"), config);
+  } finally {
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
 
 test("routed-first publishes every routed model ahead of the natives and shifts the natives by that count", () => {
   const native = {

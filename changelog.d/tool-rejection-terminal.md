@@ -1,0 +1,1 @@
+- **Codex reports streamed tool-validation failures without automatically replaying the generation.** Preserve the local rejection reason and terminal classification even when response metadata is missing; ordinary transport failures remain retryable.

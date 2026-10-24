@@ -649,7 +649,7 @@ export function atomicPrivateCopy(source, destination, { protect = protectPrivat
   let replacementError;
   try {
     copyFileSync(source, temporary, fsConstants.COPYFILE_EXCL);
-    temporaryIdentity = lstatSync(temporary);
+    temporaryIdentity = lstatSync(temporary, { bigint: true });
     replacePrivateFile(temporary, destination, {
       protect,
       beforeReplace() {

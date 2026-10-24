@@ -377,7 +377,7 @@ RESTORE_MACOS_SUPERVISION
     queried_visible=0
     query_embedded_lifecycle() {
       lifecycle_json=$(
-        run_embedded_control_center "$embedded_binary" --query-lifecycle 2>/dev/null
+        node "$repo_dir/scripts/query-control-center-lifecycle.mjs" 2>/dev/null
       ) || return 1
       # Dollar expressions below are JavaScript template literals.
       # shellcheck disable=SC2016

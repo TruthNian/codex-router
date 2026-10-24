@@ -1,0 +1,1 @@
+- **Subagent diagnostics recognize enabled generic providers.** `subagents explain` uses generic-provider readiness instead of the built-in provider selection for registered endpoints, avoiding false disabled-provider reports while preserving credential, visibility, and subagent selection checks.

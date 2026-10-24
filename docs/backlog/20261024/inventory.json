@@ -1997,7 +1997,7 @@
       ],
       "status": "focused_extraction_verified_locally_not_new_upstream_authorization",
       "localTests": 24,
-      "upstreamPr": null,
+      "upstreamPr": 1067,
       "upstreamPrerequisites": [],
       "candidateDependencies": [],
       "intent": "Preserve this exact small extraction and its existing local evidence. CI on other snapshots is not this patch CI.",
@@ -2008,7 +2008,9 @@
       "pr": 30,
       "url": "https://github.com/TruthNian/codex-router/pull/30",
       "publishedHead": "4e33f7f097c361e450e00a5c7e429ca7aa2e0dc3",
-      "isDraft": true
+      "isDraft": true,
+      "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1067",
+      "promotionStatus": "ci_running"
     },
     {
       "id": "cache-version-metadata",
@@ -2158,6 +2160,14 @@
       "head": "955645840771efbb0e689d395d753e9168143d19",
       "status": "ci_passed_waiting_merge",
       "backupPr": 31
+    },
+    "retention-clock": {
+      "topic": "retention-clock",
+      "pr": 1067,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1067",
+      "head": "2029173a65ab9a7dcc05cc028ee7086640ae82a8",
+      "status": "ci_running",
+      "backupPr": 30
     }
   }
 }

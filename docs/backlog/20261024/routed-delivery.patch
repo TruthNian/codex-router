@@ -1,0 +1,381 @@
+diff --git a/changelog.d/generation-transport-delivery-policy.md b/changelog.d/generation-transport-delivery-policy.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/generation-transport-delivery-policy.md
+@@ -0,0 +1 @@
++- Default native HTTP and direct Responses transport recovery to proven pre-send failures. A reset after submission or edge 5xx no longer silently replays a possibly executed request through these paths. `CODEX_ROUTER_NATIVE_RETRY_POLICY=availability` explicitly permits bounded ambiguous replay before client output and may repeat upstream work. Safe bounded attempt metadata records delivery evidence; client retries, provider retries, other adapters and intentional semantic repairs remain separate.
+diff --git a/src/api-forwarder.mjs b/src/api-forwarder.mjs
+--- a/src/api-forwarder.mjs
++++ b/src/api-forwarder.mjs
+@@ -111 +112 @@ import { providerPoolRegistry } from "./provider-ws-pool.mjs";
+-import { providerTransportError } from "./transport-failure.mjs";
++import { providerTransportError, PROVIDER_DELIVERY_STATE_HEADER } from "./transport-failure.mjs";
+@@ -1769,3 +1771,4 @@ async function relayUpstreamResponse(
+-  const denylist = transform.length
+-    ? new Set([...HOP_BY_HOP_HEADERS, "content-type"])
+-    : undefined;
++  const denylist = new Set([
++    ...HOP_BY_HOP_HEADERS, PROVIDER_DELIVERY_STATE_HEADER,
++    ...(transform.length ? ["content-type"] : []),
++  ]);
+@@ -2398,0 +2407 @@ const server = http.createServer((request, response) => {
++      if (transport) response.setHeader(PROVIDER_DELIVERY_STATE_HEADER, transport.deliveryState);
+diff --git a/src/model-failover.mjs b/src/model-failover.mjs
+--- a/src/model-failover.mjs
++++ b/src/model-failover.mjs
+@@ -10 +10,2 @@ import { cooldownScope } from "./provider-cooldown.mjs";
+-import { hasProviderTransportError } from "./transport-failure.mjs";
++import { providerTransportDeliveryState } from "./transport-failure.mjs";
++import { NATIVE_RETRY_POLICY } from "./upstream-retry.mjs";
+@@ -89 +90,2 @@ function isoOrUndefined(value) {
+-export function classifyRoutedFailure({ status, bodyText, retryAfterSeconds, now } = {}) {
++export function classifyRoutedFailure({ status, bodyText, retryAfterSeconds, now,
++  trustedDeliveryState, deliveryPolicy = NATIVE_RETRY_POLICY } = {}) {
+@@ -97,3 +99,3 @@ export function classifyRoutedFailure({ status, bodyText, retryAfterSeconds, now
+-  // The local provider forwarder writes this reserved marker only before it
+-  // has committed a response. A generic provider 5xx remains an application
+-  // failure and is never switched away silently.
++  // No provider response is weaker than no provider execution. Only positive
++  // evidence from the local forwarder's confined header permits a default
++  // replay; a body marker alone is ambiguous even when it names a connect code.
+@@ -101,3 +103,5 @@ export function classifyRoutedFailure({ status, bodyText, retryAfterSeconds, now
+-    return hasProviderTransportError(bodyText)
+-      ? { swap: true, reason: "transport" }
+-      : { swap: false };
++    const deliveryState = providerTransportDeliveryState(bodyText, { trustedDeliveryState });
++    if (!deliveryState) return { swap: false };
++    return deliveryState === "not_sent" || deliveryPolicy === "availability"
++      ? { swap: true, reason: "transport", deliveryState }
++      : { swap: false, reason: "transport_ambiguous", deliveryState };
+diff --git a/src/router.mjs b/src/router.mjs
+--- a/src/router.mjs
++++ b/src/router.mjs
+@@ -173 +175 @@ import {
+-import { fetchWithRetry, NATIVE_RETRY_POLICY } from "./upstream-retry.mjs";
++import { fetchWithRetry, NATIVE_RETRY_POLICY, transportDeliveryState } from "./upstream-retry.mjs";
+@@ -250 +252 @@ import {
+-import { describeTransportFailure } from "./transport-failure.mjs";
++import { describeTransportFailure, PROVIDER_DELIVERY_STATE_HEADER } from "./transport-failure.mjs";
+@@ -339,0 +343,9 @@ const API_BASE = (
++// Only our authenticated loopback hop can attest to transport delivery. An
++// externally configured Responses endpoint cannot grant itself replay rights.
++const trustedApiTransport = (() => {
++  try {
++    const url = new URL(API_BASE);
++    return url.protocol === "http:" && Number(url.port || 80) === PORTS.api &&
++      ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
++  } catch { return false; }
++})();
+@@ -439 +449 @@ function fetchForRoute(route, url, init) {
+-    return longIdleStreamFetch(url, init, { bodyTimeoutMs: LOCAL_TRANSPORT_IDLE_TIMEOUT_MS });
++    return rejectGenerationRedirect(await longIdleStreamFetch(url, init, { bodyTimeoutMs: LOCAL_TRANSPORT_IDLE_TIMEOUT_MS }));
+@@ -2360,0 +2363,4 @@ async function readVisionEvidence({ url, engine, nativeCall, effort, question, k
++      responsesTarget: engine.native || engine.local ? undefined :
++        routedResponsesTarget(MODEL_BY_SLUG.get(engine.slug) ?? engine),
++      trustedTransportResponse: trustedApiTransport && !engine.native && !engine.local &&
++        routeExecution(MODEL_BY_SLUG.get(engine.slug) ?? engine, { providerForModel }).transport === "direct-responses",
+@@ -4423,0 +4435,2 @@ async function attemptModelFailover({
++      if (!compatibilityCode && transportDeliveryState(error) !== "not_sent"
++        && NATIVE_RETRY_POLICY !== "availability") throw error;
+@@ -4440,0 +4454 @@ async function attemptModelFailover({
++      trustedDeliveryState: trustedProviderDeliveryState(model, upstream),
+@@ -4446 +4460,2 @@ async function attemptModelFailover({
+-    if (transportFallback && hopVerdict.reason !== "transport") {
++    if (hopVerdict.reason === "transport_ambiguous" ||
++      (transportFallback && hopVerdict.reason !== "transport")) {
+@@ -5069,0 +5127 @@ async function handleResponses(request, response, requestUrl) {
++        trustedDeliveryState: trustedProviderDeliveryState(route, upstream),
+@@ -5072,7 +5130,6 @@ async function handleResponses(request, response, requestUrl) {
+-      // The provider forwarder emits the reserved transport marker only when
+-      // it failed before any provider response was available. Cross-model
+-      // failover already treats that marker as replay-safe, but an ordinary
+-      // turn (or a single-provider install) has no fallback candidate. Retry
+-      // the exact same materialized request once before changing models or
+-      // surfacing the 502. Generic provider 5xx bodies never enter this branch,
+-      // and nothing can be replayed after caller bytes have been sent.
++      // A missing provider response cannot prove the POST was not executed.
++      // Only the local API forwarder's origin-stripped delivery header can
++      // certify a pre-send failure; availability explicitly allows ambiguity.
++      // Caller bytes and cancellation still prohibit every transport replay.
++      const failedAttempt = attemptsForResponse.get(upstream);
++      if (failedAttempt && verdict.deliveryState) failedAttempt.deliveryState = verdict.deliveryState;
+@@ -5107,0 +5166 @@ async function handleResponses(request, response, requestUrl) {
++              trustedDeliveryState: trustedProviderDeliveryState(route, upstream),
+@@ -5155,0 +5217 @@ async function handleResponses(request, response, requestUrl) {
++              trustedDeliveryState: trustedProviderDeliveryState(route, upstream),
+diff --git a/src/transport-failure.mjs b/src/transport-failure.mjs
+--- a/src/transport-failure.mjs
++++ b/src/transport-failure.mjs
+@@ -2 +2 @@ import { environmentProxyOptedIn } from "./proxy-environment.mjs";
+-import { isPreTlsConnectionReset } from "./upstream-retry.mjs";
++import { isPreTlsConnectionReset, transportDeliveryState } from "./upstream-retry.mjs";
+@@ -19,0 +20,4 @@ export const PROVIDER_TRANSPORT_ERROR_TYPE = "provider_transport_error";
++// This header is minted by the local API forwarder only. Its response relay
++// strips the same name from every origin, so a provider body cannot grant
++// permission to replay a generation request by claiming it was never sent.
++export const PROVIDER_DELIVERY_STATE_HEADER = "x-codex-router-delivery-state";
+@@ -166,0 +171 @@ export function providerTransportError(error) {
++    deliveryState: transportDeliveryState(error),
+@@ -176,0 +182,10 @@ export function hasProviderTransportError(bodyText) {
++
++// A missing header (including one lost through an intermediary) carries no
++// evidence of delivery. Body fields are diagnostic only: an origin can echo
++// this reserved error shape, but it cannot mint the forwarder's private header.
++// Callers supply trustedDeliveryState only for a known local forwarder reply,
++// never for a native backend, local model, or arbitrary upstream response.
++export function providerTransportDeliveryState(bodyText, { trustedDeliveryState } = {}) {
++  if (!hasProviderTransportError(bodyText)) return undefined;
++  return trustedDeliveryState === "not_sent" ? "not_sent" : "possibly_sent";
++}
+diff --git a/test/model-failover.test.mjs b/test/model-failover.test.mjs
+--- a/test/model-failover.test.mjs
++++ b/test/model-failover.test.mjs
+@@ -2 +2 @@ import assert from "node:assert/strict";
+-import { mkdtempSync, writeFileSync } from "node:fs";
++import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+@@ -7,3 +6,0 @@ import { test } from "node:test";
+-import { flattenNamespaceTools } from "../src/namespace-relay.mjs";
+-import { subagentToolAvailable } from "../src/subagent-completion.mjs";
+-
+@@ -11,0 +9,11 @@ process.env.CODEX_ROUTER_STATE_DIR = stateDir;
++process.env.MODEL_ROUTER_STATE_DIR = stateDir;
++process.env.CODEX_HOME = path.join(stateDir, "codex");
++test.after(() => {
++  const resolved = path.resolve(stateDir);
++  assert.ok(resolved.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`) &&
++    path.basename(resolved).startsWith("model-failover-test-"));
++  rmSync(resolved, { recursive: true, force: true });
++});
++
++const { flattenNamespaceTools } = await import("../src/namespace-relay.mjs");
++const { subagentToolAvailable } = await import("../src/subagent-completion.mjs");
+@@ -75 +83 @@ test("classifyRoutedFailure swaps on OpenCode FreeUsageLimitError", () => {
+-test("classifyRoutedFailure swaps only a marked provider transport 5xx", () => {
++test("classifyRoutedFailure swaps only proven pre-send transport errors by default", () => {
+@@ -79,0 +88,2 @@ test("classifyRoutedFailure swaps only a marked provider transport 5xx", () => {
++      trustedDeliveryState: "not_sent",
++      deliveryPolicy: "at-most-once",
+@@ -81 +91 @@ test("classifyRoutedFailure swaps only a marked provider transport 5xx", () => {
+-    { swap: true, reason: "transport" },
++    { swap: true, reason: "transport", deliveryState: "not_sent" },
+@@ -88,0 +99,15 @@ test("classifyRoutedFailure swaps only a marked provider transport 5xx", () => {
++test("legacy and origin-claimed transport evidence require explicit availability", () => {
++  for (const marker of [
++    { type: "provider_transport_error" },
++    { type: "provider_transport_error", code: "ECONNREFUSED", deliveryState: "not_sent" },
++  ]) {
++    const failure = { status: 502, bodyText: JSON.stringify({ error: marker }) };
++    assert.deepEqual(classifyRoutedFailure({ ...failure, deliveryPolicy: "at-most-once" }), {
++      swap: false, reason: "transport_ambiguous", deliveryState: "possibly_sent",
++    });
++    assert.deepEqual(classifyRoutedFailure({ ...failure, deliveryPolicy: "availability" }), {
++      swap: true, reason: "transport", deliveryState: "possibly_sent",
++    });
++  }
++});
++
+diff --git a/test/router-generation-contract.test.mjs b/test/router-generation-contract.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/test/router-generation-contract.test.mjs
+@@ -0,0 +1,168 @@
++import assert from "node:assert/strict";
++import { spawn } from "node:child_process";
++import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import http from "node:http";
++import os from "node:os";
++import path from "node:path";
++import test from "node:test";
++import { fileURLToPath } from "node:url";
++import { callerBaseUrl } from "../src/caller-auth.mjs";
++import { userModelEntry } from "../src/user-models.mjs";
++import { aggregateProviderUsage } from "../src/provider-usage.mjs";
++import { openPort } from "./port-pool.mjs";
++
++const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++const caller = "synthetic-generation-contract-caller-capability";
++const internal = "synthetic-generation-contract-internal-capability";
++const frame = (e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
++const example = "The XML example is `<reason>disk full</reason>`; x < and <th";
++function frames(body) {
++  return body.split(/\r?\n\r?\n/).map((block) => block.split(/\r?\n/).find((l) => l.startsWith("data:")))
++    .filter(Boolean).map((line) => JSON.parse(line.slice(5)));
++}
++function ledger(directory) {
++  const file = path.join(directory, "usage-events.jsonl");
++  return existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse) : [];
++}
++async function waitUntil(predicate, child) {
++  const deadline = Date.now() + 30_000;
++  while (Date.now() < deadline) {
++    if (child.exitCode !== null) throw new Error(`isolated Router exited: ${child.testErrors()}`);
++    if (await predicate()) return;
++    await new Promise((r) => setTimeout(r, 25));
++  }
++  throw new Error(`isolated Router wait timed out: ${child.testErrors()}`);
++}
++
++test("real Router and API forwarder preserve content and outcomes without a gateway", async () => {
++  const temp = mkdtempSync(path.join(os.tmpdir(), "router-generation-contract-"));
++  const codexHome = path.join(temp, "codex");
++  mkdirSync(codexHome);
++  let terminal = "completed";
++  let calls = 0;
++  const upstream = http.createServer(async (request, response) => {
++    if (request.method === "GET") {
++      response.writeHead(200, { "content-type": "application/json" });
++      response.end('{"ok":true,"credential_present":true}');
++      return;
++    }
++    for await (const _chunk of request) { /* consume synthetic input */ }
++    calls += 1;
++    response.writeHead(200, { "content-type": "text/event-stream" });
++    const initial = { id: `r_${calls}`, object: "response", status: "in_progress", output: [] };
++    const item = { id: `msg_${calls}`, type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: example, annotations: [] }] };
++    const events = [
++      { type: "response.created", response: initial },
++      { type: "response.output_item.added", output_index: 0, item: { ...item, status: "in_progress", content: [] } },
++      { type: "response.content_part.added", output_index: 0, content_index: 0, part: { type: "output_text", text: "", annotations: [] } },
++      { type: "response.output_text.delta", output_index: 0, content_index: 0, item_id: item.id, delta: example },
++    ];
++    if (terminal !== "eof") events.push(
++      { type: "response.output_text.done", output_index: 0, content_index: 0, item_id: item.id, text: example },
++      { type: "response.content_part.done", output_index: 0, content_index: 0, part: item.content[0] },
++      { type: "response.output_item.done", output_index: 0, item },
++      { type: terminal === "embedded-failure" ? "response.completed" : `response.${terminal}`,
++        response: { ...initial, status: terminal === "embedded-failure" ? "failed" : terminal,
++          output: [item], usage: { input_tokens: 50, output_tokens: 10 },
++          ...(terminal === "failed" ? { error: { code: "synthetic_failure", message: "synthetic only" } } : {}),
++        },
++      },
++    );
++    response.end(events.map(frame).join(""));
++  });
++  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
++  const upstreamBase = `http://127.0.0.1:${upstream.address().port}`;
++  const entry = { ...userModelEntry({ providerId: "custom", upstreamId: "grok-4.6-synthetic-contract", priority: 999, metadata: {} }),
++    endpoint: { baseUrl: `${upstreamBase}/v1`, protocol: "openai-responses", keyless: true } };
++  writeFileSync(path.join(temp, "user-models.json"), JSON.stringify({ version: 1, models: [entry] }));
++  writeFileSync(path.join(temp, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["custom"] }));
++  const port = await openPort();
++  const apiPort = await openPort();
++  let gatewayCalls = 0;
++  const unusedGateway = http.createServer((_request, response) => {
++    gatewayCalls += 1;
++    response.writeHead(503).end("negative control: gateway must not be used");
++  });
++  await new Promise((resolve) => unusedGateway.listen(0, "127.0.0.1", resolve));
++  const gatewayBase = `http://127.0.0.1:${unusedGateway.address().port}`;
++  const env = { ...process.env };
++  for (const key of Object.keys(env)) if (/^(MODEL_ROUTER_|CODEX_ROUTER_|ROUTER_PLANE_)/.test(key)) delete env[key];
++  Object.assign(env, { CODEX_HOME: codexHome, MODEL_ROUTER_STATE_DIR: temp, CODEX_ROUTER_STATE_DIR: temp,
++    MODEL_ROUTER_USER_MODELS: path.join(temp, "user-models.json"),
++    CODEX_ROUTER_PORT: String(port), CODEX_ROUTER_CALLER_KEY: caller, CODEX_ROUTER_INTERNAL_KEY: internal,
++    KIMI_INTERNAL_KEY: internal, CODEX_ROUTER_GATEWAY_BASE_URL: `${gatewayBase}/v1`,
++    CODEX_ROUTER_API_PORT: String(apiPort),
++    CODEX_ROUTER_API_BASE_URL: `http://127.0.0.1:${apiPort}/v1`, CODEX_NATIVE_BASE_URL: upstreamBase,
++    CODEX_ROUTER_GATEWAY_HEALTH_URL: `${gatewayBase}/health`, CODEX_ROUTER_API_HEALTH_URL: `http://127.0.0.1:${apiPort}/health`,
++    CODEX_ROUTER_NO_DISCOVERY: "0", CODEX_ROUTER_SHOW_ALL_MODELS: "1", CODEX_ROUTER_QUIET: "1",
++  });
++  const api = spawn(process.execPath, [path.join(root, "src/api-forwarder.mjs")], { cwd: root, env, stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
++  let apiErrors = "";
++  api.stderr.on("data", (chunk) => { apiErrors += chunk; });
++  api.testErrors = () => apiErrors;
++  const child = spawn(process.execPath, [path.join(root, "src/router.mjs")], { cwd: root, env, stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
++  let errors = "";
++  child.stderr.on("data", (chunk) => { errors += chunk; });
++  child.testErrors = () => errors;
++  const base = callerBaseUrl(port, caller);
++  try {
++    await waitUntil(async () => { try { return (await fetch(`http://127.0.0.1:${apiPort}/health`, { headers: { authorization: `Bearer ${internal}` } })).ok; } catch { return false; } }, api);
++    await waitUntil(async () => { try { return (await fetch(`${base}/models`)).ok; } catch { return false; } }, child);
++    let count = 0;
++    for (const model of [entry.slug, "gpt-6.1-sol"]) {
++      for (const [kind, outcome] of [["completed", "completed"], ["failed", "failed"], ["incomplete", "incomplete"], ["embedded-failure", "failed"], ["eof", "indeterminate"]]) {
++        terminal = kind;
++        const response = await fetch(`${base}/responses`, { method: "POST",
++          headers: { "content-type": "application/json", authorization: "Bearer synthetic-native-session" },
++          body: JSON.stringify({ model, stream: true, input: "Synthetic local regression only", tools: [] }),
++          signal: AbortSignal.timeout(10_000),
++        });
++        const body = await response.text();
++        assert.equal(response.status, 200, body);
++        const events = frames(body);
++        assert.equal(events.filter((e) => e.type === "response.output_text.delta").map((e) => e.delta).join(""), example);
++        if (kind !== "eof") assert.equal(events.find((e) => e.type === "response.output_item.done").item.content[0].text, example);
++        await waitUntil(() => ledger(temp).length > count, child);
++        count += 1;
++        const event = ledger(temp).at(-1);
++        assert.equal(event.httpStatus, 200);
++        // The canonical API forwarder rejects an EOF without a terminal frame
++        // and explicitly reports that protocol failure. A native clean EOF is
++        // still unknown, since no semantic terminal has certified its result.
++        const expectedOutcome = model === entry.slug && kind === "eof" ? "failed" : outcome;
++        assert.equal(event.generationOutcome, expectedOutcome, `${model}/${kind}`);
++        if (model === entry.slug && kind === "eof") {
++          assert.ok(events.some((e) => ["response.failed", "error"].includes(e.type)), "canonical frame validation must remain active");
++        }
++        assert.ok(Number.isInteger(event.ingressMs) && event.ingressMs >= 0);
++        assert.ok(Number.isInteger(event.preparationMs) && event.preparationMs >= 0);
++        assert.ok(Number.isInteger(event.upstreamHeadersMs) && event.upstreamHeadersMs >= 0);
++        if (kind !== "eof") {
++          assert.equal(event.inputTokens, 50, "failed generation tokens still count");
++          assert.equal(event.outputTokens, 10);
++        }
++        const activity = await (await fetch(`${base}/activity`)).json();
++        const recent = activity.recent.find((e) => e.requestId === event.requestId);
++        assert.equal(recent.generationOutcome, expectedOutcome, "activity and billing disagree");
++        assert.equal(recent.httpStatus, event.httpStatus);
++      }
++    }
++    const totals = aggregateProviderUsage(ledger(temp)).providers;
++    assert.equal(totals.find((p) => p.id === "custom").successfulRequests, 1);
++    assert.equal(totals.find((p) => p.id === "openai").successfulRequests, 1);
++    assert.equal(calls, count, "none of these semantic terminals should replay");
++    assert.equal(gatewayCalls, 0, "native Responses must not acquire a Python/gateway dependency");
++  } finally {
++    for (const ownedChild of [child, api]) {
++      if (ownedChild.exitCode === null && ownedChild.signalCode === null) {
++        ownedChild.kill("SIGTERM");
++        await new Promise((resolve) => ownedChild.once("exit", resolve));
++      }
++    }
++    upstream.closeAllConnections();
++    await new Promise((resolve) => upstream.close(resolve));
++    unusedGateway.closeAllConnections();
++    await new Promise((resolve) => unusedGateway.close(resolve));
++    rmSync(temp, { recursive: true, force: true });
++  }
++});
+diff --git a/test/transport-failure.test.mjs b/test/transport-failure.test.mjs
+--- a/test/transport-failure.test.mjs
++++ b/test/transport-failure.test.mjs
+@@ -8,0 +9,2 @@ import {
++  providerTransportDeliveryState,
++  PROVIDER_DELIVERY_STATE_HEADER,
+@@ -138 +140 @@ test("a non-transport error is not diagnosed", () => {
+-test("provider transport markers carry only a safe type and code", () => {
++test("provider transport markers carry sanitized delivery evidence without host or message contents", () => {
+@@ -142,0 +145 @@ test("provider transport markers carry only a safe type and code", () => {
++    deliveryState: "not_sent",
+@@ -152,0 +156,20 @@ test("provider transport markers carry only a safe type and code", () => {
++test("a reset and a headers timeout remain ambiguous even before any response", () => {
++  for (const code of ["ECONNRESET", "UND_ERR_SOCKET", "UND_ERR_HEADERS_TIMEOUT"]) {
++    const cause = Object.assign(new Error("synthetic-private-upstream-detail"), { code, hostname: "private.example.test" });
++    const marker = providerTransportError(new TypeError("fetch failed", { cause }));
++    assert.equal(marker.deliveryState, "possibly_sent");
++    assert.doesNotMatch(JSON.stringify(marker), /synthetic-private|private\.example/);
++  }
++});
++
++test("only the known local forwarder's delivery header grants pre-send evidence", () => {
++  const bodyText = JSON.stringify({ error: { type: "provider_transport_error", code: "ECONNREFUSED", deliveryState: "not_sent" } });
++  assert.equal(PROVIDER_DELIVERY_STATE_HEADER, "x-codex-router-delivery-state");
++  assert.equal(providerTransportDeliveryState(bodyText), "possibly_sent", "origin body fields have no authority");
++  assert.equal(providerTransportDeliveryState(bodyText, { trustedDeliveryState: "not_sent" }), "not_sent");
++  for (const value of ["possibly_sent", "not_sent, possibly_sent", "unknown", "", undefined]) {
++    assert.equal(providerTransportDeliveryState(bodyText, { trustedDeliveryState: value }), "possibly_sent");
++  }
++  assert.equal(providerTransportDeliveryState("ordinary provider error", { trustedDeliveryState: "not_sent" }), undefined);
++});
++

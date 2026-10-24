@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { nextBetaVersion } from "../scripts/next-beta-version.mjs";
 
@@ -167,7 +167,7 @@ test("releases are tag-driven and validate every asset before publishing", () =>
 test("the macOS CI lifecycle probe reads real state without starting helper processes", () => {
   const ci = readFileSync(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
   const query = ci.slice(ci.indexOf("          query_lifecycle() {"), ci.indexOf("          wait_for_lifecycle() {"));
-  const script = query.match(/node(?: --input-type=module)? -e '([\s\S]*?)'/)?.[1];
+  const script = query.match(/node (scripts\/query-control-center-lifecycle\.mjs)/)?.[1];
   assert.ok(script, "the smoke test must provide an executable Node lifecycle query");
   const directory = mkdtempSync(path.join(os.tmpdir(), "macos-ci-lifecycle-"));
   const stateFile = path.join(directory, "control-center-lifecycle.json");
@@ -185,7 +185,8 @@ test("the macOS CI lifecycle probe reads real state without starting helper proc
   try {
     for (const [record, running] of [[live, true], [{ ...live, pid: 2147483647 }, false], ["invalid JSON", false]]) {
       writeFileSync(stateFile, typeof record === "string" ? record : JSON.stringify(record));
-      const result = spawnSync(process.execPath, ["--input-type=module", "-e", guard + script], {
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e",
+        `${guard}\nawait import(${JSON.stringify(pathToFileURL(path.join(root, script)).href)});`], {
         cwd: root,
         env: { ...process.env, MODEL_ROUTER_CONTROL_CENTER_STATE: stateFile },
         encoding: "utf8", timeout: 10_000, maxBuffer: 8192, windowsHide: true,

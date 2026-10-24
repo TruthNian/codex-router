@@ -1,0 +1,177 @@
+diff --git a/apps/control-center/src/types.ts b/apps/control-center/src/types.ts
+--- a/apps/control-center/src/types.ts
++++ b/apps/control-center/src/types.ts
+@@ -584,0 +585,9 @@ export interface UsageEvent {
++  deliveryPolicy?: "at-most-once" | "availability";
++  upstreamAttempts?: Array<{
++    attempt: number;
++    deliveryState: "not_sent" | "possibly_sent" | "response_started";
++    durationMs: number;
++    retryScheduled: boolean;
++    status?: number;
++    errorCode?: string;
++  }>;
+@@ -585,0 +595,3 @@ export interface UsageEvent {
++  ingressMs?: number;
++  preparationMs?: number;
++  upstreamHeadersMs?: number;
+diff --git a/src/router.mjs b/src/router.mjs
+--- a/src/router.mjs
++++ b/src/router.mjs
+@@ -4275 +4285 @@ function subagentTransportFailoverCandidates({ request, route, agedInput, search
+-    selectedConfiguredListedModels().filter((model) => !hidden.has(model.slug)),
++    adoptedConfiguredListedModels().filter((model) => !hidden.has(model.slug)),
+@@ -4346,0 +4357 @@ async function attemptModelFailover({
++  fetchUpstream,
+@@ -4404,2 +4415,2 @@ async function attemptModelFailover({
+-      progress?.attempt();
+-      upstream = await fetchForRoute(model, built.target, {
++      if (!fetchUpstream) progress?.attempt();
++      upstream = await (fetchUpstream || fetchForRoute)(model, built.target, {
+@@ -4411 +4422 @@ async function attemptModelFailover({
+-      progress?.headers();
++      if (!fetchUpstream) progress?.headers();
+@@ -4478 +4493,5 @@ async function handleResponses(request, response, requestUrl) {
+-  const fetchObservedUpstream = async (url, init) => {
++  let ingressMs;
++  let preparationMs;
++  let upstreamHeadersMs = 0;
++  const attemptsForResponse = new WeakMap();
++  const fetchObservedUpstream = async (url, init, { attemptRoute = route } = {}) => {
+@@ -4480,3 +4499,23 @@ async function handleResponses(request, response, requestUrl) {
+-    const upstream = await fetchForRoute(route, url, init);
+-    activity.progress.headers();
+-    return upstream;
++    const dispatchAt = Date.now();
++    preparationMs ??= Math.max(0, dispatchAt - startedAt - (ingressMs ?? 0));
++    try {
++      const upstream = await fetchForRoute(attemptRoute, url, init);
++      activity.progress.headers();
++      if (attemptRoute && upstreamAttempts.length < 6) {
++        const event = { attempt: upstreamAttempts.length + 1, deliveryState: "response_started",
++          status: upstream.status, durationMs: Math.max(0, Date.now() - dispatchAt), retryScheduled: false };
++        upstreamAttempts.push(event);
++        attemptsForResponse.set(upstream, event);
++      }
++      return upstream;
++    } catch (error) {
++      if (attemptRoute && upstreamAttempts.length < 6) upstreamAttempts.push({
++        attempt: upstreamAttempts.length + 1, deliveryState: transportDeliveryState(error),
++        durationMs: Math.max(0, Date.now() - dispatchAt), retryScheduled: false,
++      });
++      throw error;
++    } finally {
++      // This includes local adapter and network/provider wait, not provider
++      // processing alone. Sum retries/failover so failed attempts stay visible.
++      upstreamHeadersMs += Math.max(0, Date.now() - dispatchAt);
++    }
+@@ -4526,0 +4565,2 @@ async function handleResponses(request, response, requestUrl) {
++  const upstreamAttempts = [];
++  let deliveryPolicy = NATIVE_RETRY_POLICY;
+@@ -4537 +4577,3 @@ async function handleResponses(request, response, requestUrl) {
+-    // The HTTP envelope remains committed even when a later SSE terminal fails.
++    // Preserve the committed HTTP envelope even if an SSE terminal error made
++    // the historical accounting status 502. No response head can be changed
++    // after output has started.
+@@ -4540 +4582,5 @@ async function handleResponses(request, response, requestUrl) {
+-    recordObservedUsage({ ...fields, httpStatus: turnHttpStatus, generationOutcome }, metadata);
++    recordObservedUsage({ ...fields, httpStatus: turnHttpStatus, generationOutcome,
++      retries: fields.retries ?? upstreamRetries,
++      ingressMs, preparationMs, upstreamHeadersMs,
++      ...(upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy } : {}),
++    }, metadata);
+@@ -4557,0 +4604 @@ async function handleResponses(request, response, requestUrl) {
++    ingressMs = Date.now() - startedAt;
+@@ -5032,5 +5077,16 @@ async function handleResponses(request, response, requestUrl) {
+-          ? (url, init) => nativeResponsesWebSocketFetch(url, init, {
+-              fallbackFetch: fetchObservedUpstream,
+-              onSent: () => { nativeWsSent = true; activity.progress.attempt(); },
+-              onHeaders: () => activity.progress.headers(),
+-            })
++          ? async (url, init) => {
++              const dispatchAt = Date.now();
++              preparationMs ??= Math.max(0, dispatchAt - startedAt - (ingressMs ?? 0));
++              try {
++                return await nativeResponsesWebSocketFetch(url, init, {
++                  fallbackFetch: async (fallbackUrl, fallbackInit) => {
++                    activity.progress.attempt();
++                    const fetched = await fetchForRoute(undefined, fallbackUrl, fallbackInit);
++                    activity.progress.headers();
++                    return fetched;
++                  },
++                  onSent: () => { nativeWsSent = true; activity.progress.attempt(); },
++                  onHeaders: () => activity.progress.headers(),
++                });
++              } finally { upstreamHeadersMs += Math.max(0, Date.now() - dispatchAt); }
++            }
+@@ -5046 +5102,4 @@ async function handleResponses(request, response, requestUrl) {
+-        onRetry: (event) => logUpstreamRetry(event, requestedModel, requestUrl.pathname),
++        onRetry: (event) => {
++          deliveryPolicy = event.deliveryPolicy;
++          logUpstreamRetry(event, requestedModel, requestUrl.pathname);
++        },
+@@ -5051,5 +5110,3 @@ async function handleResponses(request, response, requestUrl) {
+-    // Time until the upstream chain answered the request. Everything before
+-    // this is router-side work (body read, normalization, flattening, vision
+-    // bridge) plus the upstream's own time to produce response headers. For a
+-    // routed turn that means the full router -> litellm -> api-forwarder ->
+-    // provider path, so a stall here is the provider's, not the router's.
++    // Time until the whole chain answered: ingress, router preparation, local
++    // adapters, network and provider processing. This end-to-end measurement
++    // cannot by itself attribute a delay to the provider.
+@@ -5083,0 +5141 @@ async function handleResponses(request, response, requestUrl) {
++        if (failedAttempt) failedAttempt.retryScheduled = true;
+@@ -5109,0 +5169,2 @@ async function handleResponses(request, response, requestUrl) {
++        const repeatedAttempt = attemptsForResponse.get(upstream);
++        if (repeatedAttempt && verdict.deliveryState) repeatedAttempt.deliveryState = verdict.deliveryState;
+@@ -5164,0 +5227 @@ async function handleResponses(request, response, requestUrl) {
++          fetchUpstream: (model, url, init) => fetchObservedUpstream(url, init, { attemptRoute: model }),
+diff --git a/src/usage-events.mjs b/src/usage-events.mjs
+--- a/src/usage-events.mjs
++++ b/src/usage-events.mjs
+@@ -11 +10,0 @@ import path from "node:path";
+-import { knownGenerationOutcome } from "./response-outcome.mjs";
+@@ -15,0 +15 @@ import { serviceTierMetadata, usageDiagnosticMetadata } from "./request-diagnost
++import { knownGenerationOutcome } from "./response-outcome.mjs";
+@@ -100,2 +99,0 @@ export function recordUsageEvent({
+-  upstreamAttempts,
+-  deliveryPolicy,
+@@ -103,0 +102,5 @@ export function recordUsageEvent({
++  upstreamAttempts,
++  deliveryPolicy,
++  ingressMs,
++  preparationMs,
++  upstreamHeadersMs,
+@@ -251,2 +253,0 @@ export function recordUsageEvent({
+-    ...(safeUpstreamAttempts(upstreamAttempts) ? { upstreamAttempts: safeUpstreamAttempts(upstreamAttempts) } : {}),
+-    ...(["at-most-once", "availability"].includes(deliveryPolicy) ? { deliveryPolicy } : {}),
+@@ -254,0 +256,5 @@ export function recordUsageEvent({
++    ...(safeUpstreamAttempts(upstreamAttempts) ? { upstreamAttempts: safeUpstreamAttempts(upstreamAttempts) } : {}),
++    ...(["at-most-once", "availability"].includes(deliveryPolicy) ? { deliveryPolicy } : {}),
++    ...(safeTokenCount(ingressMs) !== undefined ? { ingressMs: safeTokenCount(ingressMs) } : {}),
++    ...(safeTokenCount(preparationMs) !== undefined ? { preparationMs: safeTokenCount(preparationMs) } : {}),
++    ...(safeTokenCount(upstreamHeadersMs) !== undefined ? { upstreamHeadersMs: safeTokenCount(upstreamHeadersMs) } : {}),
+@@ -591,2 +596,0 @@ export function recentUsageEvents({
+-          ...(safeUpstreamAttempts(event.upstreamAttempts) ? { upstreamAttempts: safeUpstreamAttempts(event.upstreamAttempts) } : {}),
+-          ...(["at-most-once", "availability"].includes(event.deliveryPolicy) ? { deliveryPolicy: event.deliveryPolicy } : {}),
+@@ -594,0 +599,5 @@ export function recentUsageEvents({
++          ...(safeUpstreamAttempts(event.upstreamAttempts) ? { upstreamAttempts: safeUpstreamAttempts(event.upstreamAttempts) } : {}),
++          ...(["at-most-once", "availability"].includes(event.deliveryPolicy) ? { deliveryPolicy: event.deliveryPolicy } : {}),
++          ...(safeTokenCount(event.ingressMs) !== undefined ? { ingressMs: safeTokenCount(event.ingressMs) } : {}),
++          ...(safeTokenCount(event.preparationMs) !== undefined ? { preparationMs: safeTokenCount(event.preparationMs) } : {}),
++          ...(safeTokenCount(event.upstreamHeadersMs) !== undefined ? { upstreamHeadersMs: safeTokenCount(event.upstreamHeadersMs) } : {}),
+diff --git a/test/usage-events.test.mjs b/test/usage-events.test.mjs
+--- a/test/usage-events.test.mjs
++++ b/test/usage-events.test.mjs
+@@ -20,0 +21,2 @@ test("usage events persist only bounded request metadata in a private file", asy
++      httpStatus: 200,
++      generationOutcome: "failed",
+@@ -24,2 +25,0 @@ test("usage events persist only bounded request metadata in a private file", asy
+-      httpStatus: 200,
+-      generationOutcome: "failed",
+@@ -54,2 +53,0 @@ test("usage events persist only bounded request metadata in a private file", asy
+-        deliveryPolicy: "at-most-once",
+-        upstreamAttempts: [{ attempt: 1, deliveryState: "possibly_sent", durationMs: 9, retryScheduled: false, errorCode: "ECONNRESET" }],
+@@ -57,0 +56,2 @@ test("usage events persist only bounded request metadata in a private file", asy
++        deliveryPolicy: "at-most-once",
++        upstreamAttempts: [{ attempt: 1, deliveryState: "possibly_sent", durationMs: 9, retryScheduled: false, errorCode: "ECONNRESET" }],

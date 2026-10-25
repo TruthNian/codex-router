@@ -303,7 +303,7 @@
       "upstreamState": "MERGED",
       "mergedAt": "2026-10-25T00:41:14Z",
       "mergeCommit": "186da4897d89a3957e5d22b31e0181678f414957",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     {
       "id": "selected-services",
@@ -397,7 +397,89 @@
       "pr": 12,
       "url": "https://github.com/TruthNian/codex-router/pull/12",
       "publishedHead": "07d28ee008b3f6b943f75956aca55d18d1e3a54f",
-      "isDraft": true
+      "isDraft": true,
+      "remainingBoundaries": [
+        {
+          "id": "early-bind-and-adopted-plan",
+          "intent": "Bind independent requests before optional dependencies and expose adopted generation identity; review readiness, snapshots and publication together. Not included in runtime-hop gating."
+        },
+        {
+          "id": "selection-preservation",
+          "intent": "Review the archived removal of boot-time credential pruning independently. Runtime-hop gating retains existing pruning and fail-fast startup behavior."
+        },
+        {
+          "id": "manager-status-and-operation-deadline",
+          "intent": "Re-review Linux/macOS/Windows unknown status, orphaned registration and inherited deadlines against offline adoption and rollback. No service-manager code included in this part."
+        },
+        {
+          "id": "adopted-provider-snapshot",
+          "intent": "API/router immutable provider snapshots and vision/failover selection belong with adopted-catalog review; do not copy read-interface fragments or fingerprint environment blindly."
+        },
+        {
+          "id": "ollama-readiness",
+          "intent": "Re-review direct Ollama version checks, probe authentication and health output separately. Runtime-hop gating only ensures a selected daemon and gates owned listeners."
+        },
+        {
+          "id": "cross-feature-fixture-cases",
+          "intent": "The original 405-line service-execution-plan test includes liveness, replacement/current-child readiness, adopted plan and shutdown contracts not implemented on main. Extract only cases supported by each actual PR."
+        }
+      ],
+      "excludedAdjacentFragments": [
+        {
+          "sourceHunk": "src/router.mjs#11",
+          "disposition": "already merged through #1069; do not resubmit direct Responses selection"
+        },
+        {
+          "sourceHunk": "src/router.mjs#10",
+          "disposition": "redirect handling is submitted separately as #1065; require actual merge before delivery changes"
+        },
+        {
+          "sourceHunk": "src/router.mjs#12",
+          "disposition": "trusted provider delivery state belongs to routed-delivery backup #8 and still waits for #1065 merge"
+        },
+        {
+          "sourceHunk": "src/router.mjs#25",
+          "disposition": "ambiguous vision delivery policy belongs to vision-delivery backup #10"
+        },
+        {
+          "sourceHunk": "src/router.mjs#29",
+          "disposition": "per-model aging option belongs to existing fork #6; wait for actual #1076 merge"
+        }
+      ],
+      "transferredSourceFragments": [
+        {
+          "id": "windows-launcher-private-writer",
+          "sourceTopic": "selected-services",
+          "backupPr": 12,
+          "branch": "archive/20261024/selected-services",
+          "artifact": "docs/backlog/20261024/selected-services.patch",
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "path": "src/service-windows.mjs",
+          "hunkIds": [
+            "src/service-windows.mjs#0",
+            "src/service-windows.mjs#1",
+            "src/service-windows.mjs#2",
+            "src/service-windows.mjs#3"
+          ],
+          "targetTopic": "private-writers",
+          "status": "waiting_independent_extraction",
+          "notes": "The old archive assigned these adjacent imports/writeAtomic hunks to selected-services. They consolidate launcher writes on writePrivateFile and are excluded from runtime-hop selection. Preserve the immutable source patch; independently test encoding, ACL and collision ownership before proposing."
+        }
+      ],
+      "backupState": "OPEN",
+      "extractionNotes": "Only runtime-hop selection is independently implemented in upstream #1077. Keep this archive open; remainingBoundaries and transferredSourceFragments retain the unpromoted source. Direct Responses is already merged via #1069; redirect/delivery and per-model aging remain separately gated.",
+      "upstreamParts": {
+        "selected_runtime_services": {
+          "topic": "selected-services/runtime-hops",
+          "pr": 1077,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1077",
+          "head": "08367d8811b03c1b611670261670773e77e43ecf",
+          "status": "ci_running",
+          "backupPr": 12,
+          "sourceTopic": "selected-services"
+        }
+      },
+      "promotionStatus": "partially_promoted"
     },
     {
       "id": "dependency-preparation",
@@ -1390,9 +1472,10 @@
         "src/legacy-migration.mjs",
         "src/provider-credential-store.mjs",
         "src/provider-credentials.mjs",
-        "src/secret.mjs"
+        "src/secret.mjs",
+        "src/service-windows.mjs"
       ],
-      "extractionNotes": "Partial topic: agent definitions #1070, model selections #1071, harness documents #1072, provider configuration #1073, gateway configuration #1074 and native-source records #1075 are independently extracted. Nine remaining writer source-file candidates need review and explicit disposition; this is not a count of required PRs. The excluded provider-selection read-interface fragment remains in immutable backup #24 and is explicitly mapped to adopted-catalog for dependency/boundary review. Keep backup #24 open. Shared primitive foundations are merged via #1009; deferred parser observations remain separate.",
+      "extractionNotes": "Six independently extracted consumers are merged. Ten remaining source-file candidates require explicit disposition: nine in the private-writers patch plus the Windows launcher writer retained in selected-services backup #12. Additional/transferred archive fragments retain their actual source and dependency boundaries. This is not a required-PR count.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -1405,7 +1488,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:27:49Z",
           "mergeCommit": "fabe3da9e18289a77d25bfc5758ee102bd80d6bd",
-          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+          "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
         },
         "model_selection_private_writers": {
           "topic": "private-writers/model-selection",
@@ -1418,7 +1501,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:28:22Z",
           "mergeCommit": "2fc35abd5363c43412c03279c9508f8b2560b01f",
-          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+          "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
         },
         "harness_document_private_writers": {
           "topic": "private-writers/harness-documents",
@@ -1431,7 +1514,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:29:10Z",
           "mergeCommit": "d224835e7d1fa110d27aefff5af2aa52e83bde9d",
-          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+          "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
         },
         "provider_state_private_writers": {
           "topic": "private-writers/provider-state",
@@ -1444,7 +1527,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:29:53Z",
           "mergeCommit": "04d35769dfaf1e733000f9cecf5eb6efd9cbb065",
-          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+          "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
         },
         "gateway_config_private_writer": {
           "topic": "private-writers/gateway-config",
@@ -1457,7 +1540,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:30:43Z",
           "mergeCommit": "9d014b1ec429a2b55a2d0c7cb9c09d9cae7c7c13",
-          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+          "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
         },
         "native_source_private_writer": {
           "topic": "private-writers/native-source",
@@ -1470,7 +1553,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:43:32Z",
           "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
-          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+          "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
         }
       },
       "promotionStatus": "partially_promoted",
@@ -1499,6 +1582,26 @@
           "targetTopic": "adopted-catalog",
           "status": "waiting_adoption_dependency_review",
           "notes": "Excluded from provider-state writer extraction. The integrated router passes its adopted provider snapshot to this read API. Re-review the actual adoption boundary and prerequisite merges before extraction; the original backup patch remains immutable."
+        }
+      ],
+      "additionalArchiveFragments": [
+        {
+          "id": "windows-launcher-private-writer",
+          "sourceTopic": "selected-services",
+          "backupPr": 12,
+          "branch": "archive/20261024/selected-services",
+          "artifact": "docs/backlog/20261024/selected-services.patch",
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "path": "src/service-windows.mjs",
+          "hunkIds": [
+            "src/service-windows.mjs#0",
+            "src/service-windows.mjs#1",
+            "src/service-windows.mjs#2",
+            "src/service-windows.mjs#3"
+          ],
+          "targetTopic": "private-writers",
+          "status": "waiting_independent_extraction",
+          "notes": "The old archive assigned these adjacent imports/writeAtomic hunks to selected-services. They consolidate launcher writes on writePrivateFile and are excluded from runtime-hop selection. Preserve the immutable source patch; independently test encoding, ACL and collision ownership before proposing."
         }
       ]
     },
@@ -2178,7 +2281,7 @@
       "upstreamState": "MERGED",
       "mergedAt": "2026-10-25T00:18:25Z",
       "mergeCommit": "c826e459c9287809fd726bd678894bcafe2a4000",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     {
       "id": "retention-clock",
@@ -2212,7 +2315,7 @@
       "upstreamState": "MERGED",
       "mergedAt": "2026-10-25T00:17:42Z",
       "mergeCommit": "85ef669043ac4b65780ed51982d810385b9e1d20",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     {
       "id": "cache-version-metadata",
@@ -2247,7 +2350,7 @@
       "upstreamState": "MERGED",
       "mergedAt": "2026-10-25T00:19:20Z",
       "mergeCommit": "1808d4173c4eb9076a65d866b1fecbe8b3adcbba",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     }
   ],
   "coverage": {
@@ -2281,8 +2384,12 @@
       "upstreamPr": 1076,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1076",
       "upstreamHead": "8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376",
-      "ci": "fresh upstream CI running; original archival branch retained",
-      "promotionStatus": "ci_passed_waiting_merge"
+      "ci": "9 SUCCESS and 2 conditional SKIPPED on exact published head 8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376; MERGED and verified in main 3ecc2d9b7681b88cde40778ad15ec5639f404444",
+      "promotionStatus": "ci_passed_waiting_merge",
+      "upstreamState": "MERGED",
+      "mergeCommit": "3ecc2d9b7681b88cde40778ad15ec5639f404444",
+      "mergedAt": "2026-10-25T03:18:10Z",
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     {
       "number": 6,
@@ -2360,7 +2467,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:18:25Z",
       "mergeCommit": "c826e459c9287809fd726bd678894bcafe2a4000",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "generation-redirect": {
       "topic": "generation-redirect",
@@ -2381,7 +2488,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:19:20Z",
       "mergeCommit": "1808d4173c4eb9076a65d866b1fecbe8b3adcbba",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "retention-clock": {
       "topic": "retention-clock",
@@ -2393,7 +2500,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:17:42Z",
       "mergeCommit": "85ef669043ac4b65780ed51982d810385b9e1d20",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "manual-ci-scope": {
       "topic": "manual-ci-scope",
@@ -2414,7 +2521,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:41:14Z",
       "mergeCommit": "186da4897d89a3957e5d22b31e0181678f414957",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "private-writers/agent-catalog": {
       "topic": "private-writers/agent-catalog",
@@ -2427,7 +2534,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:27:49Z",
       "mergeCommit": "fabe3da9e18289a77d25bfc5758ee102bd80d6bd",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "private-writers/model-selection": {
       "topic": "private-writers/model-selection",
@@ -2440,7 +2547,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:28:22Z",
       "mergeCommit": "2fc35abd5363c43412c03279c9508f8b2560b01f",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "private-writers/harness-documents": {
       "topic": "private-writers/harness-documents",
@@ -2453,7 +2560,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:10Z",
       "mergeCommit": "d224835e7d1fa110d27aefff5af2aa52e83bde9d",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "private-writers/provider-state": {
       "topic": "private-writers/provider-state",
@@ -2466,7 +2573,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:53Z",
       "mergeCommit": "04d35769dfaf1e733000f9cecf5eb6efd9cbb065",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "private-writers/gateway-config": {
       "topic": "private-writers/gateway-config",
@@ -2479,7 +2586,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:30:43Z",
       "mergeCommit": "9d014b1ec429a2b55a2d0c7cb9c09d9cae7c7c13",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "private-writers/native-source": {
       "topic": "private-writers/native-source",
@@ -2492,7 +2599,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:43:32Z",
       "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "desktop-readback": {
       "topic": "desktop-readback",
@@ -2505,20 +2612,33 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:47:20Z",
       "mergeCommit": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
-      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
     },
     "scoped-archive-search": {
       "topic": "scoped-archive-search",
       "pr": 1076,
       "url": "https://github.com/duolahypercho/codex-router/pull/1076",
       "head": "8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "backupPr": 5,
-      "sourceTopic": "existing-tool-history"
+      "sourceTopic": "existing-tool-history",
+      "prState": "MERGED",
+      "mergeCommit": "3ecc2d9b7681b88cde40778ad15ec5639f404444",
+      "mergedAt": "2026-10-25T03:18:10Z",
+      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+    },
+    "selected-services/runtime-hops": {
+      "topic": "selected-services/runtime-hops",
+      "pr": 1077,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1077",
+      "head": "08367d8811b03c1b611670261670773e77e43ecf",
+      "status": "ci_running",
+      "backupPr": 12,
+      "sourceTopic": "selected-services"
     }
   },
   "upstreamStateSnapshot": {
-    "verifiedMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9",
+    "verifiedMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444",
     "merged": [
       1062,
       1063,
@@ -2530,11 +2650,13 @@
       1072,
       1073,
       1074,
-      1075
+      1075,
+      1076
     ],
     "open": [
       1065,
       1068
-    ]
+    ],
+    "updatedAt": "2026-10-25T03:22:21.473421+00:00"
   }
 }

@@ -108,6 +108,9 @@ Keep this inventory available until every item has an explicit disposition.
 | private-writers/gateway-config | [#1074](https://github.com/duolahypercho/codex-router/pull/1074) | `3e6b1652b5e25b458ec11acf663acf0c6db12454` | merged |
 | private-writers/native-source | [#1075](https://github.com/duolahypercho/codex-router/pull/1075) | `18adb21e8e8f7dca7baebe30781ab45e452ecf70` | merged |
 | desktop-readback | [#1062](https://github.com/duolahypercho/codex-router/pull/1062) | `90a52eeb01410dac63ec86ed279e16a1bc6fcaab` | merged |
-| scoped-archive-search | [#1076](https://github.com/duolahypercho/codex-router/pull/1076) | `8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376` | ci_passed_waiting_merge |
+| scoped-archive-search | [#1076](https://github.com/duolahypercho/codex-router/pull/1076) | `8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376` | merged |
+| selected-services/runtime-hops | [#1077](https://github.com/duolahypercho/codex-router/pull/1077) | `08367d8811b03c1b611670261670773e77e43ecf` | ci_running |
 
-**Partial topic `private-writers`:** backup #24 remains open for the remaining consumers. Individual parts above do not complete this topic. `remainingSourceFiles` and `upstreamParts` in inventory.json preserve the extraction boundary.
+**Partial topic `selected-services`:** backup #12 remains open for the remaining work. Individual parts above do not complete this topic. `remainingBoundaries` and `upstreamParts` in inventory.json preserve the extraction boundary.
+
+**Partial topic `private-writers`:** backup #24 remains open for the remaining work. Individual parts above do not complete this topic. `remainingSourceFiles` and `upstreamParts` in inventory.json preserve the extraction boundary.

@@ -2282,7 +2282,7 @@
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1076",
       "upstreamHead": "8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376",
       "ci": "fresh upstream CI running; original archival branch retained",
-      "promotionStatus": "ci_running"
+      "promotionStatus": "ci_passed_waiting_merge"
     },
     {
       "number": 6,
@@ -2512,7 +2512,7 @@
       "pr": 1076,
       "url": "https://github.com/duolahypercho/codex-router/pull/1076",
       "head": "8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 5,
       "sourceTopic": "existing-tool-history"
     }

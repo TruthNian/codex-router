@@ -2275,7 +2275,14 @@
       "topic": "Signed-scope archive search",
       "dependsOnMerged": [
         1062
-      ]
+      ],
+      "state": "CLOSED",
+      "closedAt": "2026-10-25T02:21:19Z",
+      "upstreamPr": 1076,
+      "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1076",
+      "upstreamHead": "8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376",
+      "ci": "fresh upstream CI running; original archival branch retained",
+      "promotionStatus": "ci_running"
     },
     {
       "number": 6,
@@ -2499,6 +2506,15 @@
       "mergedAt": "2026-10-25T00:47:20Z",
       "mergeCommit": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
       "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
+    },
+    "scoped-archive-search": {
+      "topic": "scoped-archive-search",
+      "pr": 1076,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1076",
+      "head": "8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376",
+      "status": "ci_running",
+      "backupPr": 5,
+      "sourceTopic": "existing-tool-history"
     }
   },
   "upstreamStateSnapshot": {

@@ -1701,6 +1701,68 @@
           "mergedAt": "2026-10-25T08:16:36Z",
           "mergeCommit": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
           "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
+        },
+        "catalog_private_writer": {
+          "topic": "private-writers/catalog",
+          "pr": 1081,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1081",
+          "head": "b235ed65ed6159cc5874818aba32a1ebdc02e68a",
+          "status": "ci_running",
+          "backupPr": 24,
+          "sourceTopic": "private-writers",
+          "base": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "prState": "OPEN",
+          "backupState": "OPEN",
+          "acceptance": {
+            "baseline": "verified: all four PID-only catalog temporaries are consumed on main; current implementation fails eight-vs-four Windows ACL oracle",
+            "publication": "verified: all four formats and final LF remain intact, native/routed visible slugs and alias/announcement schema preserved, repeated publication stable, each new Windows publication hardens once",
+            "rollback": "verified: staged publication restores exact valid UTF-8 snapshots or removes originally absent files; failed restoration preserves AggregateError with both original error objects and does not claim rollback safe",
+            "captureFallback": "verified: capture refresh failure preserves prior capture bytes and publishes from the existing old-native fallback; native capture remains separate from the three-file publication snapshot",
+            "ownership": "verified: write/close/ACL/rename/collision/cleanup/race/restore failure cases retain existing generations, foreign temporaries, owned displaced evidence, ESTALE/cleanup diagnostics and descriptor closure",
+            "isolation": "verified: synthetic homes, stubbed Codex version/catalog/auth and empty Keychain; actual ACL operations only on owned fixture paths. Deliberate outside read is blocked and detected; synthetic stderr leak fails output assertion. No network or production service operations.",
+            "broader": "verified: 123 pass / 1 Windows-inapplicable POSIX assertion skipped across focused and six adjacent suites. Rebased publication and rollback smoke cases also pass; eighteen relevant inputs are byte-identical.",
+            "review": "verified: all seven final hunks reviewed with no findings; manifest verifier confirms unchanged boundary",
+            "ci": "3 SUCCESS, 6 running and 2 conditional SKIPPED on exact published head; no next PR until all applicable checks succeed.",
+            "rebase": "verified: 18 source/helper/test blobs unchanged; only merged #1080 added. Its changed credential writer is not called by these fixtures and credential readers are unchanged. Main catalog module exactly matches the reproduced baseline.",
+            "oracleControls": "verified: baseline collisions/ACL counts and deliberately skipped hardening/restoration, stderr leak and outside-root read all fail their intended assertions; candidate restored byte-exact",
+            "syntax": "verified on final rebased head: 7 applications, 137 changelog fragments and all source/test syntax; tracked and new-file whitespace checked"
+          },
+          "ciCheckpoint": {
+            "checkedAt": "2026-10-25T08:40:19.489186+00:00",
+            "head": "b235ed65ed6159cc5874818aba32a1ebdc02e68a",
+            "state": "OPEN",
+            "counts": {
+              "PENDING": 6,
+              "SUCCESS": 3,
+              "SKIPPED": 2
+            },
+            "pending": [
+              "test (ubuntu-latest)",
+              "test (macos-latest)",
+              "test (windows-latest)",
+              "Electron control center (Linux)",
+              "Electron control center (Windows)",
+              "Unified native macOS app"
+            ],
+            "comments": 0,
+            "reviews": 0
+          },
+          "mergeValidation": {
+            "head": "b235ed65ed6159cc5874818aba32a1ebdc02e68a",
+            "main": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
+            "merge": "0d2c2a2de462906544b33a1a1be0683bad084f14",
+            "parents": [
+              "a6e120637879ed5d5f81738d7e66d0642ec4c536",
+              "b235ed65ed6159cc5874818aba32a1ebdc02e68a"
+            ],
+            "files": [
+              "changelog.d/catalog-private-writer.md",
+              "src/catalog.mjs",
+              "test/catalog-private-writer.test.mjs"
+            ],
+            "sourceHelperTestBlobsMatchLocal": true
+          }
         }
       },
       "promotionStatus": "partially_promoted",

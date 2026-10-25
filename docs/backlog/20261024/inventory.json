@@ -1499,7 +1499,6 @@
       "isDraft": true,
       "remainingSourceFiles": [
         "src/caller-key-rotation.mjs",
-        "src/catalog.mjs",
         "src/config-manager.mjs",
         "src/file-security.mjs",
         "src/kimi-oauth-session.mjs",
@@ -1507,7 +1506,7 @@
         "src/provider-credential-store.mjs",
         "src/service-windows.mjs"
       ],
-      "extractionNotes": "Seven independent consumer PRs (#1070-1075 and #1079) are merged. Provider credential publication is submitted separately as #1080. Eight remaining source-file candidates require disposition, including Windows launcher fragments preserved in selected-services backup #12; transferred adopted-provider read API remains with archive #20. Archive patches are immutable; this is not a required-PR count.",
+      "extractionNotes": "Eight independent consumer PRs (#1070-1075, #1079 and #1080) are merged. Catalog publication is submitted independently as #1081. Seven remaining source-file candidates require disposition, including Windows launcher fragments preserved in selected-services backup #12; the transferred adopted-provider read API remains with archive #20. Immutable patch files and source branches remain retained. This is not a required-PR count.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -1647,7 +1646,7 @@
         "provider_credential_private_writer": {
           "base": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
           "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
-          "prState": "OPEN",
+          "prState": "MERGED",
           "backupState": "OPEN",
           "acceptance": {
             "negativeBaseline": "verified: both identities lose a PID-only foreign temporary on unchanged main and need two Windows ACL helpers instead of one; all intended oracles fail",
@@ -1658,7 +1657,7 @@
             "readers": "verified: provider-bound references resolve the exact new value, reject wrong target/provider, obey discovery off/on; stdout/stderr leak detector independently proven against injected synthetic leak",
             "broader": "verified: 73 pass, 3 platform skips: six full adjacent suites (68/3) plus five credential-store integration cases; remaining full platform suite is CI-pending",
             "review": "verified: all six final hunks reviewed, no findings; manifest verifier confirms unchanged boundary",
-            "ci": "9 SUCCESS and 2 conditional SKIPPED on exact head 9161a34fad09c1cdf010a11ca4a3882d8b41dde4; OPEN, not merged.",
+            "ci": "9 SUCCESS and 2 conditional SKIPPED on exact head 9161a34fad09c1cdf010a11ca4a3882d8b41dde4; actually MERGED at 08:16:36Z and verified in main a6e12063.",
             "validationEnvironment": "verified: unchanged main reproduces Vertex ADC assertion only under forced CODEX_ROUTER_NO_DISCOVERY=0; passes with clean inherited policy. Harness override removed, failure evidence retained.",
             "oracleControls": "verified: skipping hardening fails before rename; an injected synthetic stderr leak fails output-redaction oracle for both identities. Candidate restored byte-exact.",
             "syntax": "verified: full check passed on new base: 7 applications, 136 fragments, all source/test syntax; final prose-only fragment refinement revalidated separately",
@@ -1696,9 +1695,12 @@
           "pr": 1080,
           "url": "https://github.com/duolahypercho/codex-router/pull/1080",
           "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
-          "status": "ci_passed_waiting_merge",
+          "status": "merged",
           "backupPr": 24,
-          "sourceTopic": "private-writers"
+          "sourceTopic": "private-writers",
+          "mergedAt": "2026-10-25T08:16:36Z",
+          "mergeCommit": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
+          "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
         }
       },
       "promotionStatus": "partially_promoted",
@@ -2642,7 +2644,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:18:25Z",
       "mergeCommit": "c826e459c9287809fd726bd678894bcafe2a4000",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "generation-redirect": {
       "topic": "generation-redirect",
@@ -2663,7 +2665,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:19:20Z",
       "mergeCommit": "1808d4173c4eb9076a65d866b1fecbe8b3adcbba",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "retention-clock": {
       "topic": "retention-clock",
@@ -2675,7 +2677,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:17:42Z",
       "mergeCommit": "85ef669043ac4b65780ed51982d810385b9e1d20",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "manual-ci-scope": {
       "topic": "manual-ci-scope",
@@ -2696,7 +2698,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:41:14Z",
       "mergeCommit": "186da4897d89a3957e5d22b31e0181678f414957",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "private-writers/agent-catalog": {
       "topic": "private-writers/agent-catalog",
@@ -2709,7 +2711,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:27:49Z",
       "mergeCommit": "fabe3da9e18289a77d25bfc5758ee102bd80d6bd",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "private-writers/model-selection": {
       "topic": "private-writers/model-selection",
@@ -2722,7 +2724,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:28:22Z",
       "mergeCommit": "2fc35abd5363c43412c03279c9508f8b2560b01f",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "private-writers/harness-documents": {
       "topic": "private-writers/harness-documents",
@@ -2735,7 +2737,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:10Z",
       "mergeCommit": "d224835e7d1fa110d27aefff5af2aa52e83bde9d",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "private-writers/provider-state": {
       "topic": "private-writers/provider-state",
@@ -2748,7 +2750,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:53Z",
       "mergeCommit": "04d35769dfaf1e733000f9cecf5eb6efd9cbb065",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "private-writers/gateway-config": {
       "topic": "private-writers/gateway-config",
@@ -2761,7 +2763,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:30:43Z",
       "mergeCommit": "9d014b1ec429a2b55a2d0c7cb9c09d9cae7c7c13",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "private-writers/native-source": {
       "topic": "private-writers/native-source",
@@ -2774,7 +2776,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:43:32Z",
       "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "desktop-readback": {
       "topic": "desktop-readback",
@@ -2787,7 +2789,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:47:20Z",
       "mergeCommit": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "scoped-archive-search": {
       "topic": "scoped-archive-search",
@@ -2800,7 +2802,7 @@
       "prState": "MERGED",
       "mergeCommit": "3ecc2d9b7681b88cde40778ad15ec5639f404444",
       "mergedAt": "2026-10-25T03:18:10Z",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "selected-services/runtime-hops": {
       "topic": "selected-services/runtime-hops",
@@ -2843,7 +2845,7 @@
       "prState": "MERGED",
       "mergeCommit": "7432b02d670dd7889696fc91971257a427016d34",
       "mergedAt": "2026-10-25T05:25:06Z",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "per-model-history-policy": {
       "topic": "per-model-history-policy",
@@ -2856,7 +2858,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T06:18:01Z",
       "mergeCommit": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
       "ci": {
         "SUCCESS": 12,
         "SKIPPED": 2,
@@ -2918,12 +2920,12 @@
       },
       "mergedAt": "2026-10-25T07:20:06Z",
       "mergeCommit": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
-      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
     },
     "private-writers/provider-credentials": {
       "base": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
       "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
-      "prState": "OPEN",
+      "prState": "MERGED",
       "backupState": "OPEN",
       "acceptance": {
         "negativeBaseline": "verified: both identities lose a PID-only foreign temporary on unchanged main and need two Windows ACL helpers instead of one; all intended oracles fail",
@@ -2934,7 +2936,7 @@
         "readers": "verified: provider-bound references resolve the exact new value, reject wrong target/provider, obey discovery off/on; stdout/stderr leak detector independently proven against injected synthetic leak",
         "broader": "verified: 73 pass, 3 platform skips: six full adjacent suites (68/3) plus five credential-store integration cases; remaining full platform suite is CI-pending",
         "review": "verified: all six final hunks reviewed, no findings; manifest verifier confirms unchanged boundary",
-        "ci": "9 SUCCESS and 2 conditional SKIPPED on exact head 9161a34fad09c1cdf010a11ca4a3882d8b41dde4; OPEN, not merged.",
+        "ci": "9 SUCCESS and 2 conditional SKIPPED on exact head 9161a34fad09c1cdf010a11ca4a3882d8b41dde4; actually MERGED at 08:16:36Z and verified in main a6e12063.",
         "validationEnvironment": "verified: unchanged main reproduces Vertex ADC assertion only under forced CODEX_ROUTER_NO_DISCOVERY=0; passes with clean inherited policy. Harness override removed, failure evidence retained.",
         "oracleControls": "verified: skipping hardening fails before rename; an injected synthetic stderr leak fails output-redaction oracle for both identities. Candidate restored byte-exact.",
         "syntax": "verified: full check passed on new base: 7 applications, 136 fragments, all source/test syntax; final prose-only fragment refinement revalidated separately",
@@ -2972,13 +2974,78 @@
       "pr": 1080,
       "url": "https://github.com/duolahypercho/codex-router/pull/1080",
       "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "backupPr": 24,
-      "sourceTopic": "private-writers"
+      "sourceTopic": "private-writers",
+      "mergedAt": "2026-10-25T08:16:36Z",
+      "mergeCommit": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
+      "verifiedInMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
+    },
+    "private-writers/catalog": {
+      "topic": "private-writers/catalog",
+      "pr": 1081,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1081",
+      "head": "b235ed65ed6159cc5874818aba32a1ebdc02e68a",
+      "status": "ci_running",
+      "backupPr": 24,
+      "sourceTopic": "private-writers",
+      "base": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
+      "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+      "prState": "OPEN",
+      "backupState": "OPEN",
+      "acceptance": {
+        "baseline": "verified: all four PID-only catalog temporaries are consumed on main; current implementation fails eight-vs-four Windows ACL oracle",
+        "publication": "verified: all four formats and final LF remain intact, native/routed visible slugs and alias/announcement schema preserved, repeated publication stable, each new Windows publication hardens once",
+        "rollback": "verified: staged publication restores exact valid UTF-8 snapshots or removes originally absent files; failed restoration preserves AggregateError with both original error objects and does not claim rollback safe",
+        "captureFallback": "verified: capture refresh failure preserves prior capture bytes and publishes from the existing old-native fallback; native capture remains separate from the three-file publication snapshot",
+        "ownership": "verified: write/close/ACL/rename/collision/cleanup/race/restore failure cases retain existing generations, foreign temporaries, owned displaced evidence, ESTALE/cleanup diagnostics and descriptor closure",
+        "isolation": "verified: synthetic homes, stubbed Codex version/catalog/auth and empty Keychain; actual ACL operations only on owned fixture paths. Deliberate outside read is blocked and detected; synthetic stderr leak fails output assertion. No network or production service operations.",
+        "broader": "verified: 123 pass / 1 Windows-inapplicable POSIX assertion skipped across focused and six adjacent suites. Rebased publication and rollback smoke cases also pass; eighteen relevant inputs are byte-identical.",
+        "review": "verified: all seven final hunks reviewed with no findings; manifest verifier confirms unchanged boundary",
+        "ci": "3 SUCCESS, 6 running and 2 conditional SKIPPED on exact published head; no next PR until all applicable checks succeed.",
+        "rebase": "verified: 18 source/helper/test blobs unchanged; only merged #1080 added. Its changed credential writer is not called by these fixtures and credential readers are unchanged. Main catalog module exactly matches the reproduced baseline.",
+        "oracleControls": "verified: baseline collisions/ACL counts and deliberately skipped hardening/restoration, stderr leak and outside-root read all fail their intended assertions; candidate restored byte-exact",
+        "syntax": "verified on final rebased head: 7 applications, 137 changelog fragments and all source/test syntax; tracked and new-file whitespace checked"
+      },
+      "ciCheckpoint": {
+        "checkedAt": "2026-10-25T08:40:19.489186+00:00",
+        "head": "b235ed65ed6159cc5874818aba32a1ebdc02e68a",
+        "state": "OPEN",
+        "counts": {
+          "PENDING": 6,
+          "SUCCESS": 3,
+          "SKIPPED": 2
+        },
+        "pending": [
+          "test (ubuntu-latest)",
+          "test (macos-latest)",
+          "test (windows-latest)",
+          "Electron control center (Linux)",
+          "Electron control center (Windows)",
+          "Unified native macOS app"
+        ],
+        "comments": 0,
+        "reviews": 0
+      },
+      "mergeValidation": {
+        "head": "b235ed65ed6159cc5874818aba32a1ebdc02e68a",
+        "main": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
+        "merge": "0d2c2a2de462906544b33a1a1be0683bad084f14",
+        "parents": [
+          "a6e120637879ed5d5f81738d7e66d0642ec4c536",
+          "b235ed65ed6159cc5874818aba32a1ebdc02e68a"
+        ],
+        "files": [
+          "changelog.d/catalog-private-writer.md",
+          "src/catalog.mjs",
+          "test/catalog-private-writer.test.mjs"
+        ],
+        "sourceHelperTestBlobsMatchLocal": true
+      }
     }
   },
   "upstreamStateSnapshot": {
-    "verifiedMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
+    "verifiedMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
     "merged": [
       1062,
       1063,
@@ -2994,14 +3061,15 @@
       1076,
       1077,
       1078,
-      1079
+      1079,
+      1080
     ],
     "open": [
       1065,
       1068,
-      1080
+      1081
     ],
-    "updatedAt": "2026-10-25T07:41:23.237950+00:00"
+    "updatedAt": "2026-10-25T08:41:46.366957+00:00"
   },
-  "verifiedMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+  "verifiedMain": "a6e120637879ed5d5f81738d7e66d0642ec4c536"
 }

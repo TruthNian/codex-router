@@ -1505,10 +1505,9 @@
         "src/kimi-oauth-session.mjs",
         "src/legacy-migration.mjs",
         "src/provider-credential-store.mjs",
-        "src/provider-credentials.mjs",
         "src/service-windows.mjs"
       ],
-      "extractionNotes": "Six independent consumers are merged; generated secrets submitted separately as #1079. Nine remaining source-file candidates require disposition, including Windows launcher fragments preserved in selected-services backup #12. Archive patches remain immutable; this is not a required-PR count.",
+      "extractionNotes": "Seven independent consumer PRs (#1070-1075 and #1079) are merged. Provider credential publication is submitted separately as #1080. Eight remaining source-file candidates require disposition, including Windows launcher fragments preserved in selected-services backup #12; transferred adopted-provider read API remains with archive #20. Archive patches are immutable; this is not a required-PR count.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -1641,6 +1640,70 @@
             ],
             "sourceHelperTestBlobsMatchLocal": true
           }
+        },
+        "provider_credential_private_writer": {
+          "base": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "prState": "OPEN",
+          "backupState": "OPEN",
+          "acceptance": {
+            "negativeBaseline": "verified: both identities lose a PID-only foreign temporary on unchanged main and need two Windows ACL helpers instead of one; all intended oracles fail",
+            "bytesPrivacy": "verified: 17 focused scenarios within final adjacent run pass; exact UTF-8 trimming/newline, same return path, private before/after rename, one real Windows ACL operation per write and fresh/repeated generic/built-in writes",
+            "failureAtomicity": "verified: injected write/close/ACL/rename failures preserve exact previous bytes and surface expected errors; successful descriptors close before hardening/publication",
+            "ownershipDiagnostics": "verified: collisions, leaf replacement and cleanup failure preserve foreign objects and original errors; displaced owned bytes stay private; cleanup diagnostics survive",
+            "validation": "verified: blank/unknown/anonymous/per-model/Vertex/classic Copilot/generic traversal/reserved id rejections leave old bytes untouched with zero publication or ACL work",
+            "readers": "verified: provider-bound references resolve the exact new value, reject wrong target/provider, obey discovery off/on; stdout/stderr leak detector independently proven against injected synthetic leak",
+            "broader": "verified: 73 pass, 3 platform skips: six full adjacent suites (68/3) plus five credential-store integration cases; remaining full platform suite is CI-pending",
+            "review": "verified: all six final hunks reviewed, no findings; manifest verifier confirms unchanged boundary",
+            "ci": "3 SUCCESS, 6 running and 2 conditional SKIPPED on exact published head; no next PR until all applicable CI succeeds.",
+            "validationEnvironment": "verified: unchanged main reproduces Vertex ADC assertion only under forced CODEX_ROUTER_NO_DISCOVERY=0; passes with clean inherited policy. Harness override removed, failure evidence retained.",
+            "oracleControls": "verified: skipping hardening fails before rename; an injected synthetic stderr leak fails output-redaction oracle for both identities. Candidate restored byte-exact.",
+            "syntax": "verified: full check passed on new base: 7 applications, 136 fragments, all source/test syntax; final prose-only fragment refinement revalidated separately",
+            "rebase": "verified: 16 relevant source/helper/test blobs remain identical; current main consumer equals the reproduced baseline exactly; only merged #1079 was added",
+            "rebasedFocused": "verified: all 17 pass again on rebased source, no skips/failures"
+          },
+          "ciCheckpoint": {
+            "checkedAt": "2026-10-25T07:39:00.219104+00:00",
+            "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
+            "counts": {
+              "PENDING": 6,
+              "SUCCESS": 3,
+              "SKIPPED": 2
+            },
+            "pending": [
+              "test (ubuntu-latest)",
+              "test (macos-latest)",
+              "test (windows-latest)",
+              "Electron control center (Linux)",
+              "Electron control center (Windows)",
+              "Unified native macOS app"
+            ],
+            "state": "OPEN",
+            "comments": 0,
+            "reviews": 0
+          },
+          "mergeValidation": {
+            "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
+            "main": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
+            "merge": "f58a0d9e501a7137f29852f8cecfc40101d480c7",
+            "parents": [
+              "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
+              "9161a34fad09c1cdf010a11ca4a3882d8b41dde4"
+            ],
+            "files": [
+              "changelog.d/provider-credential-private-writer.md",
+              "src/provider-credentials.mjs",
+              "test/provider-credential-private-writer.test.mjs"
+            ],
+            "sourceHelperTestBlobsMatchLocal": true
+          },
+          "topic": "private-writers/provider-credentials",
+          "pr": 1080,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1080",
+          "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
+          "status": "ci_running",
+          "backupPr": 24,
+          "sourceTopic": "private-writers"
         }
       },
       "promotionStatus": "partially_promoted",
@@ -2584,7 +2647,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:18:25Z",
       "mergeCommit": "c826e459c9287809fd726bd678894bcafe2a4000",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "generation-redirect": {
       "topic": "generation-redirect",
@@ -2605,7 +2668,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:19:20Z",
       "mergeCommit": "1808d4173c4eb9076a65d866b1fecbe8b3adcbba",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "retention-clock": {
       "topic": "retention-clock",
@@ -2617,7 +2680,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:17:42Z",
       "mergeCommit": "85ef669043ac4b65780ed51982d810385b9e1d20",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "manual-ci-scope": {
       "topic": "manual-ci-scope",
@@ -2638,7 +2701,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:41:14Z",
       "mergeCommit": "186da4897d89a3957e5d22b31e0181678f414957",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "private-writers/agent-catalog": {
       "topic": "private-writers/agent-catalog",
@@ -2651,7 +2714,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:27:49Z",
       "mergeCommit": "fabe3da9e18289a77d25bfc5758ee102bd80d6bd",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "private-writers/model-selection": {
       "topic": "private-writers/model-selection",
@@ -2664,7 +2727,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:28:22Z",
       "mergeCommit": "2fc35abd5363c43412c03279c9508f8b2560b01f",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "private-writers/harness-documents": {
       "topic": "private-writers/harness-documents",
@@ -2677,7 +2740,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:10Z",
       "mergeCommit": "d224835e7d1fa110d27aefff5af2aa52e83bde9d",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "private-writers/provider-state": {
       "topic": "private-writers/provider-state",
@@ -2690,7 +2753,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:53Z",
       "mergeCommit": "04d35769dfaf1e733000f9cecf5eb6efd9cbb065",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "private-writers/gateway-config": {
       "topic": "private-writers/gateway-config",
@@ -2703,7 +2766,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:30:43Z",
       "mergeCommit": "9d014b1ec429a2b55a2d0c7cb9c09d9cae7c7c13",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "private-writers/native-source": {
       "topic": "private-writers/native-source",
@@ -2716,7 +2779,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:43:32Z",
       "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "desktop-readback": {
       "topic": "desktop-readback",
@@ -2729,7 +2792,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:47:20Z",
       "mergeCommit": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "scoped-archive-search": {
       "topic": "scoped-archive-search",
@@ -2742,7 +2805,7 @@
       "prState": "MERGED",
       "mergeCommit": "3ecc2d9b7681b88cde40778ad15ec5639f404444",
       "mergedAt": "2026-10-25T03:18:10Z",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "selected-services/runtime-hops": {
       "topic": "selected-services/runtime-hops",
@@ -2785,7 +2848,7 @@
       "prState": "MERGED",
       "mergeCommit": "7432b02d670dd7889696fc91971257a427016d34",
       "mergedAt": "2026-10-25T05:25:06Z",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
     },
     "per-model-history-policy": {
       "topic": "per-model-history-policy",
@@ -2798,7 +2861,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T06:18:01Z",
       "mergeCommit": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
       "ci": {
         "SUCCESS": 12,
         "SKIPPED": 2,
@@ -2813,7 +2876,7 @@
         "failures": "verified: write/close/ACL/rename/collision preserve old bytes; remove only owned temporaries; cleanup failure retained as diagnostic",
         "repairFailure": "verified: real repair operation fault surfaces and all existing keys remain exact",
         "statusMissing": "verified: no generation/ACL helpers; unchanged JSON shape, exit1",
-        "ci": "9 SUCCESS and 2 conditional SKIPPED on exact head c5549f0b9becaf6fefcdedf2c07274234f492ea7; OPEN, not merged.",
+        "ci": "9 SUCCESS and 2 conditional SKIPPED on exact head c5549f0b9becaf6fefcdedf2c07274234f492ea7; actual MERGED at 07:20:06Z and verified in main 36e9a0a0.",
         "regressionGuards": "verified: deliberately duplicate final repair and omit existing repair both fail intended external oracle; restored candidate byte-exact",
         "adjacentTests": "verified: 42 pass, 1 Windows-inapplicable POSIX mode assertion skipped across secret CLI, file-security, caller rotation/auth command and secret-entry",
         "syntax": "verified: scripts-check passed 7 applications, 134 changelog fragments, all syntax; tracked and untracked whitespace checked",
@@ -2822,13 +2885,13 @@
       "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
       "base": "7432b02d670dd7889696fc91971257a427016d34",
       "mainAtPublication": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
-      "prState": "OPEN",
+      "prState": "MERGED",
       "backupState": "OPEN",
       "topic": "private-writers/generated-secrets",
       "pr": 1079,
       "url": "https://github.com/duolahypercho/codex-router/pull/1079",
       "head": "c5549f0b9becaf6fefcdedf2c07274234f492ea7",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "backupPr": 24,
       "sourceTopic": "private-writers",
       "ciCheckpoint": {
@@ -2857,11 +2920,78 @@
           "test/secret-private-writer.test.mjs"
         ],
         "sourceHelperTestBlobsMatchLocal": true
-      }
+      },
+      "mergedAt": "2026-10-25T07:20:06Z",
+      "mergeCommit": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
+      "verifiedInMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
+    },
+    "private-writers/provider-credentials": {
+      "base": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
+      "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+      "prState": "OPEN",
+      "backupState": "OPEN",
+      "acceptance": {
+        "negativeBaseline": "verified: both identities lose a PID-only foreign temporary on unchanged main and need two Windows ACL helpers instead of one; all intended oracles fail",
+        "bytesPrivacy": "verified: 17 focused scenarios within final adjacent run pass; exact UTF-8 trimming/newline, same return path, private before/after rename, one real Windows ACL operation per write and fresh/repeated generic/built-in writes",
+        "failureAtomicity": "verified: injected write/close/ACL/rename failures preserve exact previous bytes and surface expected errors; successful descriptors close before hardening/publication",
+        "ownershipDiagnostics": "verified: collisions, leaf replacement and cleanup failure preserve foreign objects and original errors; displaced owned bytes stay private; cleanup diagnostics survive",
+        "validation": "verified: blank/unknown/anonymous/per-model/Vertex/classic Copilot/generic traversal/reserved id rejections leave old bytes untouched with zero publication or ACL work",
+        "readers": "verified: provider-bound references resolve the exact new value, reject wrong target/provider, obey discovery off/on; stdout/stderr leak detector independently proven against injected synthetic leak",
+        "broader": "verified: 73 pass, 3 platform skips: six full adjacent suites (68/3) plus five credential-store integration cases; remaining full platform suite is CI-pending",
+        "review": "verified: all six final hunks reviewed, no findings; manifest verifier confirms unchanged boundary",
+        "ci": "3 SUCCESS, 6 running and 2 conditional SKIPPED on exact published head; no next PR until all applicable CI succeeds.",
+        "validationEnvironment": "verified: unchanged main reproduces Vertex ADC assertion only under forced CODEX_ROUTER_NO_DISCOVERY=0; passes with clean inherited policy. Harness override removed, failure evidence retained.",
+        "oracleControls": "verified: skipping hardening fails before rename; an injected synthetic stderr leak fails output-redaction oracle for both identities. Candidate restored byte-exact.",
+        "syntax": "verified: full check passed on new base: 7 applications, 136 fragments, all source/test syntax; final prose-only fragment refinement revalidated separately",
+        "rebase": "verified: 16 relevant source/helper/test blobs remain identical; current main consumer equals the reproduced baseline exactly; only merged #1079 was added",
+        "rebasedFocused": "verified: all 17 pass again on rebased source, no skips/failures"
+      },
+      "ciCheckpoint": {
+        "checkedAt": "2026-10-25T07:39:00.219104+00:00",
+        "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
+        "counts": {
+          "PENDING": 6,
+          "SUCCESS": 3,
+          "SKIPPED": 2
+        },
+        "pending": [
+          "test (ubuntu-latest)",
+          "test (macos-latest)",
+          "test (windows-latest)",
+          "Electron control center (Linux)",
+          "Electron control center (Windows)",
+          "Unified native macOS app"
+        ],
+        "state": "OPEN",
+        "comments": 0,
+        "reviews": 0
+      },
+      "mergeValidation": {
+        "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
+        "main": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
+        "merge": "f58a0d9e501a7137f29852f8cecfc40101d480c7",
+        "parents": [
+          "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
+          "9161a34fad09c1cdf010a11ca4a3882d8b41dde4"
+        ],
+        "files": [
+          "changelog.d/provider-credential-private-writer.md",
+          "src/provider-credentials.mjs",
+          "test/provider-credential-private-writer.test.mjs"
+        ],
+        "sourceHelperTestBlobsMatchLocal": true
+      },
+      "topic": "private-writers/provider-credentials",
+      "pr": 1080,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1080",
+      "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
+      "status": "ci_running",
+      "backupPr": 24,
+      "sourceTopic": "private-writers"
     }
   },
   "upstreamStateSnapshot": {
-    "verifiedMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
+    "verifiedMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
     "merged": [
       1062,
       1063,
@@ -2876,14 +3006,15 @@
       1075,
       1076,
       1077,
-      1078
+      1078,
+      1079
     ],
     "open": [
       1065,
       1068,
-      1079
+      1080
     ],
-    "updatedAt": "2026-10-25T06:20:33.649491+00:00"
+    "updatedAt": "2026-10-25T07:41:23.237950+00:00"
   },
-  "verifiedMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+  "verifiedMain": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc"
 }

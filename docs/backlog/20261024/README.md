@@ -95,17 +95,18 @@ Keep this inventory available until every item has an explicit disposition.
 
 | Topic | Upstream PR | Exact published head | Status |
 |---|---|---|---|
-| catalog-fixture-isolation | [#1064](https://github.com/duolahypercho/codex-router/pull/1064) | `b9e54fc6b201e68ab5212b279162434561dc8ee7` | ci_passed_waiting_merge |
+| catalog-fixture-isolation | [#1064](https://github.com/duolahypercho/codex-router/pull/1064) | `b9e54fc6b201e68ab5212b279162434561dc8ee7` | merged |
 | generation-redirect | [#1065](https://github.com/duolahypercho/codex-router/pull/1065) | `3acbe3e752fd15bb1efd8c0c2e7ca1e972cd3c2b` | ci_passed_waiting_merge |
-| cache-version-metadata | [#1063](https://github.com/duolahypercho/codex-router/pull/1063) | `955645840771efbb0e689d395d753e9168143d19` | ci_passed_waiting_merge |
-| retention-clock | [#1067](https://github.com/duolahypercho/codex-router/pull/1067) | `2029173a65ab9a7dcc05cc028ee7086640ae82a8` | ci_passed_waiting_merge |
+| cache-version-metadata | [#1063](https://github.com/duolahypercho/codex-router/pull/1063) | `955645840771efbb0e689d395d753e9168143d19` | merged |
+| retention-clock | [#1067](https://github.com/duolahypercho/codex-router/pull/1067) | `2029173a65ab9a7dcc05cc028ee7086640ae82a8` | merged |
 | manual-ci-scope | [#1068](https://github.com/duolahypercho/codex-router/pull/1068) | `3b29062c03c43721e4934e873b3596182e5f7e43` | ci_passed_waiting_merge |
-| direct-responses | [#1069](https://github.com/duolahypercho/codex-router/pull/1069) | `aa3ea31c610a8953ec2050ed8a160a751d3bad00` | ci_passed_waiting_merge |
-| private-writers/agent-catalog | [#1070](https://github.com/duolahypercho/codex-router/pull/1070) | `cb4b66bafad935db4d9a56a392611b129ecbcdaa` | ci_passed_waiting_merge |
-| private-writers/model-selection | [#1071](https://github.com/duolahypercho/codex-router/pull/1071) | `dbeb8885c3a1d20be7185867ec220563c6f251ed` | ci_passed_waiting_merge |
-| private-writers/harness-documents | [#1072](https://github.com/duolahypercho/codex-router/pull/1072) | `58508b98d72c687252d32a41b488e7d649a7e705` | ci_passed_waiting_merge |
-| private-writers/provider-state | [#1073](https://github.com/duolahypercho/codex-router/pull/1073) | `150c03b8bbe09f635b04dcf620afe279ba7cd1f9` | ci_passed_waiting_merge |
-| private-writers/gateway-config | [#1074](https://github.com/duolahypercho/codex-router/pull/1074) | `3e6b1652b5e25b458ec11acf663acf0c6db12454` | ci_passed_waiting_merge |
-| private-writers/native-source | [#1075](https://github.com/duolahypercho/codex-router/pull/1075) | `18adb21e8e8f7dca7baebe30781ab45e452ecf70` | ci_running |
+| direct-responses | [#1069](https://github.com/duolahypercho/codex-router/pull/1069) | `aa3ea31c610a8953ec2050ed8a160a751d3bad00` | merged |
+| private-writers/agent-catalog | [#1070](https://github.com/duolahypercho/codex-router/pull/1070) | `cb4b66bafad935db4d9a56a392611b129ecbcdaa` | merged |
+| private-writers/model-selection | [#1071](https://github.com/duolahypercho/codex-router/pull/1071) | `dbeb8885c3a1d20be7185867ec220563c6f251ed` | merged |
+| private-writers/harness-documents | [#1072](https://github.com/duolahypercho/codex-router/pull/1072) | `58508b98d72c687252d32a41b488e7d649a7e705` | merged |
+| private-writers/provider-state | [#1073](https://github.com/duolahypercho/codex-router/pull/1073) | `150c03b8bbe09f635b04dcf620afe279ba7cd1f9` | merged |
+| private-writers/gateway-config | [#1074](https://github.com/duolahypercho/codex-router/pull/1074) | `3e6b1652b5e25b458ec11acf663acf0c6db12454` | merged |
+| private-writers/native-source | [#1075](https://github.com/duolahypercho/codex-router/pull/1075) | `18adb21e8e8f7dca7baebe30781ab45e452ecf70` | merged |
+| desktop-readback | [#1062](https://github.com/duolahypercho/codex-router/pull/1062) | `90a52eeb01410dac63ec86ed279e16a1bc6fcaab` | merged |
 
 **Partial topic `private-writers`:** backup #24 remains open for the remaining consumers. Individual parts above do not complete this topic. `remainingSourceFiles` and `upstreamParts` in inventory.json preserve the extraction boundary.

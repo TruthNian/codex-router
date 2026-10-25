@@ -122,7 +122,8 @@
       "backupState": "CLOSED",
       "closedAt": "2026-10-24T15:16:20Z",
       "prState": "CLOSED",
-      "closureReason": "Promoted as upstream #1065; exact published head and 16 successful CI checks verified. Source branch retained."
+      "closureReason": "Promoted as upstream #1065; exact published head and 16 successful CI checks verified. Source branch retained.",
+      "upstreamState": "OPEN"
     },
     {
       "id": "vision-delivery",
@@ -281,7 +282,7 @@
       },
       "upstreamPr": 1069,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1069",
-      "promotionStatus": "ci_passed_waiting_merge",
+      "promotionStatus": "merged",
       "ciFollowUp": {
         "head": "e454b39f7e778db022880857da7f67f450bd0be4",
         "run": 40115130585,
@@ -298,7 +299,11 @@
       },
       "prState": "CLOSED",
       "closedAt": "2026-10-24T18:47:34Z",
-      "ciResult": "12 SUCCESS and 2 conditional SKIPPED on corrected exact head aa3ea31c610a8953ec2050ed8a160a751d3bad00"
+      "ciResult": "12 SUCCESS and 2 conditional SKIPPED on corrected exact head aa3ea31c610a8953ec2050ed8a160a751d3bad00",
+      "upstreamState": "MERGED",
+      "mergedAt": "2026-10-25T00:41:14Z",
+      "mergeCommit": "186da4897d89a3957e5d22b31e0181678f414957",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     {
       "id": "selected-services",
@@ -1394,54 +1399,78 @@
           "pr": 1070,
           "url": "https://github.com/duolahypercho/codex-router/pull/1070",
           "head": "cb4b66bafad935db4d9a56a392611b129ecbcdaa",
-          "status": "ci_passed_waiting_merge",
+          "status": "merged",
           "backupPr": 24,
-          "sourceTopic": "private-writers"
+          "sourceTopic": "private-writers",
+          "prState": "MERGED",
+          "mergedAt": "2026-10-25T00:27:49Z",
+          "mergeCommit": "fabe3da9e18289a77d25bfc5758ee102bd80d6bd",
+          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
         },
         "model_selection_private_writers": {
           "topic": "private-writers/model-selection",
           "pr": 1071,
           "url": "https://github.com/duolahypercho/codex-router/pull/1071",
           "head": "dbeb8885c3a1d20be7185867ec220563c6f251ed",
-          "status": "ci_passed_waiting_merge",
+          "status": "merged",
           "backupPr": 24,
-          "sourceTopic": "private-writers"
+          "sourceTopic": "private-writers",
+          "prState": "MERGED",
+          "mergedAt": "2026-10-25T00:28:22Z",
+          "mergeCommit": "2fc35abd5363c43412c03279c9508f8b2560b01f",
+          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
         },
         "harness_document_private_writers": {
           "topic": "private-writers/harness-documents",
           "pr": 1072,
           "url": "https://github.com/duolahypercho/codex-router/pull/1072",
           "head": "58508b98d72c687252d32a41b488e7d649a7e705",
-          "status": "ci_passed_waiting_merge",
+          "status": "merged",
           "backupPr": 24,
-          "sourceTopic": "private-writers"
+          "sourceTopic": "private-writers",
+          "prState": "MERGED",
+          "mergedAt": "2026-10-25T00:29:10Z",
+          "mergeCommit": "d224835e7d1fa110d27aefff5af2aa52e83bde9d",
+          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
         },
         "provider_state_private_writers": {
           "topic": "private-writers/provider-state",
           "pr": 1073,
           "url": "https://github.com/duolahypercho/codex-router/pull/1073",
           "head": "150c03b8bbe09f635b04dcf620afe279ba7cd1f9",
-          "status": "ci_passed_waiting_merge",
+          "status": "merged",
           "backupPr": 24,
-          "sourceTopic": "private-writers"
+          "sourceTopic": "private-writers",
+          "prState": "MERGED",
+          "mergedAt": "2026-10-25T00:29:53Z",
+          "mergeCommit": "04d35769dfaf1e733000f9cecf5eb6efd9cbb065",
+          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
         },
         "gateway_config_private_writer": {
           "topic": "private-writers/gateway-config",
           "pr": 1074,
           "url": "https://github.com/duolahypercho/codex-router/pull/1074",
           "head": "3e6b1652b5e25b458ec11acf663acf0c6db12454",
-          "status": "ci_passed_waiting_merge",
+          "status": "merged",
           "backupPr": 24,
-          "sourceTopic": "private-writers"
+          "sourceTopic": "private-writers",
+          "prState": "MERGED",
+          "mergedAt": "2026-10-25T00:30:43Z",
+          "mergeCommit": "9d014b1ec429a2b55a2d0c7cb9c09d9cae7c7c13",
+          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
         },
         "native_source_private_writer": {
           "topic": "private-writers/native-source",
           "pr": 1075,
           "url": "https://github.com/duolahypercho/codex-router/pull/1075",
           "head": "18adb21e8e8f7dca7baebe30781ab45e452ecf70",
-          "status": "ci_running",
+          "status": "merged",
           "backupPr": 24,
-          "sourceTopic": "private-writers"
+          "sourceTopic": "private-writers",
+          "prState": "MERGED",
+          "mergedAt": "2026-10-25T00:43:32Z",
+          "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
+          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
         }
       },
       "promotionStatus": "partially_promoted",
@@ -1637,7 +1666,8 @@
       "backupState": "CLOSED",
       "closedAt": "2026-10-24T16:57:50Z",
       "prState": "CLOSED",
-      "closureReason": "Promoted as upstream #1068; exact head and all applicable upstream CI verified. Source branch retained."
+      "closureReason": "Promoted as upstream #1068; exact head and all applicable upstream CI verified. Source branch retained.",
+      "upstreamState": "OPEN"
     },
     {
       "id": "runtime-fixtures",
@@ -2141,10 +2171,14 @@
       "publishedHead": "5f72f1ba0da9264bed539efc0431cfbfa4e0fa99",
       "isDraft": true,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1064",
-      "promotionStatus": "ci_passed_waiting_merge",
+      "promotionStatus": "merged",
       "prState": "CLOSED",
       "closedAt": "2026-10-24T13:58:39Z",
-      "closureReason": "Promoted as upstream #1064; exact published head and all applicable CI verified; archival branch retained."
+      "closureReason": "Promoted as upstream #1064; exact published head and all applicable CI verified; archival branch retained.",
+      "upstreamState": "MERGED",
+      "mergedAt": "2026-10-25T00:18:25Z",
+      "mergeCommit": "c826e459c9287809fd726bd678894bcafe2a4000",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     {
       "id": "retention-clock",
@@ -2170,11 +2204,15 @@
       "publishedHead": "4e33f7f097c361e450e00a5c7e429ca7aa2e0dc3",
       "isDraft": true,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1067",
-      "promotionStatus": "ci_passed_waiting_merge",
+      "promotionStatus": "merged",
       "backupState": "CLOSED",
       "closedAt": "2026-10-24T15:48:10Z",
       "prState": "CLOSED",
-      "closureReason": "Promoted as upstream #1067; exact head and all applicable CI verified. Source branch retained."
+      "closureReason": "Promoted as upstream #1067; exact head and all applicable CI verified. Source branch retained.",
+      "upstreamState": "MERGED",
+      "mergedAt": "2026-10-25T00:17:42Z",
+      "mergeCommit": "85ef669043ac4b65780ed51982d810385b9e1d20",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     {
       "id": "cache-version-metadata",
@@ -2202,10 +2240,14 @@
       "publishedHead": "68582a4c7ebd8912a78a6e9a5fcff4315dda03b2",
       "isDraft": true,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1063",
-      "promotionStatus": "ci_passed_waiting_merge",
+      "promotionStatus": "merged",
       "prState": "CLOSED",
       "closedAt": "2026-10-24T14:42:40Z",
-      "closureReason": "Promoted as upstream #1063; exact published head and all applicable CI verified. Source branch retained."
+      "closureReason": "Promoted as upstream #1063; exact published head and all applicable CI verified. Source branch retained.",
+      "upstreamState": "MERGED",
+      "mergedAt": "2026-10-25T00:19:20Z",
+      "mergeCommit": "1808d4173c4eb9076a65d866b1fecbe8b3adcbba",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     }
   ],
   "coverage": {
@@ -2306,8 +2348,12 @@
       "pr": 1064,
       "url": "https://github.com/duolahypercho/codex-router/pull/1064",
       "head": "b9e54fc6b201e68ab5212b279162434561dc8ee7",
-      "status": "ci_passed_waiting_merge",
-      "backupPr": 29
+      "status": "merged",
+      "backupPr": 29,
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:18:25Z",
+      "mergeCommit": "c826e459c9287809fd726bd678894bcafe2a4000",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     "generation-redirect": {
       "topic": "generation-redirect",
@@ -2315,23 +2361,32 @@
       "url": "https://github.com/duolahypercho/codex-router/pull/1065",
       "head": "3acbe3e752fd15bb1efd8c0c2e7ca1e972cd3c2b",
       "status": "ci_passed_waiting_merge",
-      "backupPr": 9
+      "backupPr": 9,
+      "prState": "OPEN"
     },
     "cache-version-metadata": {
       "topic": "cache-version-metadata",
       "pr": 1063,
       "url": "https://github.com/duolahypercho/codex-router/pull/1063",
       "head": "955645840771efbb0e689d395d753e9168143d19",
-      "status": "ci_passed_waiting_merge",
-      "backupPr": 31
+      "status": "merged",
+      "backupPr": 31,
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:19:20Z",
+      "mergeCommit": "1808d4173c4eb9076a65d866b1fecbe8b3adcbba",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     "retention-clock": {
       "topic": "retention-clock",
       "pr": 1067,
       "url": "https://github.com/duolahypercho/codex-router/pull/1067",
       "head": "2029173a65ab9a7dcc05cc028ee7086640ae82a8",
-      "status": "ci_passed_waiting_merge",
-      "backupPr": 30
+      "status": "merged",
+      "backupPr": 30,
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:17:42Z",
+      "mergeCommit": "85ef669043ac4b65780ed51982d810385b9e1d20",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     "manual-ci-scope": {
       "topic": "manual-ci-scope",
@@ -2339,69 +2394,131 @@
       "url": "https://github.com/duolahypercho/codex-router/pull/1068",
       "head": "3b29062c03c43721e4934e873b3596182e5f7e43",
       "status": "ci_passed_waiting_merge",
-      "backupPr": 27
+      "backupPr": 27,
+      "prState": "OPEN"
     },
     "direct-responses": {
       "topic": "direct-responses",
       "pr": 1069,
       "url": "https://github.com/duolahypercho/codex-router/pull/1069",
       "head": "aa3ea31c610a8953ec2050ed8a160a751d3bad00",
-      "status": "ci_passed_waiting_merge",
-      "backupPr": 11
+      "status": "merged",
+      "backupPr": 11,
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:41:14Z",
+      "mergeCommit": "186da4897d89a3957e5d22b31e0181678f414957",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     "private-writers/agent-catalog": {
       "topic": "private-writers/agent-catalog",
       "pr": 1070,
       "url": "https://github.com/duolahypercho/codex-router/pull/1070",
       "head": "cb4b66bafad935db4d9a56a392611b129ecbcdaa",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "backupPr": 24,
-      "sourceTopic": "private-writers"
+      "sourceTopic": "private-writers",
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:27:49Z",
+      "mergeCommit": "fabe3da9e18289a77d25bfc5758ee102bd80d6bd",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     "private-writers/model-selection": {
       "topic": "private-writers/model-selection",
       "pr": 1071,
       "url": "https://github.com/duolahypercho/codex-router/pull/1071",
       "head": "dbeb8885c3a1d20be7185867ec220563c6f251ed",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "backupPr": 24,
-      "sourceTopic": "private-writers"
+      "sourceTopic": "private-writers",
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:28:22Z",
+      "mergeCommit": "2fc35abd5363c43412c03279c9508f8b2560b01f",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     "private-writers/harness-documents": {
       "topic": "private-writers/harness-documents",
       "pr": 1072,
       "url": "https://github.com/duolahypercho/codex-router/pull/1072",
       "head": "58508b98d72c687252d32a41b488e7d649a7e705",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "backupPr": 24,
-      "sourceTopic": "private-writers"
+      "sourceTopic": "private-writers",
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:29:10Z",
+      "mergeCommit": "d224835e7d1fa110d27aefff5af2aa52e83bde9d",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     "private-writers/provider-state": {
       "topic": "private-writers/provider-state",
       "pr": 1073,
       "url": "https://github.com/duolahypercho/codex-router/pull/1073",
       "head": "150c03b8bbe09f635b04dcf620afe279ba7cd1f9",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "backupPr": 24,
-      "sourceTopic": "private-writers"
+      "sourceTopic": "private-writers",
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:29:53Z",
+      "mergeCommit": "04d35769dfaf1e733000f9cecf5eb6efd9cbb065",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     "private-writers/gateway-config": {
       "topic": "private-writers/gateway-config",
       "pr": 1074,
       "url": "https://github.com/duolahypercho/codex-router/pull/1074",
       "head": "3e6b1652b5e25b458ec11acf663acf0c6db12454",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "backupPr": 24,
-      "sourceTopic": "private-writers"
+      "sourceTopic": "private-writers",
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:30:43Z",
+      "mergeCommit": "9d014b1ec429a2b55a2d0c7cb9c09d9cae7c7c13",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     },
     "private-writers/native-source": {
       "topic": "private-writers/native-source",
       "pr": 1075,
       "url": "https://github.com/duolahypercho/codex-router/pull/1075",
       "head": "18adb21e8e8f7dca7baebe30781ab45e452ecf70",
-      "status": "ci_running",
+      "status": "merged",
       "backupPr": 24,
-      "sourceTopic": "private-writers"
+      "sourceTopic": "private-writers",
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:43:32Z",
+      "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+    },
+    "desktop-readback": {
+      "topic": "desktop-readback",
+      "pr": 1062,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1062",
+      "head": "90a52eeb01410dac63ec86ed279e16a1bc6fcaab",
+      "backupPr": 4,
+      "sourceTopic": "existing-tool-history",
+      "status": "merged",
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T00:47:20Z",
+      "mergeCommit": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
+      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
     }
+  },
+  "upstreamStateSnapshot": {
+    "verifiedMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
+    "merged": [
+      1062,
+      1063,
+      1064,
+      1067,
+      1069,
+      1070,
+      1071,
+      1072,
+      1073,
+      1074,
+      1075
+    ],
+    "open": [
+      1065,
+      1068
+    ]
   }
 }

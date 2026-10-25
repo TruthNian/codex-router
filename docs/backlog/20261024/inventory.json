@@ -1506,10 +1506,9 @@
         "src/legacy-migration.mjs",
         "src/provider-credential-store.mjs",
         "src/provider-credentials.mjs",
-        "src/secret.mjs",
         "src/service-windows.mjs"
       ],
-      "extractionNotes": "Six independently extracted consumers are merged. Ten remaining source-file candidates require explicit disposition: nine in the private-writers patch plus the Windows launcher writer retained in selected-services backup #12. Additional/transferred archive fragments retain their actual source and dependency boundaries. This is not a required-PR count.",
+      "extractionNotes": "Six independent consumers are merged; generated secrets submitted separately as #1079. Nine remaining source-file candidates require disposition, including Windows launcher fragments preserved in selected-services backup #12. Archive patches remain immutable; this is not a required-PR count.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -1588,6 +1587,33 @@
           "mergedAt": "2026-10-25T00:43:32Z",
           "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
           "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+        },
+        "secret_private_writer": {
+          "acceptance": {
+            "negativeBaseline": "verified: latest main fails both foreign-temporary preservation and 9-vs-3 Windows hardening oracles",
+            "fresh": "verified: three independent 48-byte base64url secrets plus newline and private before/following publication; one real Windows ACL helper each",
+            "existing": "verified: ensure/status keep exact valid key bytes, repair every existing file; one invalid key replaced while others unchanged",
+            "failures": "verified: write/close/ACL/rename/collision preserve old bytes; remove only owned temporaries; cleanup failure retained as diagnostic",
+            "repairFailure": "verified: real repair operation fault surfaces and all existing keys remain exact",
+            "statusMissing": "verified: no generation/ACL helpers; unchanged JSON shape, exit1",
+            "ci": "pending: Linux/macOS/Windows via upstream CI",
+            "regressionGuards": "verified: deliberately duplicate final repair and omit existing repair both fail intended external oracle; restored candidate byte-exact",
+            "adjacentTests": "verified: 42 pass, 1 Windows-inapplicable POSIX mode assertion skipped across secret CLI, file-security, caller rotation/auth command and secret-entry",
+            "syntax": "verified: scripts-check passed 7 applications, 134 changelog fragments, all syntax; tracked and untracked whitespace checked",
+            "review": "verified: all 12 final commit hunks reviewed; no shared helper/other source changes"
+          },
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "base": "7432b02d670dd7889696fc91971257a427016d34",
+          "mainAtPublication": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
+          "prState": "OPEN",
+          "backupState": "OPEN",
+          "topic": "private-writers/generated-secrets",
+          "pr": 1079,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1079",
+          "head": "c5549f0b9becaf6fefcdedf2c07274234f492ea7",
+          "status": "ci_running",
+          "backupPr": 24,
+          "sourceTopic": "private-writers"
         }
       },
       "promotionStatus": "partially_promoted",
@@ -2442,8 +2468,8 @@
       "upstreamPr": 1078,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1078",
       "upstreamHead": "149bd4d93c90291464bbb85e2167e6b142e980cd",
-      "upstreamState": "OPEN",
-      "promotionStatus": "ci_passed_waiting_merge",
+      "upstreamState": "MERGED",
+      "promotionStatus": "merged",
       "sourceBranchRetained": "feat/model-tool-aging-policy-20261023",
       "sourceHead": "530dc6c01312e861525e938e4e1649ae205d76fa",
       "adaptedBranch": "feat/per-model-history-policy-main-20261025",
@@ -2457,7 +2483,11 @@
         "review": "18/18 final hunks accepted; verify-review complete, unchanged boundary, no findings.",
         "syntax": "7 v2 applications, 134 changelog fragments, syntax and whitespace passed on final rebased head.",
         "ci": "Fresh applicable checks running on verified published head 149bd4d93c90291464bbb85e2167e6b142e980cd; initial 3 SUCCESS, 9 running, 2 conditional SKIPPED."
-      }
+      },
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T06:18:01Z",
+      "mergeCommit": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     }
   ],
   "alreadyUpstream": {
@@ -2527,7 +2557,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:18:25Z",
       "mergeCommit": "c826e459c9287809fd726bd678894bcafe2a4000",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "generation-redirect": {
       "topic": "generation-redirect",
@@ -2548,7 +2578,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:19:20Z",
       "mergeCommit": "1808d4173c4eb9076a65d866b1fecbe8b3adcbba",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "retention-clock": {
       "topic": "retention-clock",
@@ -2560,7 +2590,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:17:42Z",
       "mergeCommit": "85ef669043ac4b65780ed51982d810385b9e1d20",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "manual-ci-scope": {
       "topic": "manual-ci-scope",
@@ -2581,7 +2611,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:41:14Z",
       "mergeCommit": "186da4897d89a3957e5d22b31e0181678f414957",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "private-writers/agent-catalog": {
       "topic": "private-writers/agent-catalog",
@@ -2594,7 +2624,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:27:49Z",
       "mergeCommit": "fabe3da9e18289a77d25bfc5758ee102bd80d6bd",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "private-writers/model-selection": {
       "topic": "private-writers/model-selection",
@@ -2607,7 +2637,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:28:22Z",
       "mergeCommit": "2fc35abd5363c43412c03279c9508f8b2560b01f",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "private-writers/harness-documents": {
       "topic": "private-writers/harness-documents",
@@ -2620,7 +2650,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:10Z",
       "mergeCommit": "d224835e7d1fa110d27aefff5af2aa52e83bde9d",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "private-writers/provider-state": {
       "topic": "private-writers/provider-state",
@@ -2633,7 +2663,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:53Z",
       "mergeCommit": "04d35769dfaf1e733000f9cecf5eb6efd9cbb065",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "private-writers/gateway-config": {
       "topic": "private-writers/gateway-config",
@@ -2646,7 +2676,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:30:43Z",
       "mergeCommit": "9d014b1ec429a2b55a2d0c7cb9c09d9cae7c7c13",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "private-writers/native-source": {
       "topic": "private-writers/native-source",
@@ -2659,7 +2689,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:43:32Z",
       "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "desktop-readback": {
       "topic": "desktop-readback",
@@ -2672,7 +2702,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:47:20Z",
       "mergeCommit": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "scoped-archive-search": {
       "topic": "scoped-archive-search",
@@ -2685,7 +2715,7 @@
       "prState": "MERGED",
       "mergeCommit": "3ecc2d9b7681b88cde40778ad15ec5639f404444",
       "mergedAt": "2026-10-25T03:18:10Z",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "selected-services/runtime-hops": {
       "topic": "selected-services/runtime-hops",
@@ -2728,20 +2758,56 @@
       "prState": "MERGED",
       "mergeCommit": "7432b02d670dd7889696fc91971257a427016d34",
       "mergedAt": "2026-10-25T05:25:06Z",
-      "verifiedInMain": "7432b02d670dd7889696fc91971257a427016d34"
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     },
     "per-model-history-policy": {
       "topic": "per-model-history-policy",
       "pr": 1078,
       "url": "https://github.com/duolahypercho/codex-router/pull/1078",
       "head": "149bd4d93c90291464bbb85e2167e6b142e980cd",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "backupPr": 6,
-      "sourceTopic": "existing-tool-history"
+      "sourceTopic": "existing-tool-history",
+      "prState": "MERGED",
+      "mergedAt": "2026-10-25T06:18:01Z",
+      "mergeCommit": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
+      "ci": {
+        "SUCCESS": 12,
+        "SKIPPED": 2,
+        "pending": []
+      }
+    },
+    "private-writers/generated-secrets": {
+      "acceptance": {
+        "negativeBaseline": "verified: latest main fails both foreign-temporary preservation and 9-vs-3 Windows hardening oracles",
+        "fresh": "verified: three independent 48-byte base64url secrets plus newline and private before/following publication; one real Windows ACL helper each",
+        "existing": "verified: ensure/status keep exact valid key bytes, repair every existing file; one invalid key replaced while others unchanged",
+        "failures": "verified: write/close/ACL/rename/collision preserve old bytes; remove only owned temporaries; cleanup failure retained as diagnostic",
+        "repairFailure": "verified: real repair operation fault surfaces and all existing keys remain exact",
+        "statusMissing": "verified: no generation/ACL helpers; unchanged JSON shape, exit1",
+        "ci": "pending: Linux/macOS/Windows via upstream CI",
+        "regressionGuards": "verified: deliberately duplicate final repair and omit existing repair both fail intended external oracle; restored candidate byte-exact",
+        "adjacentTests": "verified: 42 pass, 1 Windows-inapplicable POSIX mode assertion skipped across secret CLI, file-security, caller rotation/auth command and secret-entry",
+        "syntax": "verified: scripts-check passed 7 applications, 134 changelog fragments, all syntax; tracked and untracked whitespace checked",
+        "review": "verified: all 12 final commit hunks reviewed; no shared helper/other source changes"
+      },
+      "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+      "base": "7432b02d670dd7889696fc91971257a427016d34",
+      "mainAtPublication": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
+      "prState": "OPEN",
+      "backupState": "OPEN",
+      "topic": "private-writers/generated-secrets",
+      "pr": 1079,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1079",
+      "head": "c5549f0b9becaf6fefcdedf2c07274234f492ea7",
+      "status": "ci_running",
+      "backupPr": 24,
+      "sourceTopic": "private-writers"
     }
   },
   "upstreamStateSnapshot": {
-    "verifiedMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444",
+    "verifiedMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
     "merged": [
       1062,
       1063,
@@ -2754,13 +2820,16 @@
       1073,
       1074,
       1075,
-      1076
+      1076,
+      1077,
+      1078
     ],
     "open": [
       1065,
-      1068
+      1068,
+      1079
     ],
-    "updatedAt": "2026-10-25T03:22:21.473421+00:00"
+    "updatedAt": "2026-10-25T06:20:33.649491+00:00"
   },
-  "verifiedMain": "7432b02d670dd7889696fc91971257a427016d34"
+  "verifiedMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
 }

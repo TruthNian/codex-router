@@ -2516,7 +2516,7 @@
         "desktopAndRetentionRegressions": "71 passed, no skips/failures across four unit/recovery/retention suites. Eight relevant source/test files are byte-identical after rebase onto latest main. Five real Router cases pass again on latest main.",
         "review": "18/18 final hunks accepted; verify-review complete, unchanged boundary, no findings.",
         "syntax": "7 v2 applications, 134 changelog fragments, syntax and whitespace passed on final rebased head.",
-        "ci": "Fresh applicable checks running on verified published head 149bd4d93c90291464bbb85e2167e6b142e980cd; initial 3 SUCCESS, 9 running, 2 conditional SKIPPED."
+        "ci": "12 SUCCESS and 2 conditional SKIPPED on exact head 149bd4d93c90291464bbb85e2167e6b142e980cd; actual MERGED at 06:18:01Z, merge commit in latest main."
       },
       "prState": "CLOSED",
       "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",

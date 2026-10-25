@@ -482,7 +482,7 @@
             "healthNegative": "503 with degraded=[antigravityOauth] reproduced before fixture wiring; selected Antigravity/Devin positive and unreachable controls pass; removing the Antigravity probe fails the new test.",
             "gatewayNegative": "Empty provider selection fails needsGateway assertion; a fresh-registry selected loopback AIML Chat plan is exactly api+gateway. Registry is loaded after persistence.",
             "affectedSuites": "The prior run passed all failover, resilience, routing and selected-runtime tests. Its only leaf failure was the new plan assertion reading a cached pre-mutation registry, corrected and separately verified with a fresh process.",
-            "localFullWindows": "in progress; one known local junction-copy EPERM before the tested onboarding command, reproduced separately. Physical test dependencies prepared for remediation after the active run finishes.",
+            "localFullWindows": "Running, not complete. One known junction-copy EPERM before onboarding logic; independently reproduced, and the same unchanged-source test passes in a physical checkout. activeLocalVerification preserves owned job identity and safe completion steps.",
             "review": "35/35 final PR hunks reviewed; verify-review complete, unchanged boundary, no findings.",
             "logs": [
               "selected-ci-health-negative.log",
@@ -493,7 +493,20 @@
               "selected-ci-repaired-tests.log",
               "selected-ci-full-windows.log",
               "selected-ci-onboarding-negative.log"
-            ]
+            ],
+            "localEnvironmentControl": "selected-ci-onboarding-physical-positive.log: one passed with physical node_modules, versus reproducible EPERM with the worktree Junction; runtime/source unchanged.",
+            "syntax": "node scripts-check.mjs passed on repair head: 7 v2 applications, 133 changelog fragments, syntax passed.",
+            "ciCheckpoint": {
+              "head": "625d95415ef175e73c6092eed7b7001982c05c11",
+              "checkedAt": "2026-10-25T04:50:43Z",
+              "success": 11,
+              "inProgress": [
+                "test (windows-latest)"
+              ],
+              "conditionalSkipped": 2,
+              "linuxMacFullNode": "SUCCESS",
+              "nativeMacApp": "SUCCESS"
+            }
           }
         }
       },
@@ -2658,7 +2671,7 @@
         "healthNegative": "503 with degraded=[antigravityOauth] reproduced before fixture wiring; selected Antigravity/Devin positive and unreachable controls pass; removing the Antigravity probe fails the new test.",
         "gatewayNegative": "Empty provider selection fails needsGateway assertion; a fresh-registry selected loopback AIML Chat plan is exactly api+gateway. Registry is loaded after persistence.",
         "affectedSuites": "The prior run passed all failover, resilience, routing and selected-runtime tests. Its only leaf failure was the new plan assertion reading a cached pre-mutation registry, corrected and separately verified with a fresh process.",
-        "localFullWindows": "in progress; one known local junction-copy EPERM before the tested onboarding command, reproduced separately. Physical test dependencies prepared for remediation after the active run finishes.",
+        "localFullWindows": "Running, not complete. One known junction-copy EPERM before onboarding logic; independently reproduced, and the same unchanged-source test passes in a physical checkout. activeLocalVerification preserves owned job identity and safe completion steps.",
         "review": "35/35 final PR hunks reviewed; verify-review complete, unchanged boundary, no findings.",
         "logs": [
           "selected-ci-health-negative.log",
@@ -2669,7 +2682,20 @@
           "selected-ci-repaired-tests.log",
           "selected-ci-full-windows.log",
           "selected-ci-onboarding-negative.log"
-        ]
+        ],
+        "localEnvironmentControl": "selected-ci-onboarding-physical-positive.log: one passed with physical node_modules, versus reproducible EPERM with the worktree Junction; runtime/source unchanged.",
+        "syntax": "node scripts-check.mjs passed on repair head: 7 v2 applications, 133 changelog fragments, syntax passed.",
+        "ciCheckpoint": {
+          "head": "625d95415ef175e73c6092eed7b7001982c05c11",
+          "checkedAt": "2026-10-25T04:50:43Z",
+          "success": 11,
+          "inProgress": [
+            "test (windows-latest)"
+          ],
+          "conditionalSkipped": 2,
+          "linuxMacFullNode": "SUCCESS",
+          "nativeMacApp": "SUCCESS"
+        }
       }
     }
   },

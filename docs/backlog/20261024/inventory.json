@@ -1658,7 +1658,7 @@
             "readers": "verified: provider-bound references resolve the exact new value, reject wrong target/provider, obey discovery off/on; stdout/stderr leak detector independently proven against injected synthetic leak",
             "broader": "verified: 73 pass, 3 platform skips: six full adjacent suites (68/3) plus five credential-store integration cases; remaining full platform suite is CI-pending",
             "review": "verified: all six final hunks reviewed, no findings; manifest verifier confirms unchanged boundary",
-            "ci": "3 SUCCESS, 6 running and 2 conditional SKIPPED on exact published head; no next PR until all applicable CI succeeds.",
+            "ci": "9 SUCCESS and 2 conditional SKIPPED on exact head 9161a34fad09c1cdf010a11ca4a3882d8b41dde4; OPEN, not merged.",
             "validationEnvironment": "verified: unchanged main reproduces Vertex ADC assertion only under forced CODEX_ROUTER_NO_DISCOVERY=0; passes with clean inherited policy. Harness override removed, failure evidence retained.",
             "oracleControls": "verified: skipping hardening fails before rename; an injected synthetic stderr leak fails output-redaction oracle for both identities. Candidate restored byte-exact.",
             "syntax": "verified: full check passed on new base: 7 applications, 136 fragments, all source/test syntax; final prose-only fragment refinement revalidated separately",
@@ -1666,22 +1666,14 @@
             "rebasedFocused": "verified: all 17 pass again on rebased source, no skips/failures"
           },
           "ciCheckpoint": {
-            "checkedAt": "2026-10-25T07:39:00.219104+00:00",
+            "checkedAt": "2026-10-25T08:14:41.897756+00:00",
             "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
+            "state": "OPEN",
             "counts": {
-              "PENDING": 6,
-              "SUCCESS": 3,
+              "SUCCESS": 9,
               "SKIPPED": 2
             },
-            "pending": [
-              "test (ubuntu-latest)",
-              "test (macos-latest)",
-              "test (windows-latest)",
-              "Electron control center (Linux)",
-              "Electron control center (Windows)",
-              "Unified native macOS app"
-            ],
-            "state": "OPEN",
+            "pending": [],
             "comments": 0,
             "reviews": 0
           },
@@ -1704,7 +1696,7 @@
           "pr": 1080,
           "url": "https://github.com/duolahypercho/codex-router/pull/1080",
           "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
-          "status": "ci_running",
+          "status": "ci_passed_waiting_merge",
           "backupPr": 24,
           "sourceTopic": "private-writers"
         }
@@ -2942,7 +2934,7 @@
         "readers": "verified: provider-bound references resolve the exact new value, reject wrong target/provider, obey discovery off/on; stdout/stderr leak detector independently proven against injected synthetic leak",
         "broader": "verified: 73 pass, 3 platform skips: six full adjacent suites (68/3) plus five credential-store integration cases; remaining full platform suite is CI-pending",
         "review": "verified: all six final hunks reviewed, no findings; manifest verifier confirms unchanged boundary",
-        "ci": "3 SUCCESS, 6 running and 2 conditional SKIPPED on exact published head; no next PR until all applicable CI succeeds.",
+        "ci": "9 SUCCESS and 2 conditional SKIPPED on exact head 9161a34fad09c1cdf010a11ca4a3882d8b41dde4; OPEN, not merged.",
         "validationEnvironment": "verified: unchanged main reproduces Vertex ADC assertion only under forced CODEX_ROUTER_NO_DISCOVERY=0; passes with clean inherited policy. Harness override removed, failure evidence retained.",
         "oracleControls": "verified: skipping hardening fails before rename; an injected synthetic stderr leak fails output-redaction oracle for both identities. Candidate restored byte-exact.",
         "syntax": "verified: full check passed on new base: 7 applications, 136 fragments, all source/test syntax; final prose-only fragment refinement revalidated separately",
@@ -2950,22 +2942,14 @@
         "rebasedFocused": "verified: all 17 pass again on rebased source, no skips/failures"
       },
       "ciCheckpoint": {
-        "checkedAt": "2026-10-25T07:39:00.219104+00:00",
+        "checkedAt": "2026-10-25T08:14:41.897756+00:00",
         "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
+        "state": "OPEN",
         "counts": {
-          "PENDING": 6,
-          "SUCCESS": 3,
+          "SUCCESS": 9,
           "SKIPPED": 2
         },
-        "pending": [
-          "test (ubuntu-latest)",
-          "test (macos-latest)",
-          "test (windows-latest)",
-          "Electron control center (Linux)",
-          "Electron control center (Windows)",
-          "Unified native macOS app"
-        ],
-        "state": "OPEN",
+        "pending": [],
         "comments": 0,
         "reviews": 0
       },
@@ -2988,7 +2972,7 @@
       "pr": 1080,
       "url": "https://github.com/duolahypercho/codex-router/pull/1080",
       "head": "9161a34fad09c1cdf010a11ca4a3882d8b41dde4",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 24,
       "sourceTopic": "private-writers"
     }

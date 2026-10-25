@@ -112,7 +112,7 @@ Keep this inventory available until every item has an explicit disposition.
 | selected-services/runtime-hops | [#1077](https://github.com/duolahypercho/codex-router/pull/1077) | `625d95415ef175e73c6092eed7b7001982c05c11` | merged |
 | per-model-history-policy | [#1078](https://github.com/duolahypercho/codex-router/pull/1078) | `149bd4d93c90291464bbb85e2167e6b142e980cd` | merged |
 | private-writers/generated-secrets | [#1079](https://github.com/duolahypercho/codex-router/pull/1079) | `c5549f0b9becaf6fefcdedf2c07274234f492ea7` | merged |
-| private-writers/provider-credentials | [#1080](https://github.com/duolahypercho/codex-router/pull/1080) | `9161a34fad09c1cdf010a11ca4a3882d8b41dde4` | ci_running |
+| private-writers/provider-credentials | [#1080](https://github.com/duolahypercho/codex-router/pull/1080) | `9161a34fad09c1cdf010a11ca4a3882d8b41dde4` | ci_passed_waiting_merge |
 
 **Partial topic `selected-services`:** backup #12 remains open for the remaining work. Individual parts above do not complete this topic. `remainingBoundaries` and `upstreamParts` in inventory.json preserve the extraction boundary.
 

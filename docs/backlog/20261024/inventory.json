@@ -2518,10 +2518,10 @@
         "syntax": "7 v2 applications, 134 changelog fragments, syntax and whitespace passed on final rebased head.",
         "ci": "Fresh applicable checks running on verified published head 149bd4d93c90291464bbb85e2167e6b142e980cd; initial 3 SUCCESS, 9 running, 2 conditional SKIPPED."
       },
-      "prState": "MERGED",
-      "mergedAt": "2026-10-25T06:18:01Z",
-      "mergeCommit": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
-      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
+      "prState": "CLOSED",
+      "verifiedInMain": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
+      "upstreamMergedAt": "2026-10-25T06:18:01Z",
+      "upstreamMergeCommit": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d"
     }
   ],
   "alreadyUpstream": {

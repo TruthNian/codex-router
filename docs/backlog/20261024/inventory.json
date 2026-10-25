@@ -1596,7 +1596,7 @@
             "failures": "verified: write/close/ACL/rename/collision preserve old bytes; remove only owned temporaries; cleanup failure retained as diagnostic",
             "repairFailure": "verified: real repair operation fault surfaces and all existing keys remain exact",
             "statusMissing": "verified: no generation/ACL helpers; unchanged JSON shape, exit1",
-            "ci": "{'PENDING': 5, 'SUCCESS': 4, 'SKIPPED': 2}; exact published head; waiting for all applicable checks.",
+            "ci": "9 SUCCESS and 2 conditional SKIPPED on exact head c5549f0b9becaf6fefcdedf2c07274234f492ea7; OPEN, not merged.",
             "regressionGuards": "verified: deliberately duplicate final repair and omit existing repair both fail intended external oracle; restored candidate byte-exact",
             "adjacentTests": "verified: 42 pass, 1 Windows-inapplicable POSIX mode assertion skipped across secret CLI, file-security, caller rotation/auth command and secret-entry",
             "syntax": "verified: scripts-check passed 7 applications, 134 changelog fragments, all syntax; tracked and untracked whitespace checked",
@@ -1611,25 +1611,18 @@
           "pr": 1079,
           "url": "https://github.com/duolahypercho/codex-router/pull/1079",
           "head": "c5549f0b9becaf6fefcdedf2c07274234f492ea7",
-          "status": "ci_running",
+          "status": "ci_passed_waiting_merge",
           "backupPr": 24,
           "sourceTopic": "private-writers",
           "ciCheckpoint": {
-            "checkedAt": "2026-10-25T06:21:12.513621+00:00",
+            "checkedAt": "2026-10-25T07:11:32.522873+00:00",
             "head": "c5549f0b9becaf6fefcdedf2c07274234f492ea7",
             "state": "OPEN",
             "counts": {
-              "PENDING": 5,
-              "SUCCESS": 4,
+              "SUCCESS": 9,
               "SKIPPED": 2
             },
-            "pending": [
-              "test (ubuntu-latest)",
-              "test (macos-latest)",
-              "test (windows-latest)",
-              "Electron control center (Windows)",
-              "Unified native macOS app"
-            ],
+            "pending": [],
             "comments": 0,
             "reviews": 0
           },
@@ -2820,7 +2813,7 @@
         "failures": "verified: write/close/ACL/rename/collision preserve old bytes; remove only owned temporaries; cleanup failure retained as diagnostic",
         "repairFailure": "verified: real repair operation fault surfaces and all existing keys remain exact",
         "statusMissing": "verified: no generation/ACL helpers; unchanged JSON shape, exit1",
-        "ci": "{'PENDING': 5, 'SUCCESS': 4, 'SKIPPED': 2}; exact published head; waiting for all applicable checks.",
+        "ci": "9 SUCCESS and 2 conditional SKIPPED on exact head c5549f0b9becaf6fefcdedf2c07274234f492ea7; OPEN, not merged.",
         "regressionGuards": "verified: deliberately duplicate final repair and omit existing repair both fail intended external oracle; restored candidate byte-exact",
         "adjacentTests": "verified: 42 pass, 1 Windows-inapplicable POSIX mode assertion skipped across secret CLI, file-security, caller rotation/auth command and secret-entry",
         "syntax": "verified: scripts-check passed 7 applications, 134 changelog fragments, all syntax; tracked and untracked whitespace checked",
@@ -2835,25 +2828,18 @@
       "pr": 1079,
       "url": "https://github.com/duolahypercho/codex-router/pull/1079",
       "head": "c5549f0b9becaf6fefcdedf2c07274234f492ea7",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 24,
       "sourceTopic": "private-writers",
       "ciCheckpoint": {
-        "checkedAt": "2026-10-25T06:21:12.513621+00:00",
+        "checkedAt": "2026-10-25T07:11:32.522873+00:00",
         "head": "c5549f0b9becaf6fefcdedf2c07274234f492ea7",
         "state": "OPEN",
         "counts": {
-          "PENDING": 5,
-          "SUCCESS": 4,
+          "SUCCESS": 9,
           "SKIPPED": 2
         },
-        "pending": [
-          "test (ubuntu-latest)",
-          "test (macos-latest)",
-          "test (windows-latest)",
-          "Electron control center (Windows)",
-          "Unified native macOS app"
-        ],
+        "pending": [],
         "comments": 0,
         "reviews": 0
       },

@@ -2405,7 +2405,12 @@
       "state": "CLOSED",
       "closedAt": "2026-10-24T14:42:36Z",
       "upstreamHead": "90a52eeb01410dac63ec86ed279e16a1bc6fcaab",
-      "ci": "9 SUCCESS, 2 conditional SKIPPED; exact published head verified before closing backup"
+      "ci": "9 SUCCESS, 2 conditional SKIPPED; exact published head verified before closing backup",
+      "promotionStatus": "merged",
+      "upstreamState": "MERGED",
+      "mergeCommit": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
+      "mergedAt": "2026-10-25T00:47:20Z",
+      "verifiedInMain": "7432b02d670dd7889696fc91971257a427016d34"
     },
     {
       "number": 5,
@@ -2419,11 +2424,11 @@
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1076",
       "upstreamHead": "8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376",
       "ci": "9 SUCCESS and 2 conditional SKIPPED on exact published head 8ea5f215ab6d6ed3d93bb24d9b0a3d12e66b0376; MERGED and verified in main 3ecc2d9b7681b88cde40778ad15ec5639f404444",
-      "promotionStatus": "ci_passed_waiting_merge",
+      "promotionStatus": "merged",
       "upstreamState": "MERGED",
       "mergeCommit": "3ecc2d9b7681b88cde40778ad15ec5639f404444",
       "mergedAt": "2026-10-25T03:18:10Z",
-      "verifiedInMain": "3ecc2d9b7681b88cde40778ad15ec5639f404444"
+      "verifiedInMain": "7432b02d670dd7889696fc91971257a427016d34"
     },
     {
       "number": 6,
@@ -2431,7 +2436,28 @@
       "dependsOnMerged": [
         "desktop readback",
         "scope search"
-      ]
+      ],
+      "state": "CLOSED",
+      "closedAt": "2026-10-25T05:37:25Z",
+      "upstreamPr": 1078,
+      "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1078",
+      "upstreamHead": "149bd4d93c90291464bbb85e2167e6b142e980cd",
+      "upstreamState": "OPEN",
+      "promotionStatus": "ci_running",
+      "sourceBranchRetained": "feat/model-tool-aging-policy-20261023",
+      "sourceHead": "530dc6c01312e861525e938e4e1649ae205d76fa",
+      "adaptedBranch": "feat/per-model-history-policy-main-20261025",
+      "acceptance": {
+        "mainNegative": "Latest main does not apply 16KiB policy or notice; exact same Router test fails the intended behavior assertion.",
+        "perModelIsolation": "Verified: selected route uses 16KiB and signed wrapped readback; unrelated route retains 32KiB, native remains opt-in and newest frontier remains exact. Removing selected-route options fails the integration test.",
+        "storageAndPermissions": "Verified with real private Windows file operations: full original on absent tools, injected write failure, failed permission, corrupt/expired store, contention and unverified readback. No original command is replayed.",
+        "failedAndUnverifiedReceipts": "Reproduced original notice-loop error. Fixed gate uses existing verifier for that completed reader output: error/malformed/forged/expired/cross-scope receipts suppress optional probes without omitting bytes.",
+        "smallSavings": "Verified: independent write counters stay zero below planned 128KiB; removing guard increments the counter and fails. Default fallback still recovers large results and preserves medium ones.",
+        "desktopAndRetentionRegressions": "71 passed, no skips/failures across four unit/recovery/retention suites. Eight relevant source/test files are byte-identical after rebase onto latest main. Five real Router cases pass again on latest main.",
+        "review": "18/18 final hunks accepted; verify-review complete, unchanged boundary, no findings.",
+        "syntax": "7 v2 applications, 134 changelog fragments, syntax and whitespace passed on final rebased head.",
+        "ci": "Fresh applicable checks running on verified published head 149bd4d93c90291464bbb85e2167e6b142e980cd; initial 3 SUCCESS, 9 running, 2 conditional SKIPPED."
+      }
     }
   ],
   "alreadyUpstream": {
@@ -2703,6 +2729,15 @@
       "mergeCommit": "7432b02d670dd7889696fc91971257a427016d34",
       "mergedAt": "2026-10-25T05:25:06Z",
       "verifiedInMain": "7432b02d670dd7889696fc91971257a427016d34"
+    },
+    "per-model-history-policy": {
+      "topic": "per-model-history-policy",
+      "pr": 1078,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1078",
+      "head": "149bd4d93c90291464bbb85e2167e6b142e980cd",
+      "status": "ci_running",
+      "backupPr": 6,
+      "sourceTopic": "existing-tool-history"
     }
   },
   "upstreamStateSnapshot": {

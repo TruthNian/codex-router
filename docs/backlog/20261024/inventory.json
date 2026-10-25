@@ -474,7 +474,7 @@
           "pr": 1077,
           "url": "https://github.com/duolahypercho/codex-router/pull/1077",
           "head": "625d95415ef175e73c6092eed7b7001982c05c11",
-          "status": "ci_passed_waiting_merge",
+          "status": "merged",
           "backupPr": 12,
           "sourceTopic": "selected-services",
           "ciRepair": {
@@ -506,7 +506,11 @@
               "nativeMacApp": "SUCCESS"
             },
             "localDependencyRemediation": "Automatic approval review rejected replacing the old development-worktree Junction, with no detailed reason. It remains untouched. New extraction worktrees will use physical dependencies from the outset."
-          }
+          },
+          "prState": "MERGED",
+          "mergeCommit": "7432b02d670dd7889696fc91971257a427016d34",
+          "mergedAt": "2026-10-25T05:25:06Z",
+          "verifiedInMain": "7432b02d670dd7889696fc91971257a427016d34"
         }
       },
       "promotionStatus": "partially_promoted"
@@ -2662,7 +2666,7 @@
       "pr": 1077,
       "url": "https://github.com/duolahypercho/codex-router/pull/1077",
       "head": "625d95415ef175e73c6092eed7b7001982c05c11",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "backupPr": 12,
       "sourceTopic": "selected-services",
       "ciRepair": {
@@ -2694,7 +2698,11 @@
           "nativeMacApp": "SUCCESS"
         },
         "localDependencyRemediation": "Automatic approval review rejected replacing the old development-worktree Junction, with no detailed reason. It remains untouched. New extraction worktrees will use physical dependencies from the outset."
-      }
+      },
+      "prState": "MERGED",
+      "mergeCommit": "7432b02d670dd7889696fc91971257a427016d34",
+      "mergedAt": "2026-10-25T05:25:06Z",
+      "verifiedInMain": "7432b02d670dd7889696fc91971257a427016d34"
     }
   },
   "upstreamStateSnapshot": {
@@ -2718,5 +2726,6 @@
       1068
     ],
     "updatedAt": "2026-10-25T03:22:21.473421+00:00"
-  }
+  },
+  "verifiedMain": "7432b02d670dd7889696fc91971257a427016d34"
 }

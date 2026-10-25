@@ -96,7 +96,7 @@ Keep this inventory available until every item has an explicit disposition.
 | Topic | Upstream PR | Exact published head | Status |
 |---|---|---|---|
 | catalog-fixture-isolation | [#1064](https://github.com/duolahypercho/codex-router/pull/1064) | `b9e54fc6b201e68ab5212b279162434561dc8ee7` | merged |
-| generation-redirect | [#1065](https://github.com/duolahypercho/codex-router/pull/1065) | `72a2c3e010812ff210eacf923cbf77b805c47176` | ci_running |
+| generation-redirect | [#1065](https://github.com/duolahypercho/codex-router/pull/1065) | `72a2c3e010812ff210eacf923cbf77b805c47176` | ci_passed_waiting_merge |
 | cache-version-metadata | [#1063](https://github.com/duolahypercho/codex-router/pull/1063) | `955645840771efbb0e689d395d753e9168143d19` | merged |
 | retention-clock | [#1067](https://github.com/duolahypercho/codex-router/pull/1067) | `2029173a65ab9a7dcc05cc028ee7086640ae82a8` | merged |
 | manual-ci-scope | [#1068](https://github.com/duolahypercho/codex-router/pull/1068) | `3b29062c03c43721e4934e873b3596182e5f7e43` | ci_passed_waiting_merge |

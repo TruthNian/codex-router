@@ -118,7 +118,7 @@
       "isDraft": true,
       "upstreamPr": 1065,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1065",
-      "promotionStatus": "ci_running",
+      "promotionStatus": "ci_passed_waiting_merge",
       "backupState": "CLOSED",
       "closedAt": "2026-10-24T15:16:20Z",
       "prState": "CLOSED",
@@ -2360,7 +2360,7 @@
       "pr": 1065,
       "url": "https://github.com/duolahypercho/codex-router/pull/1065",
       "head": "72a2c3e010812ff210eacf923cbf77b805c47176",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 9,
       "prState": "OPEN"
     },

@@ -2443,7 +2443,7 @@
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1078",
       "upstreamHead": "149bd4d93c90291464bbb85e2167e6b142e980cd",
       "upstreamState": "OPEN",
-      "promotionStatus": "ci_running",
+      "promotionStatus": "ci_passed_waiting_merge",
       "sourceBranchRetained": "feat/model-tool-aging-policy-20261023",
       "sourceHead": "530dc6c01312e861525e938e4e1649ae205d76fa",
       "adaptedBranch": "feat/per-model-history-policy-main-20261025",
@@ -2735,7 +2735,7 @@
       "pr": 1078,
       "url": "https://github.com/duolahypercho/codex-router/pull/1078",
       "head": "149bd4d93c90291464bbb85e2167e6b142e980cd",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 6,
       "sourceTopic": "existing-tool-history"
     }

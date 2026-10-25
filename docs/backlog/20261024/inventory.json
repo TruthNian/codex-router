@@ -118,7 +118,7 @@
       "isDraft": true,
       "upstreamPr": 1065,
       "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1065",
-      "promotionStatus": "ci_passed_waiting_merge",
+      "promotionStatus": "ci_running",
       "backupState": "CLOSED",
       "closedAt": "2026-10-24T15:16:20Z",
       "prState": "CLOSED",
@@ -303,7 +303,7 @@
       "upstreamState": "MERGED",
       "mergedAt": "2026-10-25T00:41:14Z",
       "mergeCommit": "186da4897d89a3957e5d22b31e0181678f414957",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     {
       "id": "selected-services",
@@ -1405,7 +1405,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:27:49Z",
           "mergeCommit": "fabe3da9e18289a77d25bfc5758ee102bd80d6bd",
-          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
         },
         "model_selection_private_writers": {
           "topic": "private-writers/model-selection",
@@ -1418,7 +1418,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:28:22Z",
           "mergeCommit": "2fc35abd5363c43412c03279c9508f8b2560b01f",
-          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
         },
         "harness_document_private_writers": {
           "topic": "private-writers/harness-documents",
@@ -1431,7 +1431,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:29:10Z",
           "mergeCommit": "d224835e7d1fa110d27aefff5af2aa52e83bde9d",
-          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
         },
         "provider_state_private_writers": {
           "topic": "private-writers/provider-state",
@@ -1444,7 +1444,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:29:53Z",
           "mergeCommit": "04d35769dfaf1e733000f9cecf5eb6efd9cbb065",
-          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
         },
         "gateway_config_private_writer": {
           "topic": "private-writers/gateway-config",
@@ -1457,7 +1457,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:30:43Z",
           "mergeCommit": "9d014b1ec429a2b55a2d0c7cb9c09d9cae7c7c13",
-          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
         },
         "native_source_private_writer": {
           "topic": "private-writers/native-source",
@@ -1470,7 +1470,7 @@
           "prState": "MERGED",
           "mergedAt": "2026-10-25T00:43:32Z",
           "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
-          "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+          "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
         }
       },
       "promotionStatus": "partially_promoted",
@@ -2178,7 +2178,7 @@
       "upstreamState": "MERGED",
       "mergedAt": "2026-10-25T00:18:25Z",
       "mergeCommit": "c826e459c9287809fd726bd678894bcafe2a4000",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     {
       "id": "retention-clock",
@@ -2212,7 +2212,7 @@
       "upstreamState": "MERGED",
       "mergedAt": "2026-10-25T00:17:42Z",
       "mergeCommit": "85ef669043ac4b65780ed51982d810385b9e1d20",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     {
       "id": "cache-version-metadata",
@@ -2247,7 +2247,7 @@
       "upstreamState": "MERGED",
       "mergedAt": "2026-10-25T00:19:20Z",
       "mergeCommit": "1808d4173c4eb9076a65d866b1fecbe8b3adcbba",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     }
   ],
   "coverage": {
@@ -2353,14 +2353,14 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:18:25Z",
       "mergeCommit": "c826e459c9287809fd726bd678894bcafe2a4000",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     "generation-redirect": {
       "topic": "generation-redirect",
       "pr": 1065,
       "url": "https://github.com/duolahypercho/codex-router/pull/1065",
-      "head": "3acbe3e752fd15bb1efd8c0c2e7ca1e972cd3c2b",
-      "status": "ci_passed_waiting_merge",
+      "head": "72a2c3e010812ff210eacf923cbf77b805c47176",
+      "status": "ci_running",
       "backupPr": 9,
       "prState": "OPEN"
     },
@@ -2374,7 +2374,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:19:20Z",
       "mergeCommit": "1808d4173c4eb9076a65d866b1fecbe8b3adcbba",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     "retention-clock": {
       "topic": "retention-clock",
@@ -2386,7 +2386,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:17:42Z",
       "mergeCommit": "85ef669043ac4b65780ed51982d810385b9e1d20",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     "manual-ci-scope": {
       "topic": "manual-ci-scope",
@@ -2407,7 +2407,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:41:14Z",
       "mergeCommit": "186da4897d89a3957e5d22b31e0181678f414957",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     "private-writers/agent-catalog": {
       "topic": "private-writers/agent-catalog",
@@ -2420,7 +2420,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:27:49Z",
       "mergeCommit": "fabe3da9e18289a77d25bfc5758ee102bd80d6bd",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     "private-writers/model-selection": {
       "topic": "private-writers/model-selection",
@@ -2433,7 +2433,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:28:22Z",
       "mergeCommit": "2fc35abd5363c43412c03279c9508f8b2560b01f",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     "private-writers/harness-documents": {
       "topic": "private-writers/harness-documents",
@@ -2446,7 +2446,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:10Z",
       "mergeCommit": "d224835e7d1fa110d27aefff5af2aa52e83bde9d",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     "private-writers/provider-state": {
       "topic": "private-writers/provider-state",
@@ -2459,7 +2459,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:53Z",
       "mergeCommit": "04d35769dfaf1e733000f9cecf5eb6efd9cbb065",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     "private-writers/gateway-config": {
       "topic": "private-writers/gateway-config",
@@ -2472,7 +2472,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:30:43Z",
       "mergeCommit": "9d014b1ec429a2b55a2d0c7cb9c09d9cae7c7c13",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     "private-writers/native-source": {
       "topic": "private-writers/native-source",
@@ -2485,7 +2485,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:43:32Z",
       "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     },
     "desktop-readback": {
       "topic": "desktop-readback",
@@ -2498,11 +2498,11 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:47:20Z",
       "mergeCommit": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
-      "verifiedInMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00"
+      "verifiedInMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9"
     }
   },
   "upstreamStateSnapshot": {
-    "verifiedMain": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
+    "verifiedMain": "44cc7b0bf2cac42c16e302f0c5a28bdb40e8c6c9",
     "merged": [
       1062,
       1063,

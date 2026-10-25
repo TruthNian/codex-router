@@ -1707,7 +1707,7 @@
           "pr": 1081,
           "url": "https://github.com/duolahypercho/codex-router/pull/1081",
           "head": "b235ed65ed6159cc5874818aba32a1ebdc02e68a",
-          "status": "ci_running",
+          "status": "ci_passed_waiting_merge",
           "backupPr": 24,
           "sourceTopic": "private-writers",
           "base": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
@@ -1723,28 +1723,20 @@
             "isolation": "verified: synthetic homes, stubbed Codex version/catalog/auth and empty Keychain; actual ACL operations only on owned fixture paths. Deliberate outside read is blocked and detected; synthetic stderr leak fails output assertion. No network or production service operations.",
             "broader": "verified: 123 pass / 1 Windows-inapplicable POSIX assertion skipped across focused and six adjacent suites. Rebased publication and rollback smoke cases also pass; eighteen relevant inputs are byte-identical.",
             "review": "verified: all seven final hunks reviewed with no findings; manifest verifier confirms unchanged boundary",
-            "ci": "3 SUCCESS, 6 running and 2 conditional SKIPPED on exact published head; no next PR until all applicable checks succeed.",
+            "ci": "9 SUCCESS and 2 conditional SKIPPED on exact published head b235ed65ed6159cc5874818aba32a1ebdc02e68a; OPEN, not merged.",
             "rebase": "verified: 18 source/helper/test blobs unchanged; only merged #1080 added. Its changed credential writer is not called by these fixtures and credential readers are unchanged. Main catalog module exactly matches the reproduced baseline.",
             "oracleControls": "verified: baseline collisions/ACL counts and deliberately skipped hardening/restoration, stderr leak and outside-root read all fail their intended assertions; candidate restored byte-exact",
             "syntax": "verified on final rebased head: 7 applications, 137 changelog fragments and all source/test syntax; tracked and new-file whitespace checked"
           },
           "ciCheckpoint": {
-            "checkedAt": "2026-10-25T08:40:19.489186+00:00",
+            "checkedAt": "2026-10-25T09:19:58.438023+00:00",
             "head": "b235ed65ed6159cc5874818aba32a1ebdc02e68a",
             "state": "OPEN",
             "counts": {
-              "PENDING": 6,
-              "SUCCESS": 3,
+              "SUCCESS": 9,
               "SKIPPED": 2
             },
-            "pending": [
-              "test (ubuntu-latest)",
-              "test (macos-latest)",
-              "test (windows-latest)",
-              "Electron control center (Linux)",
-              "Electron control center (Windows)",
-              "Unified native macOS app"
-            ],
+            "pending": [],
             "comments": 0,
             "reviews": 0
           },
@@ -3048,7 +3040,7 @@
       "pr": 1081,
       "url": "https://github.com/duolahypercho/codex-router/pull/1081",
       "head": "b235ed65ed6159cc5874818aba32a1ebdc02e68a",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "backupPr": 24,
       "sourceTopic": "private-writers",
       "base": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
@@ -3064,28 +3056,20 @@
         "isolation": "verified: synthetic homes, stubbed Codex version/catalog/auth and empty Keychain; actual ACL operations only on owned fixture paths. Deliberate outside read is blocked and detected; synthetic stderr leak fails output assertion. No network or production service operations.",
         "broader": "verified: 123 pass / 1 Windows-inapplicable POSIX assertion skipped across focused and six adjacent suites. Rebased publication and rollback smoke cases also pass; eighteen relevant inputs are byte-identical.",
         "review": "verified: all seven final hunks reviewed with no findings; manifest verifier confirms unchanged boundary",
-        "ci": "3 SUCCESS, 6 running and 2 conditional SKIPPED on exact published head; no next PR until all applicable checks succeed.",
+        "ci": "9 SUCCESS and 2 conditional SKIPPED on exact published head b235ed65ed6159cc5874818aba32a1ebdc02e68a; OPEN, not merged.",
         "rebase": "verified: 18 source/helper/test blobs unchanged; only merged #1080 added. Its changed credential writer is not called by these fixtures and credential readers are unchanged. Main catalog module exactly matches the reproduced baseline.",
         "oracleControls": "verified: baseline collisions/ACL counts and deliberately skipped hardening/restoration, stderr leak and outside-root read all fail their intended assertions; candidate restored byte-exact",
         "syntax": "verified on final rebased head: 7 applications, 137 changelog fragments and all source/test syntax; tracked and new-file whitespace checked"
       },
       "ciCheckpoint": {
-        "checkedAt": "2026-10-25T08:40:19.489186+00:00",
+        "checkedAt": "2026-10-25T09:19:58.438023+00:00",
         "head": "b235ed65ed6159cc5874818aba32a1ebdc02e68a",
         "state": "OPEN",
         "counts": {
-          "PENDING": 6,
-          "SUCCESS": 3,
+          "SUCCESS": 9,
           "SKIPPED": 2
         },
-        "pending": [
-          "test (ubuntu-latest)",
-          "test (macos-latest)",
-          "test (windows-latest)",
-          "Electron control center (Linux)",
-          "Electron control center (Windows)",
-          "Unified native macOS app"
-        ],
+        "pending": [],
         "comments": 0,
         "reviews": 0
       },

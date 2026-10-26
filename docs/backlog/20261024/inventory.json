@@ -466,7 +466,7 @@
           "notes": "The old archive assigned these adjacent imports/writeAtomic hunks to selected-services. They consolidate launcher writes on writePrivateFile and are excluded from runtime-hop selection. Preserve the immutable source patch; independently test encoding, ACL and collision ownership before proposing.",
           "upstreamPr": 1083,
           "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1083",
-          "upstreamHead": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+          "upstreamHead": "23429ec0cdc45ab5444e1caad75b74965a1acf52"
         }
       ],
       "backupState": "OPEN",
@@ -518,7 +518,7 @@
         "windows_launcher_private_writer": {
           "id": "windows_launcher_private_writer",
           "status": "ci_running",
-          "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+          "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
           "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
           "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
           "branch": "fix/windows-launcher-private-writer-20261026",
@@ -541,58 +541,61 @@
             "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
             "adjacent": "verified: 15 focused and 47 adjacent pass; 23 POSIX/stub assertions skip on Windows; real UTF-16 VBS exit forwarding case also passes",
             "review": "verified: 6/6 final hunks accepted, no findings, unchanged boundary; full check 7 apps / 138 fragments and whitespace pass; final added assertion syntax verified",
-            "ci": "Running on exact published head; next submission requires every applicable check to pass."
+            "ci": "Running on exact published head; next submission requires every applicable check to pass.",
+            "scannerFixture": "Generated ephemeral proxy credentials replace the fixed Basic Auth URL while preserving credential-bearing output and no-leak checks; GitGuardian on new head must be verified."
           },
           "dependsOnMerged": [],
           "preparedAt": "2026-10-26T01:40:16.950144+00:00",
-          "commit": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+          "commit": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
           "pr": 1083,
           "url": "https://github.com/duolahypercho/codex-router/pull/1083",
           "prState": "OPEN",
           "title": "fix: publish Windows launchers with the private writer",
           "ciCheckpoint": {
-            "checkedAt": "2026-10-26T01:55:59.835964+00:00",
-            "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+            "checkedAt": "2026-10-26T02:01:54.130993+00:00",
+            "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
             "state": "OPEN",
             "counts": {
-              "PENDING": 10,
-              "SUCCESS": 2,
-              "SKIPPED": 2
+              "PENDING": 1
             },
             "pending": [
-              "test (ubuntu-latest)",
-              "ubuntu-latest / python 3.12",
-              "test (macos-latest)",
-              "macos-latest / python 3.12",
-              "test (windows-latest)",
-              "windows-latest / python 3.12",
-              "Electron control center (Linux)",
-              "Electron control center (Windows)",
-              "Unified native macOS app",
               "GitGuardian Security Checks"
             ],
-            "comments": 0,
+            "comments": 1,
             "reviews": 0
           },
           "backupUrl": "https://github.com/TruthNian/codex-router/pull/12",
           "backupState": "OPEN",
           "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
           "mergeValidation": {
-            "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+            "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
             "main": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-            "merge": "f461461f851b79c96961b6d86dca98a6663f78f4",
+            "merge": "9303ff11cc5f07ecd1f15762bcd93daf9255b024",
             "parents": [
               "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-              "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+              "23429ec0cdc45ab5444e1caad75b74965a1acf52"
             ],
-            "files": [
-              "changelog.d/windows-launcher-private-writer.md",
-              "src/service-windows.mjs",
-              "test/windows-launcher-private-writer.test.mjs"
-            ],
-            "sourceHelperTestBlobsMatchLocal": true
+            "sourceHelperTestBlobsMatchLocal": true,
+            "runtimeAndAdjacentBlobsUnchangedFrom": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
           },
-          "topic": "private-writers/windows-launcher"
+          "topic": "private-writers/windows-launcher",
+          "ciRun": 40256571336,
+          "discoveryRun": 40256571200,
+          "additionalRuns": [],
+          "supersededHeads": [
+            "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+          ],
+          "ciFailureHistory": [
+            {
+              "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+              "check": "GitGuardian Security Checks",
+              "cause": "Static synthetic Basic Auth URL for a reserved .invalid fixture triggered generic Basic Auth detection; no real endpoint/account used; all fixture network is blocked. Grok apply_patch protocol was successful, not the failed check.",
+              "fix": "Generate a unique ephemeral test password per case using Node crypto and URL properties. Retain credential-bearing bytes and redaction/privacy assertions; amend own single-commit branch with exact force lease so the fixed Basic Auth literal is removed from PR ancestry.",
+              "validation": "All 15 focused and 8 negative controls pass again; six final hunks accepted; runtime and all four adjacent suite blobs unchanged.",
+              "newHead": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+              "fixedAt": "2026-10-26T02:01:54.130993+00:00"
+            }
+          ]
         }
       },
       "promotionStatus": "partially_promoted"
@@ -1904,7 +1907,7 @@
         "windows_launcher_private_writer": {
           "id": "windows_launcher_private_writer",
           "status": "ci_running",
-          "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+          "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
           "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
           "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
           "branch": "fix/windows-launcher-private-writer-20261026",
@@ -1927,58 +1930,61 @@
             "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
             "adjacent": "verified: 15 focused and 47 adjacent pass; 23 POSIX/stub assertions skip on Windows; real UTF-16 VBS exit forwarding case also passes",
             "review": "verified: 6/6 final hunks accepted, no findings, unchanged boundary; full check 7 apps / 138 fragments and whitespace pass; final added assertion syntax verified",
-            "ci": "Running on exact published head; next submission requires every applicable check to pass."
+            "ci": "Running on exact published head; next submission requires every applicable check to pass.",
+            "scannerFixture": "Generated ephemeral proxy credentials replace the fixed Basic Auth URL while preserving credential-bearing output and no-leak checks; GitGuardian on new head must be verified."
           },
           "dependsOnMerged": [],
           "preparedAt": "2026-10-26T01:40:16.950144+00:00",
-          "commit": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+          "commit": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
           "pr": 1083,
           "url": "https://github.com/duolahypercho/codex-router/pull/1083",
           "prState": "OPEN",
           "title": "fix: publish Windows launchers with the private writer",
           "ciCheckpoint": {
-            "checkedAt": "2026-10-26T01:55:59.835964+00:00",
-            "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+            "checkedAt": "2026-10-26T02:01:54.130993+00:00",
+            "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
             "state": "OPEN",
             "counts": {
-              "PENDING": 10,
-              "SUCCESS": 2,
-              "SKIPPED": 2
+              "PENDING": 1
             },
             "pending": [
-              "test (ubuntu-latest)",
-              "ubuntu-latest / python 3.12",
-              "test (macos-latest)",
-              "macos-latest / python 3.12",
-              "test (windows-latest)",
-              "windows-latest / python 3.12",
-              "Electron control center (Linux)",
-              "Electron control center (Windows)",
-              "Unified native macOS app",
               "GitGuardian Security Checks"
             ],
-            "comments": 0,
+            "comments": 1,
             "reviews": 0
           },
           "backupUrl": "https://github.com/TruthNian/codex-router/pull/12",
           "backupState": "OPEN",
           "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
           "mergeValidation": {
-            "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+            "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
             "main": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-            "merge": "f461461f851b79c96961b6d86dca98a6663f78f4",
+            "merge": "9303ff11cc5f07ecd1f15762bcd93daf9255b024",
             "parents": [
               "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-              "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+              "23429ec0cdc45ab5444e1caad75b74965a1acf52"
             ],
-            "files": [
-              "changelog.d/windows-launcher-private-writer.md",
-              "src/service-windows.mjs",
-              "test/windows-launcher-private-writer.test.mjs"
-            ],
-            "sourceHelperTestBlobsMatchLocal": true
+            "sourceHelperTestBlobsMatchLocal": true,
+            "runtimeAndAdjacentBlobsUnchangedFrom": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
           },
-          "topic": "private-writers/windows-launcher"
+          "topic": "private-writers/windows-launcher",
+          "ciRun": 40256571336,
+          "discoveryRun": 40256571200,
+          "additionalRuns": [],
+          "supersededHeads": [
+            "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+          ],
+          "ciFailureHistory": [
+            {
+              "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+              "check": "GitGuardian Security Checks",
+              "cause": "Static synthetic Basic Auth URL for a reserved .invalid fixture triggered generic Basic Auth detection; no real endpoint/account used; all fixture network is blocked. Grok apply_patch protocol was successful, not the failed check.",
+              "fix": "Generate a unique ephemeral test password per case using Node crypto and URL properties. Retain credential-bearing bytes and redaction/privacy assertions; amend own single-commit branch with exact force lease so the fixed Basic Auth literal is removed from PR ancestry.",
+              "validation": "All 15 focused and 8 negative controls pass again; six final hunks accepted; runtime and all four adjacent suite blobs unchanged.",
+              "newHead": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+              "fixedAt": "2026-10-26T02:01:54.130993+00:00"
+            }
+          ]
         }
       },
       "promotionStatus": "partially_promoted",
@@ -2029,7 +2035,7 @@
           "notes": "The old archive assigned these adjacent imports/writeAtomic hunks to selected-services. They consolidate launcher writes on writePrivateFile and are excluded from runtime-hop selection. Preserve the immutable source patch; independently test encoding, ACL and collision ownership before proposing.",
           "upstreamPr": 1083,
           "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1083",
-          "upstreamHead": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+          "upstreamHead": "23429ec0cdc45ab5444e1caad75b74965a1acf52"
         }
       ],
       "remainingExtractionConstraints": [
@@ -3404,7 +3410,7 @@
     "private-writers/windows-launcher": {
       "id": "windows_launcher_private_writer",
       "status": "ci_running",
-      "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+      "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
       "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
       "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
       "branch": "fix/windows-launcher-private-writer-20261026",
@@ -3427,58 +3433,61 @@
         "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
         "adjacent": "verified: 15 focused and 47 adjacent pass; 23 POSIX/stub assertions skip on Windows; real UTF-16 VBS exit forwarding case also passes",
         "review": "verified: 6/6 final hunks accepted, no findings, unchanged boundary; full check 7 apps / 138 fragments and whitespace pass; final added assertion syntax verified",
-        "ci": "Running on exact published head; next submission requires every applicable check to pass."
+        "ci": "Running on exact published head; next submission requires every applicable check to pass.",
+        "scannerFixture": "Generated ephemeral proxy credentials replace the fixed Basic Auth URL while preserving credential-bearing output and no-leak checks; GitGuardian on new head must be verified."
       },
       "dependsOnMerged": [],
       "preparedAt": "2026-10-26T01:40:16.950144+00:00",
-      "commit": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+      "commit": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
       "pr": 1083,
       "url": "https://github.com/duolahypercho/codex-router/pull/1083",
       "prState": "OPEN",
       "title": "fix: publish Windows launchers with the private writer",
       "ciCheckpoint": {
-        "checkedAt": "2026-10-26T01:55:59.835964+00:00",
-        "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+        "checkedAt": "2026-10-26T02:01:54.130993+00:00",
+        "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
         "state": "OPEN",
         "counts": {
-          "PENDING": 10,
-          "SUCCESS": 2,
-          "SKIPPED": 2
+          "PENDING": 1
         },
         "pending": [
-          "test (ubuntu-latest)",
-          "ubuntu-latest / python 3.12",
-          "test (macos-latest)",
-          "macos-latest / python 3.12",
-          "test (windows-latest)",
-          "windows-latest / python 3.12",
-          "Electron control center (Linux)",
-          "Electron control center (Windows)",
-          "Unified native macOS app",
           "GitGuardian Security Checks"
         ],
-        "comments": 0,
+        "comments": 1,
         "reviews": 0
       },
       "backupUrl": "https://github.com/TruthNian/codex-router/pull/12",
       "backupState": "OPEN",
       "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
       "mergeValidation": {
-        "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+        "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
         "main": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-        "merge": "f461461f851b79c96961b6d86dca98a6663f78f4",
+        "merge": "9303ff11cc5f07ecd1f15762bcd93daf9255b024",
         "parents": [
           "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-          "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+          "23429ec0cdc45ab5444e1caad75b74965a1acf52"
         ],
-        "files": [
-          "changelog.d/windows-launcher-private-writer.md",
-          "src/service-windows.mjs",
-          "test/windows-launcher-private-writer.test.mjs"
-        ],
-        "sourceHelperTestBlobsMatchLocal": true
+        "sourceHelperTestBlobsMatchLocal": true,
+        "runtimeAndAdjacentBlobsUnchangedFrom": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
       },
-      "topic": "private-writers/windows-launcher"
+      "topic": "private-writers/windows-launcher",
+      "ciRun": 40256571336,
+      "discoveryRun": 40256571200,
+      "additionalRuns": [],
+      "supersededHeads": [
+        "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+      ],
+      "ciFailureHistory": [
+        {
+          "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+          "check": "GitGuardian Security Checks",
+          "cause": "Static synthetic Basic Auth URL for a reserved .invalid fixture triggered generic Basic Auth detection; no real endpoint/account used; all fixture network is blocked. Grok apply_patch protocol was successful, not the failed check.",
+          "fix": "Generate a unique ephemeral test password per case using Node crypto and URL properties. Retain credential-bearing bytes and redaction/privacy assertions; amend own single-commit branch with exact force lease so the fixed Basic Auth literal is removed from PR ancestry.",
+          "validation": "All 15 focused and 8 negative controls pass again; six final hunks accepted; runtime and all four adjacent suite blobs unchanged.",
+          "newHead": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+          "fixedAt": "2026-10-26T02:01:54.130993+00:00"
+        }
+      ]
     }
   },
   "upstreamStateSnapshot": {

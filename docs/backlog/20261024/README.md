@@ -115,7 +115,7 @@ Keep this inventory available until every item has an explicit disposition.
 | private-writers/provider-credentials | [#1080](https://github.com/duolahypercho/codex-router/pull/1080) | `9161a34fad09c1cdf010a11ca4a3882d8b41dde4` | merged |
 | private-writers/catalog | [#1081](https://github.com/duolahypercho/codex-router/pull/1081) | `b235ed65ed6159cc5874818aba32a1ebdc02e68a` | merged |
 | private-writers/legacy-migration | [#1082](https://github.com/duolahypercho/codex-router/pull/1082) | `1fcb6630001b8404b2cc92446d20ce49aa4faa02` | ci_passed_waiting_merge |
-| private-writers/windows-launcher | [#1083](https://github.com/duolahypercho/codex-router/pull/1083) | `f77ad74cbc765a5f9873b52b5469f3fdd0360bbe` | ci_running |
+| private-writers/windows-launcher | [#1083](https://github.com/duolahypercho/codex-router/pull/1083) | `23429ec0cdc45ab5444e1caad75b74965a1acf52` | ci_running |
 
 **Partial topic `selected-services`:** backup #12 remains open for the remaining work. Individual parts above do not complete this topic. `remainingBoundaries` and `upstreamParts` in inventory.json preserve the extraction boundary.
 

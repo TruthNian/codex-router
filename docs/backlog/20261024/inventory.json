@@ -1618,11 +1618,10 @@
       "isDraft": true,
       "remainingSourceFiles": [
         "src/caller-key-rotation.mjs",
-        "src/config-manager.mjs",
         "src/file-security.mjs",
         "src/kimi-oauth-session.mjs"
       ],
-      "extractionNotes": "Ten earlier consumer PRs (#1070-1075 and #1079-1082) are merged. Windows launcher #1083 has all applicable CI passed; credential metadata #1084 is independently submitted. Four runtime source-file candidates remain, alongside explicit historical fixture/adopted-provider fragment dispositions. Keep source backups #12/#24; this is not a required-PR count.",
+      "extractionNotes": "Ten earlier consumers and credential metadata #1084 are actually merged. Windows launcher #1083 is green and OPEN; Codex configuration #1085 is submitted. Three runtime source files remain (rotation, shared primitive extensions, Kimi durability), alongside historical fixture/adopted-provider fragments. Keep backups #12/#24; filenames are not a PR count.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -2058,7 +2057,7 @@
         },
         "credential_metadata_private_writer": {
           "id": "credential_metadata_private_writer",
-          "status": "ci_running",
+          "status": "merged",
           "head": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
           "base": "e31f423071fe2284ee285440ad2a6f94a19d1919",
           "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-credential-metadata-private-20261026",
@@ -2085,28 +2084,20 @@
           "commit": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
           "pr": 1084,
           "url": "https://github.com/duolahypercho/codex-router/pull/1084",
-          "prState": "OPEN",
+          "prState": "MERGED",
           "title": "fix: publish credential metadata with the private writer",
           "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
           "backupState": "OPEN",
           "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
           "ciCheckpoint": {
-            "checkedAt": "2026-10-26T03:11:48.726385+00:00",
+            "checkedAt": "2026-10-26T04:26:35.488196+00:00",
             "head": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
-            "state": "OPEN",
+            "state": "MERGED",
             "counts": {
-              "PENDING": 6,
-              "SUCCESS": 3,
+              "SUCCESS": 9,
               "SKIPPED": 2
             },
-            "pending": [
-              "test (ubuntu-latest)",
-              "test (macos-latest)",
-              "test (windows-latest)",
-              "Electron control center (Linux)",
-              "Electron control center (Windows)",
-              "Unified native macOS app"
-            ],
+            "pending": [],
             "comments": 0,
             "reviews": 0
           },
@@ -2133,7 +2124,98 @@
             "src/provider-credential-store.mjs#2",
             "src/provider-credential-store.mjs#3"
           ],
-          "topic": "private-writers/credential-metadata"
+          "topic": "private-writers/credential-metadata",
+          "mergedAt": "2026-10-26T03:42:17Z",
+          "mergeCommit": "9eb347b35aeb1829603aa1800bb0467b91f53343",
+          "verifiedInMain": "9eb347b35aeb1829603aa1800bb0467b91f53343"
+        },
+        "codex_config_private_writer": {
+          "id": "codex_config_private_writer",
+          "status": "ci_running",
+          "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-codex-config-private-20261026",
+          "branch": "fix/codex-config-private-writer-20261026",
+          "base": "9eb347b35aeb1829603aa1800bb0467b91f53343",
+          "backupPr": 24,
+          "sourceTopic": "private-writers",
+          "head": "9c232fedc0002863e74eec2711ca52246a76988a",
+          "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\codex-config-private-pr-body.md",
+          "acceptance": {
+            "bytes": "verified: all three source wrappers preserve exact UTF8/TOML CRLF/JSON LF and void return",
+            "ownership": "verified: 30 focused cases; three old-source collisions fail, exclusive foreign bytes and replacement-race ownership preserved",
+            "privacy": "verified: real Windows ACL checks, one ACL/publication, old source double-ACL fails; POSIX parent checks retained for CI",
+            "faults": "verified: write/close/harden/rename/cleanup/race preserve old target and diagnostics",
+            "compatibility": "verified: 61 existing CLI cases pass /1 original conditional skip, 26 refresh/rollback and 17 security pass /1 platform skip; strengthened single rollback case rerun after edit",
+            "negativeControls": "verified: 9 expected failures including no-rollback, candidate/helper restored exact",
+            "review": "verified: 12/12 final hunks accepted; syntax/check 7 apps/140 fragments and whitespace passed",
+            "fullPlatformCI": "pending: full npm test and platform builds run in upstream CI; no production or paid probes"
+          },
+          "commit": "9c232fedc0002863e74eec2711ca52246a76988a",
+          "pr": 1085,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1085",
+          "prState": "OPEN",
+          "title": "fix: publish Codex configuration with the private writer",
+          "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
+          "backupState": "OPEN",
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "ciCheckpoint": {
+            "checkedAt": "2026-10-26T04:39:01.463510+00:00",
+            "head": "9c232fedc0002863e74eec2711ca52246a76988a",
+            "state": "OPEN",
+            "counts": {
+              "PENDING": 10,
+              "SKIPPED": 2,
+              "SUCCESS": 1
+            },
+            "pending": [
+              "test (ubuntu-latest)",
+              "ubuntu-latest / python 3.12",
+              "Deterministic discovery tests",
+              "test (macos-latest)",
+              "macos-latest / python 3.12",
+              "test (windows-latest)",
+              "windows-latest / python 3.12",
+              "Electron control center (Linux)",
+              "Electron control center (Windows)",
+              "Unified native macOS app"
+            ],
+            "comments": 0,
+            "reviews": 0
+          },
+          "mergeValidation": {
+            "head": "9c232fedc0002863e74eec2711ca52246a76988a",
+            "main": "9eb347b35aeb1829603aa1800bb0467b91f53343",
+            "merge": "a85b0cb8f5ed9e34f3a83c58dbe550b4bbd567ae",
+            "parents": [
+              "9eb347b35aeb1829603aa1800bb0467b91f53343",
+              "9c232fedc0002863e74eec2711ca52246a76988a"
+            ],
+            "files": [
+              "changelog.d/codex-config-private-writer.md",
+              "src/config-manager.mjs",
+              "test/codex-config-private-writer.test.mjs",
+              "test/config-manager.test.mjs"
+            ],
+            "sourceHelperTestBlobsMatchLocal": true
+          },
+          "dependsOnMerged": [],
+          "requiredUpstreamMerges": [
+            1009
+          ],
+          "sharedCleanupFix": "06bdc15704ea327e679cef69a412a0dadd348b01",
+          "sourceHunkIds": [
+            "src/config-manager.mjs#0",
+            "src/config-manager.mjs#1",
+            "src/config-manager.mjs#2",
+            "src/config-manager.mjs#3",
+            "src/config-manager.mjs#4",
+            "src/config-manager.mjs#5"
+          ],
+          "ciRun": 40270071097,
+          "discoveryRun": 40270071130,
+          "additionalRuns": [
+            40270071127
+          ],
+          "topic": "private-writers/codex-config"
         }
       },
       "promotionStatus": "partially_promoted",
@@ -2202,9 +2284,11 @@
         },
         {
           "path": "src/provider-credential-store.mjs",
-          "status": "preserve_validation_boundary",
+          "status": "verified_preserved_in_merged_pr",
           "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-          "reason": "Keep atomicPrivateBytes path/symlink validation and requested directory mode behavior around shared writer. Independently validate referenced credential identity and parent ownership; do not copy adjacent broader fixture edits blindly."
+          "reason": "Keep atomicPrivateBytes path/symlink validation and requested directory mode behavior around shared writer. Independently validate referenced credential identity and parent ownership; do not copy adjacent broader fixture edits blindly.",
+          "upstreamPr": 1084,
+          "mergeCommit": "9eb347b35aeb1829603aa1800bb0467b91f53343"
         }
       ],
       "historicalTestFragments": [
@@ -2225,7 +2309,7 @@
             "test/provider-credential-store.test.mjs#9"
           ],
           "status": "partially_covered_remaining_portability_review",
-          "covered": "Post-publication pointer fault and exact rollback are independently covered by the new dedicated test.",
+          "covered": "Post-publication pointer fault and exact rollback independently covered by merged #1084; remaining isolation/real-link portability review stays deferred.",
           "deferred": "Historical forced discovery/isolation edits and Windows file-link-to-junction substitutions are retained in the archive, not applied blindly. Re-review fixture portability separately while preserving real file-symlink coverage; current PR leaves the existing real-link tests intact."
         }
       ]
@@ -3699,7 +3783,7 @@
     },
     "private-writers/credential-metadata": {
       "id": "credential_metadata_private_writer",
-      "status": "ci_running",
+      "status": "merged",
       "head": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
       "base": "e31f423071fe2284ee285440ad2a6f94a19d1919",
       "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-credential-metadata-private-20261026",
@@ -3726,28 +3810,20 @@
       "commit": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
       "pr": 1084,
       "url": "https://github.com/duolahypercho/codex-router/pull/1084",
-      "prState": "OPEN",
+      "prState": "MERGED",
       "title": "fix: publish credential metadata with the private writer",
       "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
       "backupState": "OPEN",
       "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
       "ciCheckpoint": {
-        "checkedAt": "2026-10-26T03:11:48.726385+00:00",
+        "checkedAt": "2026-10-26T04:26:35.488196+00:00",
         "head": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
-        "state": "OPEN",
+        "state": "MERGED",
         "counts": {
-          "PENDING": 6,
-          "SUCCESS": 3,
+          "SUCCESS": 9,
           "SKIPPED": 2
         },
-        "pending": [
-          "test (ubuntu-latest)",
-          "test (macos-latest)",
-          "test (windows-latest)",
-          "Electron control center (Linux)",
-          "Electron control center (Windows)",
-          "Unified native macOS app"
-        ],
+        "pending": [],
         "comments": 0,
         "reviews": 0
       },
@@ -3774,11 +3850,102 @@
         "src/provider-credential-store.mjs#2",
         "src/provider-credential-store.mjs#3"
       ],
-      "topic": "private-writers/credential-metadata"
+      "topic": "private-writers/credential-metadata",
+      "mergedAt": "2026-10-26T03:42:17Z",
+      "mergeCommit": "9eb347b35aeb1829603aa1800bb0467b91f53343",
+      "verifiedInMain": "9eb347b35aeb1829603aa1800bb0467b91f53343"
+    },
+    "private-writers/codex-config": {
+      "id": "codex_config_private_writer",
+      "status": "ci_running",
+      "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-codex-config-private-20261026",
+      "branch": "fix/codex-config-private-writer-20261026",
+      "base": "9eb347b35aeb1829603aa1800bb0467b91f53343",
+      "backupPr": 24,
+      "sourceTopic": "private-writers",
+      "head": "9c232fedc0002863e74eec2711ca52246a76988a",
+      "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\codex-config-private-pr-body.md",
+      "acceptance": {
+        "bytes": "verified: all three source wrappers preserve exact UTF8/TOML CRLF/JSON LF and void return",
+        "ownership": "verified: 30 focused cases; three old-source collisions fail, exclusive foreign bytes and replacement-race ownership preserved",
+        "privacy": "verified: real Windows ACL checks, one ACL/publication, old source double-ACL fails; POSIX parent checks retained for CI",
+        "faults": "verified: write/close/harden/rename/cleanup/race preserve old target and diagnostics",
+        "compatibility": "verified: 61 existing CLI cases pass /1 original conditional skip, 26 refresh/rollback and 17 security pass /1 platform skip; strengthened single rollback case rerun after edit",
+        "negativeControls": "verified: 9 expected failures including no-rollback, candidate/helper restored exact",
+        "review": "verified: 12/12 final hunks accepted; syntax/check 7 apps/140 fragments and whitespace passed",
+        "fullPlatformCI": "pending: full npm test and platform builds run in upstream CI; no production or paid probes"
+      },
+      "commit": "9c232fedc0002863e74eec2711ca52246a76988a",
+      "pr": 1085,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1085",
+      "prState": "OPEN",
+      "title": "fix: publish Codex configuration with the private writer",
+      "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
+      "backupState": "OPEN",
+      "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+      "ciCheckpoint": {
+        "checkedAt": "2026-10-26T04:39:01.463510+00:00",
+        "head": "9c232fedc0002863e74eec2711ca52246a76988a",
+        "state": "OPEN",
+        "counts": {
+          "PENDING": 10,
+          "SKIPPED": 2,
+          "SUCCESS": 1
+        },
+        "pending": [
+          "test (ubuntu-latest)",
+          "ubuntu-latest / python 3.12",
+          "Deterministic discovery tests",
+          "test (macos-latest)",
+          "macos-latest / python 3.12",
+          "test (windows-latest)",
+          "windows-latest / python 3.12",
+          "Electron control center (Linux)",
+          "Electron control center (Windows)",
+          "Unified native macOS app"
+        ],
+        "comments": 0,
+        "reviews": 0
+      },
+      "mergeValidation": {
+        "head": "9c232fedc0002863e74eec2711ca52246a76988a",
+        "main": "9eb347b35aeb1829603aa1800bb0467b91f53343",
+        "merge": "a85b0cb8f5ed9e34f3a83c58dbe550b4bbd567ae",
+        "parents": [
+          "9eb347b35aeb1829603aa1800bb0467b91f53343",
+          "9c232fedc0002863e74eec2711ca52246a76988a"
+        ],
+        "files": [
+          "changelog.d/codex-config-private-writer.md",
+          "src/config-manager.mjs",
+          "test/codex-config-private-writer.test.mjs",
+          "test/config-manager.test.mjs"
+        ],
+        "sourceHelperTestBlobsMatchLocal": true
+      },
+      "dependsOnMerged": [],
+      "requiredUpstreamMerges": [
+        1009
+      ],
+      "sharedCleanupFix": "06bdc15704ea327e679cef69a412a0dadd348b01",
+      "sourceHunkIds": [
+        "src/config-manager.mjs#0",
+        "src/config-manager.mjs#1",
+        "src/config-manager.mjs#2",
+        "src/config-manager.mjs#3",
+        "src/config-manager.mjs#4",
+        "src/config-manager.mjs#5"
+      ],
+      "ciRun": 40270071097,
+      "discoveryRun": 40270071130,
+      "additionalRuns": [
+        40270071127
+      ],
+      "topic": "private-writers/codex-config"
     }
   },
   "upstreamStateSnapshot": {
-    "verifiedMain": "e31f423071fe2284ee285440ad2a6f94a19d1919",
+    "verifiedMain": "9eb347b35aeb1829603aa1800bb0467b91f53343",
     "merged": [
       1062,
       1063,
@@ -3797,15 +3964,16 @@
       1079,
       1080,
       1081,
-      1082
+      1082,
+      1084
     ],
     "open": [
       1065,
       1068,
       1083,
-      1084
+      1085
     ],
-    "updatedAt": "2026-10-26T03:11:48.726385+00:00"
+    "updatedAt": "2026-10-26T04:39:01.463510+00:00"
   },
-  "verifiedMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
+  "verifiedMain": "9eb347b35aeb1829603aa1800bb0467b91f53343"
 }

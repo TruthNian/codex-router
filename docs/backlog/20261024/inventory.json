@@ -517,7 +517,7 @@
         },
         "windows_launcher_private_writer": {
           "id": "windows_launcher_private_writer",
-          "status": "ci_running",
+          "status": "ci_passed_waiting_merge",
           "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
           "base": "e31f423071fe2284ee285440ad2a6f94a19d1919",
           "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
@@ -541,7 +541,7 @@
             "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
             "adjacent": "verified: 15 focused + 107 adjacent pass; 23 POSIX/stub skips on Windows. Includes fixed 60-test lifecycle suites and 26 simulated reset scenarios.",
             "review": "verified: all 15 final hunks accepted, unchanged boundary, no findings.",
-            "ci": "Running on exact published head; next submission requires every applicable check to pass.",
+            "ci": "12 SUCCESS and 2 conditional SKIPPED on exact repaired head 5a825ae07a179c9a34facb0af97624ca1fb0ea11; Windows lifecycle fixtures verified on all platforms.",
             "scannerFixture": "verified: per-case ephemeral proxy credentials preserve private output and redaction checks; latest-head GitGuardian SUCCESS.",
             "lifecycleFixtureRepair": "60 source-executing tests fixed; 15 focused + 107 adjacent pass / 23 platform skips after rebasing on actual merged #1082. Removing exports or bypassing fault hooks reproduces intended failures; all 15 final hunks reviewed.",
             "syntax": "verified: 7 applications, 139 changelog fragments and all syntax pass on base e31f4230; whitespace passes."
@@ -554,23 +554,14 @@
           "prState": "OPEN",
           "title": "fix: publish Windows launchers with the private writer",
           "ciCheckpoint": {
-            "checkedAt": "2026-10-26T02:35:57.729250+00:00",
+            "checkedAt": "2026-10-26T03:11:48.726385+00:00",
             "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
             "state": "OPEN",
             "counts": {
-              "PENDING": 7,
-              "SUCCESS": 5,
+              "SUCCESS": 12,
               "SKIPPED": 2
             },
-            "pending": [
-              "test (ubuntu-latest)",
-              "test (macos-latest)",
-              "test (windows-latest)",
-              "windows-latest / python 3.12",
-              "Electron control center (Linux)",
-              "Electron control center (Windows)",
-              "Unified native macOS app"
-            ],
+            "pending": [],
             "comments": 2,
             "reviews": 0
           },
@@ -631,7 +622,12 @@
               "baseline": "Local two-file reproduction has 13 failures, matching all three CI logs.",
               "validation": "60 source-executing tests fixed; 15 focused + 107 adjacent pass / 23 platform skips after rebasing on actual merged #1082. Removing exports or bypassing fault hooks reproduces intended failures; all 15 final hunks reviewed.",
               "newHead": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
-              "fixedAt": "2026-10-26T02:35:57.729250+00:00"
+              "fixedAt": "2026-10-26T02:35:57.729250+00:00",
+              "verifiedOnAllPlatforms": true,
+              "newHeadChecks": {
+                "SUCCESS": 12,
+                "SKIPPED": 2
+              }
             }
           ]
         }
@@ -1624,10 +1620,9 @@
         "src/caller-key-rotation.mjs",
         "src/config-manager.mjs",
         "src/file-security.mjs",
-        "src/kimi-oauth-session.mjs",
-        "src/provider-credential-store.mjs"
+        "src/kimi-oauth-session.mjs"
       ],
-      "extractionNotes": "Ten earlier private-writer consumer PRs (#1070-1075 and #1079-1082) are merged. Windows launcher #1083 is submitted, with fixture interface failures reproduced and repaired; latest CI is pending. Five remaining source-file candidates and the adopted-provider read API still require disposition. Keep partial source backups #12/#24; this is not a required-PR count.",
+      "extractionNotes": "Ten earlier consumer PRs (#1070-1075 and #1079-1082) are merged. Windows launcher #1083 has all applicable CI passed; credential metadata #1084 is independently submitted. Four runtime source-file candidates remain, alongside explicit historical fixture/adopted-provider fragment dispositions. Keep source backups #12/#24; this is not a required-PR count.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -2135,6 +2130,28 @@
           "status": "preserve_validation_boundary",
           "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
           "reason": "Keep atomicPrivateBytes path/symlink validation and requested directory mode behavior around shared writer. Independently validate referenced credential identity and parent ownership; do not copy adjacent broader fixture edits blindly."
+        }
+      ],
+      "historicalTestFragments": [
+        {
+          "id": "credential-store-historical-fixture-edits",
+          "sourcePath": "test/provider-credential-store.test.mjs",
+          "backupPr": 24,
+          "sourceHunkIds": [
+            "test/provider-credential-store.test.mjs#0",
+            "test/provider-credential-store.test.mjs#1",
+            "test/provider-credential-store.test.mjs#2",
+            "test/provider-credential-store.test.mjs#3",
+            "test/provider-credential-store.test.mjs#4",
+            "test/provider-credential-store.test.mjs#5",
+            "test/provider-credential-store.test.mjs#6",
+            "test/provider-credential-store.test.mjs#7",
+            "test/provider-credential-store.test.mjs#8",
+            "test/provider-credential-store.test.mjs#9"
+          ],
+          "status": "partially_covered_remaining_portability_review",
+          "covered": "Post-publication pointer fault and exact rollback are independently covered by the new dedicated test.",
+          "deferred": "Historical forced discovery/isolation edits and Windows file-link-to-junction substitutions are retained in the archive, not applied blindly. Re-review fixture portability separately while preserving real file-symlink coverage; current PR leaves the existing real-link tests intact."
         }
       ]
     },
@@ -3491,7 +3508,7 @@
     },
     "private-writers/windows-launcher": {
       "id": "windows_launcher_private_writer",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
       "base": "e31f423071fe2284ee285440ad2a6f94a19d1919",
       "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
@@ -3515,7 +3532,7 @@
         "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
         "adjacent": "verified: 15 focused + 107 adjacent pass; 23 POSIX/stub skips on Windows. Includes fixed 60-test lifecycle suites and 26 simulated reset scenarios.",
         "review": "verified: all 15 final hunks accepted, unchanged boundary, no findings.",
-        "ci": "Running on exact published head; next submission requires every applicable check to pass.",
+        "ci": "12 SUCCESS and 2 conditional SKIPPED on exact repaired head 5a825ae07a179c9a34facb0af97624ca1fb0ea11; Windows lifecycle fixtures verified on all platforms.",
         "scannerFixture": "verified: per-case ephemeral proxy credentials preserve private output and redaction checks; latest-head GitGuardian SUCCESS.",
         "lifecycleFixtureRepair": "60 source-executing tests fixed; 15 focused + 107 adjacent pass / 23 platform skips after rebasing on actual merged #1082. Removing exports or bypassing fault hooks reproduces intended failures; all 15 final hunks reviewed.",
         "syntax": "verified: 7 applications, 139 changelog fragments and all syntax pass on base e31f4230; whitespace passes."
@@ -3528,23 +3545,14 @@
       "prState": "OPEN",
       "title": "fix: publish Windows launchers with the private writer",
       "ciCheckpoint": {
-        "checkedAt": "2026-10-26T02:35:57.729250+00:00",
+        "checkedAt": "2026-10-26T03:11:48.726385+00:00",
         "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
         "state": "OPEN",
         "counts": {
-          "PENDING": 7,
-          "SUCCESS": 5,
+          "SUCCESS": 12,
           "SKIPPED": 2
         },
-        "pending": [
-          "test (ubuntu-latest)",
-          "test (macos-latest)",
-          "test (windows-latest)",
-          "windows-latest / python 3.12",
-          "Electron control center (Linux)",
-          "Electron control center (Windows)",
-          "Unified native macOS app"
-        ],
+        "pending": [],
         "comments": 2,
         "reviews": 0
       },
@@ -3605,9 +3613,93 @@
           "baseline": "Local two-file reproduction has 13 failures, matching all three CI logs.",
           "validation": "60 source-executing tests fixed; 15 focused + 107 adjacent pass / 23 platform skips after rebasing on actual merged #1082. Removing exports or bypassing fault hooks reproduces intended failures; all 15 final hunks reviewed.",
           "newHead": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
-          "fixedAt": "2026-10-26T02:35:57.729250+00:00"
+          "fixedAt": "2026-10-26T02:35:57.729250+00:00",
+          "verifiedOnAllPlatforms": true,
+          "newHeadChecks": {
+            "SUCCESS": 12,
+            "SKIPPED": 2
+          }
         }
       ]
+    },
+    "private-writers/credential-metadata": {
+      "id": "credential_metadata_private_writer",
+      "status": "ci_running",
+      "head": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
+      "base": "e31f423071fe2284ee285440ad2a6f94a19d1919",
+      "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-credential-metadata-private-20261026",
+      "branch": "fix/credential-metadata-private-writer-20261026",
+      "sourceTopic": "private-writers",
+      "backupPr": 24,
+      "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\credential-metadata-private-pr-body.md",
+      "dependsOnMerged": [],
+      "requiredUpstreamMerges": [
+        1009
+      ],
+      "sharedCleanupFix": "06bdc15704ea327e679cef69a412a0dadd348b01",
+      "acceptance": {
+        "local": "13 focused + 8 applicable metadata + 15 adjacent passed; 2 platform skips",
+        "realSymlinkLimit": "4 existing tests reproduce EPERM at symlink creation on candidate and unchanged main; not counted as passed/skipped, require full CI",
+        "controls": "7 meaningful baseline/mutation controls fail as expected, candidate restored exact",
+        "review": "6/6 final hunks accepted, no findings; syntax 7 apps / 139 fragments, whitespace passed",
+        "format": "verified: metadata roundtrip, Unicode and CRLF snapshot buffers remain exact; explicit parent chmod stays intact",
+        "validation": "verified: outside-state, secret fields and reported symlink components reject before writer; real-link tests require CI",
+        "ownership": "verified: wx collisions retain foreign files; write/close/ACL/rename/cleanup/race faults preserve old generation and diagnostics",
+        "migration": "verified: late pointer publication failure restores legacy bytes; changed-target rollback refuses; reencoded snapshot and omitted restore controls fail",
+        "ci": "Running on exact head; all applicable checks required before next PR"
+      },
+      "commit": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
+      "pr": 1084,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1084",
+      "prState": "OPEN",
+      "title": "fix: publish credential metadata with the private writer",
+      "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
+      "backupState": "OPEN",
+      "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+      "ciCheckpoint": {
+        "checkedAt": "2026-10-26T03:11:48.726385+00:00",
+        "head": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
+        "state": "OPEN",
+        "counts": {
+          "PENDING": 6,
+          "SUCCESS": 3,
+          "SKIPPED": 2
+        },
+        "pending": [
+          "test (ubuntu-latest)",
+          "test (macos-latest)",
+          "test (windows-latest)",
+          "Electron control center (Linux)",
+          "Electron control center (Windows)",
+          "Unified native macOS app"
+        ],
+        "comments": 0,
+        "reviews": 0
+      },
+      "mergeValidation": {
+        "head": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
+        "main": "e31f423071fe2284ee285440ad2a6f94a19d1919",
+        "merge": "71283fef8702aabc05492802a28f5e4de3eff69d",
+        "parents": [
+          "e31f423071fe2284ee285440ad2a6f94a19d1919",
+          "3fc2996fa61ea1a98b14f0cd438b929e15bf895a"
+        ],
+        "files": [
+          "changelog.d/credential-metadata-private-writer.md",
+          "src/provider-credential-store.mjs",
+          "test/credential-metadata-private-writer.test.mjs"
+        ],
+        "sourceHelperTestBlobsMatchLocal": true
+      },
+      "ciRun": 40262631686,
+      "discoveryRun": 40262631086,
+      "sourceHunkIds": [
+        "src/provider-credential-store.mjs#0",
+        "src/provider-credential-store.mjs#1",
+        "src/provider-credential-store.mjs#2",
+        "src/provider-credential-store.mjs#3"
+      ],
+      "topic": "private-writers/credential-metadata"
     }
   },
   "upstreamStateSnapshot": {
@@ -3635,9 +3727,10 @@
     "open": [
       1065,
       1068,
-      1083
+      1083,
+      1084
     ],
-    "updatedAt": "2026-10-26T02:35:57.729250+00:00"
+    "updatedAt": "2026-10-26T03:11:48.726385+00:00"
   },
   "verifiedMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
 }

@@ -1,0 +1,719 @@
+diff --git a/.gitignore b/.gitignore
+--- a/.gitignore
++++ b/.gitignore
+@@ -34,0 +35,24 @@ output/
++
++# Personal runtime state belongs outside this public source checkout.
++/*.secret
++/caller-secret
++/internal-secret
++/cursor-public-secret
++/auth.json
++/config.toml
++/user-models.json
++/enabled-providers.json
++/model-picker.json
++/vision-bridge.json
++/install-manifest.json
++/managed-skills.json
++/models_cache.json
++/native-models.json
++/merged-models.json
++/litellm.yaml
++/*.jsonl
++/.env
++/.env.*
++!/.env.example
++/router-state/
++/router-upgrade-backup/
+diff --git a/AGENTS.md b/AGENTS.md
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -27,0 +28,4 @@
++The current execution, installation, publication, delivery, catalog, private-write,
++and shutdown boundaries are documented in
++[Optimization runtime contracts](docs/maintenance/optimization-runtime-contracts.md).
++
+@@ -47,2 +51,2 @@ These instructions apply when a user asks an agent to install this repository.
+-  one background service, one gateway, one set of provider credentials, one
+-  provider selection, one set of ports. `MODEL_ROUTER_TARGET` selects which
++  one background service, at most one gateway, one set of provider credentials,
++  one provider selection, one set of ports. `MODEL_ROUTER_TARGET` selects which
+@@ -68,3 +72,7 @@ user.
+-1. Read the host platform and check for Codex, Git, Node.js 22.19+, and `uv` or
+-   Python 3.10+. On Windows, also verify that Windows PowerShell reports
+-   `FullLanguage` and permits `Add-Type`; the process-tree safety boundary fails
++1. Read the host platform and check for Codex, Git, and Node.js 22.19+. Check
++   for `uv` or Python 3.10+ when the selected routes require LiteLLM; native
++   and actual Responses-only routes skip Python installation and probes.
++   `src/runtime-dependency-requirements.mjs --gateway-required` reports this
++   after Node dependencies are available. Explicit dependency repair still
++   rebuilds both Node and Python. On Windows, also verify that PowerShell
++   reports `FullLanguage` and permits `Add-Type`; the process-tree boundary fails
+@@ -219,3 +227,4 @@ nothing to restart and nothing to tell the user to quit.
+-   not a prerequisite: a harness-only machine needs Node 22.19+, `uv` or Python
+-   3.10+, and the harness. Do not run `src/catalog.mjs` there — it asks the
+-   Codex CLI whether the session is signed in and refuses to publish when it
++   not a prerequisite: a harness-only machine needs Node 22.19+ and the harness,
++   plus `uv` or Python 3.10+ if its routes require LiteLLM. Do not run
++   `src/catalog.mjs` there — it asks the Codex CLI whether the session is signed
++   in and refuses to publish when it
+@@ -244,3 +253,3 @@ file, never open its `settings.json` for writing, and leave the user's next
+-   not a prerequisite: a Gemini-only machine needs Node 22.19+, `uv` or Python
+-   3.10+, and the `gemini` CLI. Do not run `src/catalog.mjs` there, for the same
+-   reason the harness does not.
++   not a prerequisite: a Gemini-only machine needs Node 22.19+ and the `gemini`
++   CLI, plus `uv` or Python 3.10+ if its routes require LiteLLM. Do not run
++   `src/catalog.mjs` there, for the same reason the harness does not.
+@@ -565,2 +574,4 @@ beside ours, so everything else in them is somebody else's work.
+-The router's gateway is LiteLLM, so every install executes a large Python
+-dependency tree. That tree is pinned and hashed rather than re-resolved.
++When selected routes require LiteLLM, the installer prepares its pinned,
++hash-verified Python tree. Ordinary native/Responses-only installs skip it;
++`--force-deps` / `-ForceDeps` and checkout `doctor --fix` still rebuild both
++dependency trees, including Python, to preserve the explicit repair contract.
+@@ -671,19 +682,16 @@ The service definition still looked correct at every glance.
+-## The gateway is restarted in place; the router is not taken down with it
+-
+-`src/gateway-supervisor.mjs` watches the LiteLLM child and replaces it when it
+-dies. It exists because the gateway is the one child of the service that is not
+-ours: a bug anywhere in that pinned Python tree can end the process rather than
+-the request, and issue #261 is exactly that — mapping an upstream 429 raised out
+-of LiteLLM's own request handler and the proxy exited 1. `start.mjs` raced every
+-child's exit, so one failed request killed the router and all three forwarders
+-and every client saw a bare "Connection error" naming nothing.
+-
+-1. **Only the gateway is supervised.** The forwarders and the router are ours;
+-   when one of them dies the service still exits and the OS supervisor rebuilds
+-   it. Do not extend the supervisor to them to "be consistent" — a crash in our
+-   own code is a bug report, and papering over it costs the incident.
+-2. **Supervision starts only after the gateway has been healthy once.** A
+-   gateway that never came up is a dependency or configuration failure, and
+-   retrying it buries the message the operator needs. Startup failure is
+-   unchanged: it throws out of `main()` and takes the service down, which is
+-   what `test/startup-cleanup.test.mjs` asserts.
++## Selected dependency failures leave independent routes serving
++
++`start.mjs` boots the frontend first and supervises the dependencies required by
++its immutable execution plan. `src/gateway-supervisor.mjs` provides bounded
++restart handling for the gateway and required forwarders. The gateway also has
++a liveness watchdog. `/health/live` describes the frontend; `/health` describes
++all selected dependencies and the adopted execution-plan fingerprint.
++
++1. **Supervise only adopted dependencies.** Unused forwarders and LiteLLM are
++   not spawned. The frontend's own exit still ends the service so the OS
++   supervisor can rebuild it; dependency restarts do not reload its registry.
++2. **Liveness is separate from readiness.** A required dependency that never
++   becomes healthy leaves the frontend serving independent native/direct
++   routes with degraded readiness. A missing gateway runtime is diagnosed
++   without taking those routes down. Client publication and pending
++   Antigravity activation remain gated on full readiness.
+@@ -694,5 +702,4 @@ and every client saw a bare "Connection error" naming nothing.
+-   gateway that dies on every request into a spawn loop. Past the bound the
+-   supervisor returns and the service exits exactly as it used to, so launchd's
+-   `KeepAlive`, systemd's `Restart=always`, and Task Scheduler get their clean
+-   restart. `CODEX_ROUTER_GATEWAY_RESTARTS=0` disables it entirely and restores
+-   the pre-#261 behaviour, which is what a crash investigation wants.
++   gateway that dies on every request into a spawn loop. Past the bound,
++   dependency recovery stops while independent routes keep serving with
++   degraded readiness. A manual service restart starts a new recovery epoch.
++   `CODEX_ROUTER_GATEWAY_RESTARTS=0` disables dependency restarts.
+@@ -707 +714 @@ and every client saw a bare "Connection error" naming nothing.
+-   carries `degraded: ["gateway"]` — a closed set of three fixed local service
++   carries `degraded: ["gateway"]` — a closed set of fixed local service
+@@ -1965 +1972 @@ drops the second.
+-## Upstream retries are legal only before the first relayed byte
++## Transport replay requires delivery evidence and no relayed bytes
+@@ -1967,3 +1974,3 @@ drops the second.
+-`src/upstream-retry.mjs` retries a native upstream request a bounded number of
+-times. One rule governs it, and breaking it corrupts responses rather than
+-merely failing them.
++`src/upstream-retry.mjs` retries a native upstream request within bounded
++attempt and time limits. Nothing relayed to the caller is necessary, but does
++not prove that the origin never executed a generation request.
+@@ -2023,0 +2031,5 @@ merely failing them.
++7. This is a transport-replay policy, not an end-to-end exactly-once guarantee.
++   Semantic repairs, quota failover, client retries, and LiteLLM/provider retry
++   layers have their own limits. HTTP delivery and generation completion are
++   recorded separately; an HTTP 200 without a valid terminal event does not
++   prove a completed generation.
+@@ -2039,2 +2051,3 @@ purpose; several of them exist because the obvious wider version is wrong.
+-2. Only **"your usage is gone"** qualifies: `upstreamFailureKind` returning
+-   `out_of_usage`, a 402, or a 429 whose `Retry-After` exceeds sixty seconds. Do
++2. **Quota failover requires "your usage is gone":** `upstreamFailureKind`
++   returning `out_of_usage`, a 402, or a 429 whose `Retry-After` exceeds sixty
++   seconds. Do
+@@ -2043,4 +2056,6 @@ purpose; several of them exist because the obvious wider version is wrong.
+-   deterministic. Do not add 5xx: `upstream-retry.mjs` already absorbs the
+-   transient shapes, and masking a provider outage costs an incident somebody
+-   would want to see. Do not lower the 429 threshold; trading a twenty-second
+-   wait for a cold prompt cache is a bad deal for the rest of the session.
++   deterministic. Generic 5xx do not qualify. Default transport failover
++   requires the API forwarder's confined header to prove `not_sent`; an
++   upstream body cannot grant that permission. Explicit availability policy
++   also permits ambiguous marked transport failures. Do not lower the 429
++   threshold; trading a twenty-second wait for a cold prompt cache is a bad
++   deal for the rest of the session.
+diff --git a/changelog.d/generation-outcomes-and-delivery-policy.md b/changelog.d/generation-outcomes-and-delivery-policy.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/generation-outcomes-and-delivery-policy.md
+@@ -0,0 +1 @@
++- Distinguish HTTP transport status from generation completion in routed and native Responses usage and activity. Failed, incomplete and unfinished streams no longer count as successful generations; their measured token usage remains billed. Historical rows retain their existing HTTP-based aggregate interpretation and are counted separately because missing terminal metadata cannot be reconstructed.
+diff --git a/changelog.d/personal-upstream-integration-20261018.md b/changelog.d/personal-upstream-integration-20261018.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/personal-upstream-integration-20261018.md
+@@ -0,0 +1 @@
++- Integrate the October 18 upstream fixes for UTF-8 response decoding, client cancellation, retry billing and Grok workspace instructions while retaining the deployed execution-plan adoption, event-driven catalog refresh, private-write ownership, delivery boundaries and graceful service shutdown.
+diff --git a/changelog.d/personal-upstream-integration-20261024.md b/changelog.d/personal-upstream-integration-20261024.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/personal-upstream-integration-20261024.md
+@@ -0,0 +1 @@
++- Integrate upstream routing, private-file ownership, macOS lifecycle and dependency fixes while preserving local recovery, model policy, catalog refresh and compatibility-layer settings; isolate model-discovery fixtures from the installed compatibility policy.
+diff --git a/changelog.d/personal-upstream-integration.md b/changelog.d/personal-upstream-integration.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/personal-upstream-integration.md
+@@ -0,0 +1,5 @@
++- **The personal installation now adopts upstream runtime implementations.**
++  Preserve the former personal branch as merge ancestry and immutable tags,
++  replace superseded runtime and CUA patches, retain private-state exclusions,
++  and migrate daily catalog polling and GLM guards to supported local settings.
++  The unsafe historical narration cleanup is removed rather than carried forward.
+diff --git a/changelog.d/reasoning-tag-fidelity.md b/changelog.d/reasoning-tag-fidelity.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/reasoning-tag-fidelity.md
+@@ -0,0 +1 @@
++- **Reasoning-tag cleanup is an explicit route policy and preserves incomplete literal tags.** The validated `reasoningTagPolicy` values are `preserve`, `legacy-inline`, and `hy4-nonce`; unknown routes preserve literal XML and quoted tags by default. Only the captured Qwen Plan Flash route retains automatic bare-tag cleanup, while Hy4's established nonce handling leaves bare tags intact unless explicitly opted in. An explicit `preserve` overrides either default. Held text such as `x <` or `<th`, and untouched whitespace, is emitted before completion or stream end; message content parts retain separate state, content identity and ordered sequence numbers.
+diff --git a/changelog.d/route-execution-plan.md b/changelog.d/route-execution-plan.md
+--- a/changelog.d/route-execution-plan.md
++++ b/changelog.d/route-execution-plan.md
+@@ -1 +1 @@
+-- Add a frozen execution-plan compiler and read-only selected-route dependency query. Include hidden callable and enabled generic routes, respect effective per-model protocols, exclude credential values from route fingerprints, and distinguish a pending proof listener from published routes. Installer, startup, routing and publication adoption use separate changes.
++- Added one pure execution plan for route dispatch and service dependencies. Native GPT needs no downstream services; compatible native Responses endpoints use the existing API forwarder directly, while translated protocols retain their gateway and provider listeners. Planning includes selected hidden models and missing-credential routes, and can prepare an Antigravity proof listener before publication. An adopted plan exposes a deterministic fingerprint of model/protocol/endpoint/capability metadata and public credential references without reading or hashing credential values. A temporary proof-only listener gates readiness without changing the unchanged requestable-route identity when its proof is promoted.
+diff --git a/changelog.d/strict-skill-publication-copy.md b/changelog.d/strict-skill-publication-copy.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/strict-skill-publication-copy.md
+@@ -0,0 +1 @@
++- **Publish staged skills on Node versions with strict directory copy checks.** Copy entries into the exclusively claimed publication directory while keeping no-replace checks, marker validation and rollback protection.
+diff --git a/docs/maintenance/optimization-runtime-contracts.md b/docs/maintenance/optimization-runtime-contracts.md
+new file mode 100644
+--- /dev/null
++++ b/docs/maintenance/optimization-runtime-contracts.md
+@@ -0,0 +1,211 @@
++# Optimization runtime contracts
++
++This reference describes the current implementation boundaries. It supplements
++[AGENTS.md](../../AGENTS.md), rather than introducing a separate maintenance workflow.
++
++## Adopted routes determine dependencies
++
++[route-execution-plan.mjs](../../src/route-execution-plan.mjs) consumes an already
++loaded registry and explicit provider selection. Its frozen plan includes every
++selected callable route, including picker-hidden and `listed: false` models.
++Credential readiness and picker visibility do not remove required listeners:
++an unavailable credential should produce the provider's actionable error.
++Enabled generic descriptors participate through the same effective-provider
++resolver, including per-model protocols and verified overrides.
++
++| Effective route | Required execution services |
++| --- | --- |
++| Native GPT | No routed dependency |
++| Actual OpenAI Responses protocol | API forwarder |
++| Chat Completions or Anthropic Messages | API forwarder and LiteLLM |
++| Keyless Ollama adapter | Ollama and LiteLLM |
++| Supported OAuth adapter | Its forwarder and LiteLLM |
++
++An HTTP or WebSocket Responses endpoint can skip LiteLLM. A Chat or Messages
++endpoint does not become a Responses endpoint by removing its translator.
++Mixed selections retain every required service. A pending Antigravity proof
++adds its temporary listener before selection, without publishing its models or
++adding a gateway dependency merely for the proof. Proof promotion does not
++change an otherwise unchanged route fingerprint.
++
++The fingerprint covers explicit routing, provider, endpoint, and client
++capability metadata. It excludes credential/header values, URL credentials,
++and independently stored state such as Vertex project/location or overlay files.
++[start.mjs](../../src/start.mjs) and [router.mjs](../../src/router.mjs) adopt it
++at process startup; staged state cannot make an old process report new routes.
++
++## Liveness, readiness, and installation
++
++The frontend boots first. `/health/live` confirms its listener; `/health`
++returns 200 only when all adopted dependencies are reachable, otherwise 503
++with fixed dependency names and the adopted fingerprint. Unused dependencies
++are disabled. Missing Python or an exhausted dependency restart allowance can
++leave independent native/direct routes serving with degraded readiness.
++Full readiness still gates publication and pending-proof activation.
++
++[runtime-dependency-preparation.mjs](../../src/runtime-dependency-preparation.mjs)
++prepares missing Node dependencies before importing route requirements and
++prepares Python only when those routes need LiteLLM. Matching dependency trees
++are reused. The two installer modes have different mutation boundaries:
++
++| Mode in [bin/install](../../bin/install) / [install.ps1](../../install.ps1) | Mutation boundary |
++| --- | --- |
++| `--dependencies-only` / `-CheckoutInstall -DependenciesOnly` | Dependency trees and their fingerprints; no authentication, provider-selection, generated gateway/client, service, or ownership-transfer writes |
++| `--prepare-only` / `-CheckoutInstall -PrepareOnly` | Dependencies, router keys, and required gateway inputs; no client configuration/catalog publication, service installation, or ownership handoff |
++
++Prepare-only is not read-only. Explicit `--force-deps`, `-ForceDeps`, and
++checkout `doctor --fix` retain their full Node **and Python** rebuild contract,
++including on a native/Responses-only installation. Package-managed dependency
++trees remain the package manager's responsibility.
++
++## Prepare, adopt, then publish clients
++
++[model-overlay-publication.mjs](../../src/model-overlay-publication.mjs) captures
++the previous state only after acquiring the publication lock, mutates it,
++prepares dependencies and gateway inputs in fresh processes, and obtains the
++candidate fingerprint. It then restarts/adopts the candidate where requested,
++verifies the healthy running router's fingerprint, and publishes installed
++clients from a fresh registry that still matches that fingerprint.
++
++[router-restart.mjs](../../src/router-restart.mjs) permits offline publication
++only after confirmed connection refusal, a known absent/unloaded managed
++service, and a second refusal check. A stopped installed service, unknown
++owner, degraded router, or mismatched fingerprint is not that offline case.
++Native profile switching explicitly permits this confirmed offline boundary
++for its read-only guards, compares the fresh and already loaded route
++fingerprints, and publishes inside its account/model/catalog locks. Event-driven
++refresh still requires healthy adoption. Failed OS service queries remain
++unknown; they cannot establish absence. Managed restart progress is relayed to
++stderr so JSON command output remains parseable.
++
++A failed transaction restores the exact durable snapshot and repeats
++preparation/adoption/publication for the previous state with a reserved rollback
++budget. Successful rollback preserves the original failure; failed rollback
++produces an aggregate error. Irreversible physical operations can report
++publication warnings, but rollback itself does not downgrade errors to warnings.
++
++The transaction ceiling is 45 minutes. Before mutation it reserves the full
++forward and rollback preparation/adoption/publication epochs plus restoration
++of the actual prior private files. A transaction that cannot fit is rejected
++before mutation. The 60-second mutation allowance is checked when synchronous
++I/O returns; it is not preemptive cancellation of that I/O. Desktop and control
++owners reserve their cleanup time outside the inner transaction deadline.
++
++[provider-key.mjs](../../src/provider-key.mjs) uses this transaction for ordinary
++installed credential set/remove operations. Guided setup explicitly passes
++`--stage` to store credentials and selections before installer finalization;
++staging does not prepare dependencies, restart a service, or publish clients.
++Automated secret input uses bounded `--stdin`, keeping the value out of argv.
++Environment-backed key-pool changes likewise stage metadata until installation
++persists the service environment or the foreground process is restarted and
++applied. OAuth disconnection keeps its irreversible fence rather than restoring
++old credentials after a publication warning.
++
++## Delivery evidence differs from generation success
++
++[upstream-retry.mjs](../../src/upstream-retry.mjs) defaults to `at-most-once`
++**transport replay**. A generation POST may repeat only with positive
++`not_sent` evidence and before caller output, within attempt/time limits that
++are rechecked after backoff and response cancellation. Node's exact pre-TLS
++`ECONNRESET` establishes `not_sent`: it occurs before the secure connection can
++carry HTTP request bytes, even though Node omits `syscall` on that error. Its
++`host` field is retained in diagnostics. A generic connection reset,
++headers timeout, or 5xx can follow origin execution. Explicit
++`CODEX_ROUTER_NATIVE_RETRY_POLICY=availability` accepts ambiguous delivery;
++GET/HEAD/OPTIONS use the safe-method retry allowance.
++
++For routed transport failover, the default policy trusts pre-send evidence only
++from the confined local API-forwarder header. Provider headers are stripped;
++body markers alone are diagnostic. Availability policy can permit an ambiguous
++marked transport failure. See [transport-failure.mjs](../../src/transport-failure.mjs)
++and [model-failover.mjs](../../src/model-failover.mjs).
++
++These gates do not imply one generation attempt per user turn. Semantic repairs
++(such as an empty completion or context adjustment), quota failover, client
++retries, and LiteLLM/provider retry layers retain separate rules. Vision retries
++and fallback also stop on ambiguous delivery under the default policy. There
++is no end-to-end exactly-once guarantee without origin idempotency.
++
++[response-outcome.mjs](../../src/response-outcome.mjs) records `completed`,
++`failed`, `incomplete`, `canceled`, or `indeterminate` separately from HTTP
++status. When a protocol observer expects a terminal event, its absence is
++indeterminate even after HTTP 200.
++The [Control Center presentation](../../apps/control-center/src/generation-outcome.ts)
++keeps historical HTTP-only rows distinct from recorded generation outcomes.
++
++## Responses interruption keeps the connection usable
++
++[responses-websocket.mjs](../../src/responses-websocket.mjs) accepts Codex's
++`response.interrupt` with `response_id` and `mode: discard_partial_items`.
++Control messages bypass the generation queue. Acceptance cancels the local
++HTTP request, discards pending items, and finishes with `response.incomplete`
++whose reason is `interrupted`. Completed items and observed usage survive;
++usage is not invented for an origin that never reported it. A completed origin
++JSON response retains its output and usage even while client writes wait.
++
++Completion can win an interruption race; late duplicates do not leave an error
++for the next turn. A retained continuation permits the next `response.create`
++on the same connection. When its bounded cache cannot hold that context,
++`previous_response_not_found` requires the client to resend full context.
++The interruption snapshot and pending-item tracker have separate bounds.
++Canceling the local transport does not establish that the origin stopped
++executing or charging. The [WebSocket tests](../../test/responses-websocket.test.mjs)
++exercise live socket reuse, cancellation, completion races, cache overflow,
++and deterministic write backpressure.
++
++## One catalog owner, event notifications, daily fallback
++
++Initial readiness and dependency recovery share one serialized finalizer.
++Readiness uses each required service's current, individually checked child;
++historical child handles are retained only for shutdown ownership. A missing,
++dead, or replaced required child cannot be omitted to pass aggregate health.
++Pending Antigravity activation retains the captured proof/session generation
++and rechecks current children after promotion. An unconfirmed exact rollback
++reaches the service owner and stops its children; it is not swallowed as a
++dependency restart failure. Degraded startup also retires bootstrap allowances.
++
++The ready supervisor owns the single background catalog watcher; the router
++frontend and Control Center do not start competing watchers.
++[native-catalog-events.mjs](../../src/native-catalog-events.mjs) watches account
++and installed-binary identity changes through parent directories, debounces
++events, and keeps identities only in memory. Bearer rotation alone is not an
++account change; missing/unreadable identity is not proof of logout.
++
++[native-catalog-drift.mjs](../../src/native-catalog-drift.mjs) serializes refreshes
++and retains events received during an active refresh. Boot forces account
++revalidation. Account changes do not reuse the previous account's conditional
++cache; binary changes trigger a fresh check. Generated model caches/catalogs
++and staged selections are not watched, preventing self-triggered publication.
++The default fallback is daily because remote entitlement changes need not
++produce local events. [native-catalog-settings.mjs](../../src/native-catalog-settings.mjs)
++validates interval overrides. Discovery-off suppresses account reads and event
++notifications; shutdown closes watchers and timers.
++
++## Private replacement and shutdown ownership
++
++Twenty-four consumer writer implementations use the shared private boundary
++in [file-security.mjs](../../src/file-security.mjs). On Windows, same-directory
++rename preserves the already hardened temporary file's DACL, removing the
++second default ACL-helper launch. This reduces ordinary writes from two launches
++to one and caller-key swaps from three to two; backup protection remains.
++POSIX chmod behavior, custom temporary/final protection callbacks, Kimi fsync,
++exact Buffer bytes, exclusive copying, symlink guards, and rollback generations
++remain distinct contracts.
++
++Failed exclusive creation grants no cleanup ownership. Cleanup compares the
++created file's identity before unlinking and preserves a substituted object
++with `cleanupError: ESTALE`. A displaced owned temporary can remain as recovery
++evidence; the helper does not guess another path or claim to solve every
++malicious publication race. These guarantees have actual Windows DACL,
++collision, fsync/close, rename-failure, and junction/leaf-substitution coverage
++in the [private-writer tests](../../test/private-writer-specialized.test.mjs)
++and [cleanup ownership tests](../../test/private-writer-cleanup-ownership.test.mjs).
++
++[service-shutdown.mjs](../../src/service-shutdown.mjs) uses only supervisor-owned
++child handles. The frontend drains and flushes before downstream hops stop.
++Owned Node children receive `model-router:shutdown` through IPC, which invokes
++the same bounded handler on Windows, where `kill("SIGTERM")` is abrupt.
++[http-utils.mjs](../../src/http-utils.mjs) stops accepting requests, ends remaining
++streams with a terminal error, allows a flush interval, and disconnects IPC
++before normal exit. Each phase and the absolute force-stop backstop are bounded;
++the result reports the shutdown attempt, not proof that every OS process exited.
+diff --git a/docs/personal-fork.md b/docs/personal-fork.md
+new file mode 100644
+--- /dev/null
++++ b/docs/personal-fork.md
+@@ -0,0 +1,74 @@
++# 个人 fork 的维护与恢复
++
++本次维护版本为 `personal/v0.6.0-r4`，采用上游提交
++`00eed6eb9f894a734eb51bb2e2b058575c6dca7a` 的全部运行时代码、测试、技能和依赖。
++版本号仍为上游的 `0.6.0`；个人标签标识经过审核的具体提交，不表示官方新发布。
++
++## 分支与历史
++
++| 名称 | 用途 |
++| --- | --- |
++| `origin` | `https://github.com/TruthNian/codex-router.git` |
++| `upstream` | `https://github.com/duolahypercho/codex-router.git` |
++| `main` | 官方主线的同步副本 |
++| `personal` | 安装来源；运行时代码与采用的官方提交一致，只增加维护文档和本机状态排除规则 |
++| `personal/v0.6.0-r1` 至 `r3` | 旧定制实现的不可变恢复标签 |
++| `personal/v0.6.0-r4` | 上游整合版本；旧个人提交作为合并祖先保留 |
++
++合并记录有上游和旧个人分支两个父提交。此次保留上游的运行时树，不叠加旧补丁。
++已发布标签不移动，不覆盖；后续更新建立新标签。
++
++## 已由上游承担的行为
++
++| 原定制 | 采用的上游实现 |
++| --- | --- |
++| 每个自定义模型选择端点协议 | #984，保留各模型的 `endpoint.protocol` 配置 |
++| 当前 CUA 工具入口与技能 | #987，采用上游技能包 |
++| 目录 watcher 生命周期 | #985，启动检查与关闭清理 |
++| 目录检查频率 | #996，使用服务环境变量配置 |
++| 自动目标继续无进展保护 | #998，按模型显式开启 |
++| GLM-5.3 重复输出保护 | #999，经 #1000 纳入上游，按模型显式开启 |
++| Windows 冷启动进程身份、ACL、VBScript 引擎 | 上游已有对应修复与回归测试 |
++| 原生 Responses 推理分离、仅完成事件返回正文或拒绝 | 采用上游路由和空响应处理 |
++
++两个保护默认关闭。本机 curated GLM-5.3 模型使用：
++
++```json
++{
++  "goalContinuationGuard": true,
++  "repetitionGuard": true
++}
++```
++
++将字段放在对应 `user-models.json` 模型条目上，不改变其端点、密钥、预算或推理设置。
++checked-in 模型需要使用 `MODEL_ROUTER_REGISTRY` override，重复的用户条目不能覆盖它。
++更保守的上游保护排除结构化输出、代码、工具与推理；它不复刻旧保护的全部启发式。
++空响应和缺失 terminal 使用上游原有处理，不额外恢复旧强制拒绝逻辑。
++
++旧 `generation-safety.mjs` 及其历史清理功能已移除。旧逻辑发现一条损坏正文后
++可能丢弃其他健康助手上下文，不能直接重新移植。旧代码仍保存在 r1–r3 标签中。
++
++## 本机偏好与部署
++
++每天检查目录的设置是 `CODEX_ROUTER_NATIVE_CATALOG_POLL_INTERVAL_MS=86400000`。
++启动检查与手动刷新仍然保留。该值应同时存在于 Windows 用户环境和服务启动脚本中；
++重新安装或 repair 时确认安装进程取得此变量，不能只依赖旧代码中硬编码的频率。
++上游未设置此变量时默认五分钟。
++
++保持原稳定安装路径、共享状态目录和同名计划任务。账号、密钥、模型选择及
++其他 Codex 设置属于本机状态，不提交到 Git。升级前为状态、技能、任务、依赖
++与旧提交建立私有恢复快照；Git 切回旧提交本身不能回退 Python/Node 依赖。
++
++后续更新先在独立工作树中采用指定上游提交，审核差异并运行隔离测试。
++验证后快进 `personal`、创建新标签，再部署。本机偏好继续使用官方配置入口；
++仅在上游没有覆盖实际问题时才新增代码补丁。
++
++取回源码：
++
++```powershell
++git clone --branch personal https://github.com/TruthNian/codex-router.git codex-router-personal
++git -C codex-router-personal remote add upstream https://github.com/duolahypercho/codex-router.git
++git -C codex-router-personal fetch origin tag personal/v0.6.0-r4
++```
++
++这不会恢复本机账号、密钥或服务。部署与回退都应先备份后来新增的配置。
+diff --git a/docs/reviews/first-principles-optimization-2026-10-10.md b/docs/reviews/first-principles-optimization-2026-10-10.md
+new file mode 100644
+--- /dev/null
++++ b/docs/reviews/first-principles-optimization-2026-10-10.md
+@@ -0,0 +1,109 @@
++# 从使用目的重建 Codex Router 的优化边界
++
++日期：2026-10-10。基线运行代码：`00eed6eb9f894a734eb51bb2e2b058575c6dca7a`。
++本报告区分代码复现、运行观察、解释和未验证假设。实现先在个人 fork 验证，尚未替换生产服务。
++
++## 能证实的结论
++
++项目确实存在可删除的工作、过宽的故障依赖和不准确的成功统计。不能据此证明“协作者多”是原因，也不能把所有网络故障归因于 Router。
++
++最近 100 个 PR 的样本中，84 个合并，81 个没有正式 review 记录，58 个没有正式 review 或 issue comment；当前上游 main 没有强制状态检查。这个样本来自一次集中清理积压的时期，不能外推长期缺陷率。评论中的复现、负向对照和取舍讨论也是审核证据，不能因为没有 APPROVED 就认为无人审核。已有三系统 Node 测试、原生应用测试、Electron 构建和锁定 Python 安装验证，不能称为“只有简单测试”。[上游分支](https://github.com/duolahypercho/codex-router/tree/00eed6eb9f894a734eb51bb2e2b058575c6dca7a)、[积压审查记录](https://github.com/duolahypercho/codex-router/blob/00eed6eb9f894a734eb51bb2e2b058575c6dca7a/docs/reviews/pr-backlog-2026-10-10.md)、[PR #986](https://github.com/duolahypercho/codex-router/pull/986)、[PR #994](https://github.com/duolahypercho/codex-router/pull/994)。
++
++更符合已知证据的解释是：个人使用的少数路径承担了大量通用兼容责任，而输出、生成状态、路由依赖和发布时序没有始终使用同一份判断。作者数量只能作为待验证变量。
++
++## 方法：先确定不可违背的事实
++
++马斯克谈第一性原理时，强调从基础事实重新推导，而非沿用相似系统的做法。五步顺序是质疑需求、删除部件或过程、简化剩余部分、缩短周期、最后自动化。这里采用的是推理顺序；访谈中的删除比例提示不是软件必须删掉某个百分比的验收规则。[TED 访谈](https://www.ted.com/talks/elon_musk_the_mind_behind_tesla_spacex_solarcity)、[Starbase 原访谈，约 13:30 起](https://www.youtube.com/watch?v=t705r8ICkRw&t=810s)。
++
++对本系统，基础约束是：
++
++1. 用户需要在同一客户端选择原生和自定义模型，保留工具、历史、图片、压缩和取消语义。存在某种官方自定义配置，不等于已经证明它能提供相同的桌面体验。
++2. 已执行的远程计算不能靠关闭本地连接撤销。客户端未收到字节，也不能证明上游未接收 POST。重试不是免费恢复。
++3. HTTP 200 只说明该跳点接受了 HTTP 响应，生成仍可能失败、不完整或没有终止事件。令牌消耗与生成成功是不同维度。
++4. 协议转换只有在两端确实不兼容时才有必要。相同协议仍可能有认证、工具命名、帧验证和厂商字段差异，不能直接把全部中间层删掉。
++5. 数据、权限、进程内采用的配置和客户端目录必须属于可解释的同一代状态。磁盘写入和进程采用是两件事。
++6. 用户隐藏的模型可能仍被历史会话、别名或视觉辅助调用；缺少凭据不等于用户撤销了选择。
++7. 对性能的判断必须区分本地工作和远程等待。减少一个进程或一次 ACL 操作，不等于模型生成速度提高相同比例。
++
++优化目标据此定为：降低得到一个正确、完整结果的总成本，以及失败时的恢复成本。成本包括延迟、额外生成、内存、配置漂移、诊断时间和维护负担。不能单独追求请求次数少、代码行数少或 HTTP 成功率高。
++
++## 第一步：质疑需求及其隐含前提
++
++| 既有做法背后的前提 | 验证结果 | 应保留的真实需求 |
++| --- | --- | --- |
++| 所有模型都需要 LiteLLM | 错。原生 GPT 和经契约测试的 HTTP Responses 路径不需要它；Chat、Messages 和专用适配仍可能需要 | 按具体模型的有效协议构建执行计划 |
++| 容器 provider 相同，协议就相同 | 错。逐模型 endpoint 和协议 variant 可以覆盖容器默认值 | 解析最终模型，而非仅看 provider 名字 |
++| 菜单隐藏就可以停止依赖 | 错。隐藏不禁止历史会话或辅助调用 | 包含全部可调用路由，显示策略另算 |
++| 未配置的 provider 应自动删除 | 不成立。会抹掉明确选择，也使以后补凭据行为难解释 | 保留选择并返回具体设置错误 |
++| 无输出的 502/reset 可以安全重复 | 错。模拟上游完整消费 POST 后断开，基线再次提交 | 只有明确未发送的错误可默认重试；不确定重放需要显式策略 |
++| 连接拒绝总证明整个尝试未发送 | 有条件。307/308 的第一站已消费 POST，下一站才拒绝连接 | 生成请求拒绝重定向，不能把第二站的失败当作第一站未发送 |
++| 上游 JSON 的 not_sent 字段可信 | 错。响应体和原站伪造的头不能授权重放 | 只信实际本地 API 服务产生的运输证据；原站同名头被剥离 |
++| HTTP 200 可以计为成功 | 错。response.failed、不完整流都可发生在 200 内 | 明确记录生成终态并保留全部已知用量 |
++| Responses WebSocket 只会收到 response.create | 已失效。官方 Codex 的 steering 已发送 response.interrupt；本机二进制包含该协议，旧路由器的拒绝语句与实际报错完全一致 | 中断消息绕过生成队列、结束当前响应并保留同一连接的续接能力 |
++| reasoning 标签总是私密思考泄漏 | 错。代码、XML 示例和截断标签也合法 | 默认保真；只给有证据的具体模型启用修复 |
++| Windows rename 后必须再做相同 ACL | 常规文件不需要；备份、恢复、外部文件是不同对象 | 一个经过验证的私有写入边界，保留必要的 fsync 和生命周期保护 |
++| 扫描所有可选提供商更利于诊断 | 默认诊断中会淹没当前配置问题 | 默认检查相关配置，完整盘点使用 --all |
++| 目录刷新越频繁越可靠 | 不成立。账户和客户端变化有事件；服务器发模型没有本地事件 | 事件触发、合并重复工作，以及每日兜底 |
++| 发布目录即完成启用 | 错。运行进程可能仍持有旧 registry 或没有对应监听器 | 先准备依赖、采用并验证，再发布客户端 |
++| 停止 Router 和依赖可同时进行 | 错。依赖先停会切断尚未完成的流 | 先停止入口接单并排空，再停止依赖 |
++| formal review 数量等于审核质量 | 不成立，已有反例；无强制门禁则确实可以绕过检查 | 验证具体行为及失败对照，再决定采用 |
++
++每项需求的责任主体应对应到实际接口和验收行为：用户决定显示、提供商与网络决定远程能力，Router 负责本地协议和交付语义，安装器负责配置与服务采用，维护者负责合并验证。不能把“以前一直这样”作为独立需求。
++
++## 第二步：删除有反证支持的工作
++
++已实施的候选改动包括：
++
++- 正常 Responses 输出默认保留原文；已知旧模型泄漏使用明确的模型级策略。包括行内 XML、代码块、UTF-8 分块和末尾不完整标签的对照测试。
++- 在 GLM/Grok 等已验证的 Responses 路径删除 Python 协议转换这一跳，保留 Node API 的凭据解析、请求准备、工具恢复和帧验证。
++- 不启动未被执行计划使用的 OAuth 服务。原生路径先获得核心可用性，缺失网关时可继续服务独立路径，完整 readiness 保持失败以阻止错误发布。
++- 24 个私有写入实现归并到同一边界，删掉常规 Windows 写入中重复的 ACL 子进程。保留不同备份、回滚版本、已有钥匙修复和自定义回调的保护。
++- 删除 Router 内部另一个每五分钟目录定时器。之前只看 supervisor 的每日配置会漏掉这个实际定时器，因此“当前只有每日刷新”的早期判断已更正。
++- 默认 doctor 排除未使用提供商的无关告警，保留有效 protocol variant、generic provider 和密钥池权威检查。
++- 拒绝生成 POST 的隐式重定向，以及默认不确定运输重放；同时保留明确预发送恢复、受限语义修复和独立的凭据预检修复。
++
++这里不能删去 Python 的重要实际条件是：当前 registry 还包含 `custom/qwen3.8-27b` 等 Chat 模型。只要该路由仍可调用，网关就仍是执行计划的依赖，即使菜单隐藏了它。减少常用 Responses 路径的一跳与删除整个 Python 进程是不同结果。
++
++## 第三步：简化剩下的判断
++
++引入共用的生成终态观察器，将 `completed / failed / incomplete / canceled / indeterminate` 与 HTTP 状态分开。失败的已知用量继续计量；历史行没有终态证据，保留旧解释并单独统计，不能事后“修正”为确定的成功或失败。桌面显示也消费同一语义。
++
++共用执行计划解析最终模型协议，返回实际服务和路由指纹。运行 Router 与 API 服务固定采用启动时的选择；辅助视觉、压缩和故障切换不能越过这份选择读取尚未采用的候选配置。指纹不包含秘密值，也不宣称覆盖环境变量、Vertex 独立状态或覆盖文件的全部内容。
++
++模型变化按“准备依赖 → 新进程准备路由 → 服务采用验证 → 新进程发布目录”执行。失败恢复原始文件后，再采用并发布原配置；取消和失败不能共享一个已过期的恢复截止时间。前台服务无法由后台管理器重载时，需要明确停止或重新启动，不能假装采用成功。
++
++本次实际会话报错还暴露了协议假设过时：Router 只接受 `response.create`，而官方 Codex [2026-09-26 的实现](https://github.com/openai/codex/commit/12de0e395d3313bc564190d983cb4f5acf0be713) 会在 steering 时发送 `response.interrupt`。未捕获用户当时的具体控制帧，但旧代码拒绝语句、本机客户端二进制和本地失败对照共同确认了这一兼容性缺陷。修复立即处理控制消息，取消本地上游请求，以 `response.incomplete / interrupted` 结束当前响应，保留已完成内容和已观察用量。完成竞争、缓存溢出和已完成 JSON 写入背压都有对照；取消本地连接不证明远程执行或扣费已终止。
++
++这项紧急兼容修复已单独通过三系统 CI，合并到个人仓库并部署为 `d161d2136cdb3f5b7e149eaa805ab8f72fa50329`；本机验证了中断识别、同连接续接和迟到中断不影响下一轮，未发出计费生成请求。其余优化仍作为独立候选审查，没有部署。
++
++刷新原生目录只需要验证现有采用状态并发布，不需要每次安装依赖、重写网关或重启。并发刷新合并为单次运行，运行期间的事件保留一个后续检查。临时 Antigravity 待激活证明可能需要未选择提供商的监听器，但不产生可调用路由；它参与 readiness，不能让证明升级改变未变的路由指纹。
++
++不可逆操作需要明确例外：OAuth 断开保留断开栅栏，不能恢复旧令牌使过时会话复活。环境变量密钥池只暂存元数据，必须经安装器持久化服务环境或重启前台进程后再 apply；不会提前发布客户端。
++
++私有写入归并不只追求更快。测试发现临时文件的父目录被换成 junction 后，失败清理可能删除被重定向到的无关文件，因此清理只删除本次独占创建、身份仍一致的文件。这个检查没有声称消除恶意并发路径替换的全部出版风险。
++
++## 第四步：缩短验证与故障定位周期
++
++先跑能证伪假设的单项测试，再跑关联契约和全仓检查。使用真实本地 Router/API/模拟上游进程，而不是仅检查某函数被调用了几次。关键对照包括：完整接收 POST 后 reset、307 到拒绝连接、HTTP 200 内失败、配置写盘后进程未采用、隐藏 Chat 视觉模型、未使用端口已有无关服务、Windows 流式排空和私有文件替换失败。
++
++新增 ingress、准备以及上游响应头等待分段。最后一项仍包含本地适配、网络和提供商处理，不能直接称为“模型耗时”。原有整个链路到响应头的指标保留兼容解释。
++
++测量边界：七天日志共 5,857 次请求，原生 GPT-6.1 与 GLM 约占 98.1%，足以确定优化优先级；不能据此比较模型优劣。680 MiB 的进程 working-set 求和可能重复计算共享内存；55.7 秒启动间隔只是单次观察；三个私有写入微实验约 39% 改善只适用于该写入操作，不能宣传为端到端提升。
++
++合并单位应是可独立验证的行为。真正需要同时改运行、安装、健康检查和发布的变更可以作为一个原子单位；无关输出修复、统计和文件写入优化应保持可单独审查的提交。审核应看负向对照能否失败，以及修复后原有能力能否保持，而非只看测试总数。
++
++## 第五步：自动化已经验证过的流程
++
++个人 fork 应对实际维护分支运行 CI，检查最终提交，而不是只测试另一个分支的相似代码。跨系统检查通过后再将状态检查设为合并条件。正式发布和本机替换要在独立阶段做；本次 fork 候选不能因为单机模拟测试通过就视为已经部署验证。
++
++目录刷新自动化使用账户身份和客户端构建变化事件，身份摘要只在内存中存在；访问令牌轮换本身不代表账户变化，暂时缺少认证文件也不推断退出。每日检查仍有必要，因为服务器发布模型不必产生本地事件。网关秒级健康检查回答的是进程是否正在失效，不能用模型更新频率决定它是否必要。
++
++不要自动缩短所有超时、无限重试、拉取模型或替换代理配置。自动化只应执行已经界定好的工作，且遇到不确定状态应给出具体失败证据。本次没有更改 FlClash、节点或生产网络。
++
++## 验收状态及剩余边界
++
++定向对照已验证输出保真、失败计量、默认运输不确定不重放、私有权限、计划驱动启动以及真实 Windows 排空。目录采用、凭据发布和停止流程在合并候选中继续接受全仓关联检查，最终结果以 PR 的具体提交和 CI 为准。
++
++仍需区分而不能夸大的边界：客户端自身重试、其他适配器/密钥池/LiteLLM 的重试、明确的空输出修复、远程扣费是否终止、实际提供商的实时契约和不同系统的运行结果。模拟上游的重复执行证明本地策略可以重复提交，不能证明已经发生真实重复扣费或工具执行。
++
++维护接口和可复现入口见 [运行契约](../maintenance/optimization-runtime-contracts.md)。生产部署前应在已确认的代码版本上另做小规模真实请求对照；此项尚未执行，不属于本次“先放个人仓库”的本机替换步骤。
+diff --git a/docs/route-execution-plan.md b/docs/route-execution-plan.md
+--- a/docs/route-execution-plan.md
++++ b/docs/route-execution-plan.md
+@@ -45,3 +45,5 @@ this query is not an inventory of the currently running stack.
+-This additive API/query does not yet change service startup, installer
+-provisioning, Router dispatch, health reporting or client publication. Each
+-consumer can adopt the shared decision in its own independently reviewed PR.
++The upstream compiler/query is an additive API. This integration also retains
++the deployed consumers in service startup, installer provisioning, Router
++dispatch, health reporting and client publication. Their adoption, readiness
++and rollback boundaries are documented in
++[Optimization runtime contracts](maintenance/optimization-runtime-contracts.md).
+diff --git a/src/router.mjs b/src/router.mjs
+--- a/src/router.mjs
++++ b/src/router.mjs
+@@ -3043 +3051 @@ function compactionAttempts(route, aged, searchContract, { allowFailover = true
+-    selectedConfiguredListedModels().filter(
++    adoptedConfiguredListedModels().filter(
+@@ -3074 +3082 @@ function rankCompactionOverflowCandidates({
+-    selectedConfiguredListedModels().filter(
++    adoptedConfiguredListedModels().filter(
+@@ -4489 +4527,0 @@ async function handleResponses(request, response, requestUrl) {
+-  const upstreamAttempts = [];
+@@ -4642 +4688,0 @@ async function handleResponses(request, response, requestUrl) {
+-          ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -4720 +4765,0 @@ async function handleResponses(request, response, requestUrl) {
+-          ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -5185 +5247,0 @@ async function handleResponses(request, response, requestUrl) {
+-            ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -5274 +5335,0 @@ async function handleResponses(request, response, requestUrl) {
+-        ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -5443,2 +5504,3 @@ async function handleResponses(request, response, requestUrl) {
+-      // Preserve visible XML and source examples unless an evidenced route
+-      // contract or explicit operator policy enables destructive cleanup.
++      // Visible XML and source examples are ordinary answer text by default.
++      // Only an evidenced route contract or explicit operator policy enables
++      // legacy inline cleanup; nonce cleanup retains its strict Hy4 gate.
+@@ -5806 +5867,0 @@ async function handleResponses(request, response, requestUrl) {
+-      ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -5882 +5942,0 @@ async function handleResponses(request, response, requestUrl) {
+-          ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -5921 +5980,0 @@ async function handleResponses(request, response, requestUrl) {
+-        ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -5943 +6001,0 @@ async function handleResponses(request, response, requestUrl) {
+-        ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -5971 +6028,0 @@ async function handleResponses(request, response, requestUrl) {
+-        ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -5991 +6047,0 @@ async function handleResponses(request, response, requestUrl) {
+-        ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -6040 +6095,0 @@ async function handleResponses(request, response, requestUrl) {
+-        ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -6067 +6121,0 @@ async function handleResponses(request, response, requestUrl) {
+-          ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -6103 +6156,0 @@ async function handleResponses(request, response, requestUrl) {
+-          ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+@@ -6131 +6183,0 @@ async function handleResponses(request, response, requestUrl) {
+-        ...(!route && upstreamAttempts.length ? { upstreamAttempts, deliveryPolicy: NATIVE_RETRY_POLICY } : {}),
+diff --git a/src/skills-install.mjs b/src/skills-install.mjs
+--- a/src/skills-install.mjs
++++ b/src/skills-install.mjs
+@@ -41 +41 @@ import { withAtomicStateLock } from "./atomic-state-lock.mjs";
+-import { privateFileIsProtected, protectPrivateFile } from "./file-security.mjs";
++import { privateFileIsProtected, protectPrivateFile, writePrivateFile } from "./file-security.mjs";
+@@ -348 +347,0 @@ function writeOwnership(target, skills, external = emptySkills()) {
+-  const temporary = `${target}.tmp.${process.pid}`;
+@@ -351,7 +350 @@ function writeOwnership(target, skills, external = emptySkills()) {
+-  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, {
+-    encoding: "utf8",
+-    mode: 0o600,
+-  });
+-  protectPrivateFile(temporary);
+-  renameSync(temporary, target);
+-  protectPrivateFile(target);
++  writePrivateFile(target, `${JSON.stringify(state, null, 2)}\n`);
+diff --git a/test/skills-install.test.mjs b/test/skills-install.test.mjs
+--- a/test/skills-install.test.mjs
++++ b/test/skills-install.test.mjs
+@@ -98,0 +99,30 @@ test("install copies every pack skill with its SKILL.md and the marker", () => {
++test("skill publication supports strict no-replace copies into an exclusively claimed root", () => {
++  const home = tempCodexHome();
++  try {
++    const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
++      import assert from "node:assert/strict";
++      import fs from "node:fs";
++      import { syncBuiltinESMExports } from "node:module";
++      const copy = fs.cpSync;
++      // Node 24.22 rejects an existing directory at the root of a strict
++      // no-replace copy. Reproduce that contract on older supported runtimes.
++      fs.cpSync = function(source, target, options) {
++        if (options?.errorOnExist && options.force === false && fs.existsSync(target)) {
++          throw Object.assign(new Error("strict copy target already exists"), {code: "EEXIST"});
++        }
++        return copy(source, target, options);
++      };
++      syncBuiltinESMExports();
++      const { installSkills, installedSkillsFresh } = await import(${JSON.stringify(SKILLS_MODULE_URL)});
++      const home = ${JSON.stringify(home)};
++      const result = installSkills(home, {quiet: true});
++      assert.equal(result.installed, ${PACK.length});
++      assert.equal(result.skipped, 0);
++      assert.deepEqual(installedSkillsFresh(home), {fresh: true, stale: []});
++    `], { encoding: "utf8", timeout: 60_000, windowsHide: true });
++    assert.equal(child.status, 0, child.stderr || child.stdout);
++  } finally {
++    rmSync(home, { recursive: true, force: true });
++  }
++});
++

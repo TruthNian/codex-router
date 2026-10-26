@@ -1,0 +1,409 @@
+diff --git a/changelog.d/desktop-tool-readback-proof.md b/changelog.d/desktop-tool-readback-proof.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/desktop-tool-readback-proof.md
+@@ -0,0 +1 @@
++- **Recognize archive readback proofs inside Desktop tool wrappers.** Decode bounded nested JSON envelopes while preserving signature, expiry and conversation/permission scope checks and full-text fallback.
+diff --git a/changelog.d/model-tool-aging-threshold.md b/changelog.d/model-tool-aging-threshold.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/model-tool-aging-threshold.md
+@@ -0,0 +1 @@
++- **Opt routed models into smaller tool-result size floors and readback notices.** Persist validated per-model choices while preserving defaults, newest-four protection and full-text fallback; minimum-savings and failed-probe guards avoid unnecessary repeated readback requests.
+diff --git a/changelog.d/scoped-tool-result-search.md b/changelog.d/scoped-tool-result-search.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/scoped-tool-result-search.md
+@@ -0,0 +1 @@
++- **Find exact archived evidence within one conversation/permission scope.** Add literal archive search with bounded excerpts, stable pagination and incomplete-search reporting, reusing existing integrity and expiry checks without exposing foreign-scope handles or rerunning commands.
+diff --git a/docs/tool-result-model-policy.md b/docs/tool-result-model-policy.md
+new file mode 100644
+--- /dev/null
++++ b/docs/tool-result-model-policy.md
+@@ -0,0 +1,44 @@
++# Per-model history policy
++
++The default remains 32KiB, with native OpenAI aging disabled. Explicit model
++settings in the private `tool-result-aging.json` file can opt a routed model
++into a smaller size floor and a local readback notice:
++
++```json
++{
++  "version": 1,
++  "enabled": true,
++  "nativeEnabled": false,
++  "retentionTtlDays": 7,
++  "modelMinBytes": {"custom/z-ai/glm-5.3": 16384},
++  "readbackHintModels": ["custom/z-ai/glm-5.3"]
++}
++```
++
++Size floors must be integers between 8192 and 32768 bytes. Invalid entries use
++the existing default. Ordinary toggles and retention changes preserve these
++model choices. Exported validated setters are `setToolResultAgingMinBytes`
++and `setToolResultReadbackHint` in `src/tool-result-aging-state.mjs`; omitting
++the size resets that model's floor, and setting the hint to false removes it.
++Settings are read for each request after the new runtime has been adopted.
++The notice policy falls back to the existing 32KiB behavior when the planned
++wire-byte savings are below 128KiB, avoiding a probe for small histories.
++
++The notice is off by default. It adds a wire-only developer message only when
++the Router has committed exact original text but has not observed a valid
++same-context local readback proof. It asks for one read-only `--limit 1` probe;
++it does not bypass proof, force a tool choice, execute a tool, or change the
++client's saved history. The
++notice is suppressed after a failed read attempt, so denied access does not
++create an automatic probe loop. Signed proofs in bounded Desktop JSON result
++wrappers are decoded and verified with the same signature, expiry and scope
++checks as direct exec output; wrapping is never permission to omit data.
++Normal function-call arguments remain exact. The
++newest four results, unconsumed results, mixed image outputs, tool-less calls,
++failed archive writes and unverified access retain the existing protections.
++
++A smaller request is not necessarily cheaper: probes and retrieval add model
++calls, and rewriting an old prefix may lose cache hits. Validate real token
++usage, settled provider fees and task correctness before enabling a model.
++
++For exact lookup across matching archives, see [scoped archive search](tool-result-scope-search.md).
+diff --git a/docs/tool-result-readback-proof.md b/docs/tool-result-readback-proof.md
+new file mode 100644
+--- /dev/null
++++ b/docs/tool-result-readback-proof.md
+@@ -0,0 +1,10 @@
++# Desktop archive readback proofs
++
++Signed proofs in bounded Desktop JSON result wrappers are decoded and verified
++with the same signature, expiry and conversation/permission scope checks as
++direct exec output. Wrapping is never permission to omit data.
++
++Decoding is limited to eight nested levels, complete JSON strings of at most
++64KiB, the first 64 array entries, and known text/output/content/value fields.
++Missing, inaccessible, forged, expired or cross-context proofs keep full
++tool output in the request. No source command is rerun to recover it.
+diff --git a/docs/tool-result-scope-search.md b/docs/tool-result-scope-search.md
+new file mode 100644
+--- /dev/null
++++ b/docs/tool-result-scope-search.md
+@@ -0,0 +1,15 @@
++# Exact lookup without guessing archive handles
++
++The existing reader accepts `--scope-search --find 'literal identifier'` with
++any valid reference handle. It returns exact excerpts only from archives with
++the same signed conversation/permission scope. It reuses the original reader's
++integrity, signature, expiry, regular-file and directory checks. It does not
++execute source commands or summarize the evidence.
++
++Output is bounded (at most 16,000 UTF-16 characters of excerpts, 32 matching
++archives, and a 16MiB/one-second scan budget between files). `complete: false`
++must never be treated as absence. Continue with `--cursor N --index HASH` when
++`nextCursor` is present; a changed directory index requires restarting the
++search. Corrupt or expired entries report an incomplete search without exposing
++unknown-scope handles. Each matching archive supplies its first occurrence;
++use the ordinary reader's `--offset` for further occurrences or context.
+diff --git a/src/router.mjs b/src/router.mjs
+--- a/src/router.mjs
++++ b/src/router.mjs
+@@ -296,0 +299 @@ import {
++  toolResultAgingOptions,
+@@ -3403,0 +3412 @@ async function summarize(request, payload, route, signal, { allowFailover = true
++      trustedDeliveryState: trustedProviderDeliveryState(attemptRoute, sent.upstream),
+diff --git a/src/tool-result-aging-state.mjs b/src/tool-result-aging-state.mjs
+--- a/src/tool-result-aging-state.mjs
++++ b/src/tool-result-aging-state.mjs
+@@ -15,0 +16 @@ import { toolResultAgingTotals } from "./usage-events.mjs";
++import { TOOL_RESULT_AGING_MIN_BYTES } from "./tool-result-aging.mjs";
+@@ -76,0 +78,2 @@ export function readToolResultAgingSettings() {
++        ...modelThresholds(parsed.modelMinBytes),
++        ...readbackHintSettings(parsed.readbackHintModels),
+@@ -84,0 +88,59 @@ export function readToolResultAgingSettings() {
++// Per-model opt-in only. Existing installations keep the 32KiB policy; an
++// invalid entry cannot lower the floor. Keep the frontier and recovery checks
++// in the shared aging pass, regardless of this size policy.
++function validModel(model) {
++  return typeof model === "string" && /^[a-z0-9][a-z0-9._/-]{0,199}$/u.test(model);
++}
++
++function validMinBytes(value) {
++  return Number.isSafeInteger(value) && value >= 8 * 1024 && value <= TOOL_RESULT_AGING_MIN_BYTES;
++}
++
++function modelThresholds(value) {
++  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
++  const entries = Object.entries(value).filter(([model, bytes]) => validModel(model) && validMinBytes(bytes));
++  return entries.length ? { modelMinBytes: Object.fromEntries(entries) } : {};
++}
++
++function readbackHintSettings(value) {
++  const models = Array.isArray(value) ? [...new Set(value.filter(validModel))].sort() : [];
++  return models.length ? { readbackHintModels: models } : {};
++}
++
++export function toolResultAgingOptions(model) {
++  const settings = readToolResultAgingSettings();
++  return {
++    minBytes: settings.modelMinBytes && Object.hasOwn(settings.modelMinBytes, model)
++      ? settings.modelMinBytes[model] : TOOL_RESULT_AGING_MIN_BYTES,
++    readbackHint: settings.readbackHintModels?.includes(model) === true,
++    ...(settings.readbackHintModels?.includes(model) === true ? { minSavingsBytes: 128 * 1024 } : {}),
++  };
++}
++
++export function toolResultAgingMinBytes(model) {
++  return toolResultAgingOptions(model).minBytes;
++}
++
++export function setToolResultReadbackHint(model, enabled) {
++  if (!validModel(model) || typeof enabled !== "boolean") throw new Error("Readback hint requires a model slug and boolean.");
++  const current = readToolResultAgingSettings();
++  const models = new Set(current.readbackHintModels || []);
++  if (enabled) models.add(model);
++  else models.delete(model);
++  const { defaulted: _defaulted, readbackHintModels: _previous, ...rest } = current;
++  return writeSettings({ ...rest, ...readbackHintSettings([...models]) });
++}
++
++export function setToolResultAgingMinBytes(model, bytes) {
++  if (!validModel(model)) throw new Error("Aging threshold requires a valid model slug.");
++  if (bytes !== undefined && !validMinBytes(bytes)) {
++    throw new Error("Aging threshold must be an integer between 8192 and 32768 bytes.");
++  }
++  const current = readToolResultAgingSettings();
++  const entries = new Map(Object.entries(current.modelMinBytes || {}));
++  if (bytes === undefined) entries.delete(model);
++  else entries.set(model, bytes);
++  const { defaulted: _defaulted, modelMinBytes: _previous, ...rest } = current;
++  return writeSettings({ ...rest, ...modelThresholds(Object.fromEntries(entries)) });
++}
++
+@@ -96,0 +159,2 @@ export function setToolResultAgingEnabled(enabled) {
++    ...modelThresholds(current.modelMinBytes),
++    ...readbackHintSettings(current.readbackHintModels),
+@@ -106,0 +171,2 @@ export function setNativeToolResultAgingEnabled(enabled) {
++    ...modelThresholds(current.modelMinBytes),
++    ...readbackHintSettings(current.readbackHintModels),
+@@ -138,0 +205,2 @@ export function setRetentionTtlDays(days) {
++    ...modelThresholds(current.modelMinBytes),
++    ...readbackHintSettings(current.readbackHintModels),
+diff --git a/src/tool-result-read.mjs b/src/tool-result-read.mjs
+--- a/src/tool-result-read.mjs
++++ b/src/tool-result-read.mjs
+@@ -3 +3 @@ import { fileURLToPath } from "node:url";
+-import { readRetainedToolResult } from "./tool-result-recovery.mjs";
++import { readRetainedToolResult, searchRetainedToolResults } from "./tool-result-recovery.mjs";
+@@ -9 +9,2 @@ export function readToolResultCommand(args) {
+-  for (let i = 0; i < rest.length; i += 2) {
++  let search = false;
++  for (let i = 0; i < rest.length;) {
+@@ -11,2 +12,5 @@ export function readToolResultCommand(args) {
+-    if (!["--store", "--offset", "--limit", "--find"].includes(flag) || value === undefined || flags.has(flag)) {
+-      throw new Error("Usage: tool-result-read HANDLE [--store DIR] [--offset N] [--limit N] [--find TEXT]");
++    if (flag === "--scope-search" && !flags.has(flag)) {
++      flags.add(flag); search = true; i += 1; continue;
++    }
++    if (!["--store", "--offset", "--limit", "--find", "--cursor", "--index"].includes(flag) || value === undefined || flags.has(flag)) {
++      throw new Error("Usage: tool-result-read HANDLE [--store DIR] [--offset N] [--limit N] [--find TEXT] [--scope-search [--cursor N --index HASH]]");
+@@ -16 +20,5 @@ export function readToolResultCommand(args) {
+-      flag === "--offset" || flag === "--limit" ? Number(value) : value;
++      ["--offset", "--limit", "--cursor"].includes(flag) ? Number(value) : value;
++    i += 2;
++  }
++  if ((search && flags.has("--offset")) || (!search && (flags.has("--cursor") || flags.has("--index")))) {
++    throw new Error("Use --offset for a single archive; --cursor and --index only with --scope-search.");
+@@ -17,0 +26 @@ export function readToolResultCommand(args) {
++  if (search) return searchRetainedToolResults(handle, options);
+diff --git a/src/tool-result-recovery.mjs b/src/tool-result-recovery.mjs
+--- a/src/tool-result-recovery.mjs
++++ b/src/tool-result-recovery.mjs
+@@ -4 +4 @@ import {
+-  openSync, readFileSync, renameSync, unlinkSync, utimesSync, writeFileSync,
++  openSync, readFileSync, readdirSync, renameSync, unlinkSync, utimesSync, writeFileSync,
+@@ -70,0 +71,19 @@ function readbackProof(key, scope, now) {
++function* readbackTexts(value, depth = 0) {
++  if (depth > 8) return;
++  if (typeof value === "string") {
++    yield value;
++    // Desktop batched tools wrap exec output in JSON strings. Decode only
++    // bounded, complete JSON envelopes; signatures and scope are still
++    // checked below. Large/unknown formats simply keep the original text.
++    if (value.length <= 64 * 1024) {
++      try { yield* readbackTexts(JSON.parse(value), depth + 1); } catch { /* plain text */ }
++    }
++  } else if (Array.isArray(value)) {
++    for (const item of value.slice(0, 64)) yield* readbackTexts(item, depth + 1);
++  } else if (value && typeof value === "object") {
++    for (const key of ["text", "output", "content", "value"]) {
++      if (Object.hasOwn(value, key)) yield* readbackTexts(value[key], depth + 1);
++    }
++  }
++}
++
+@@ -74 +93,2 @@ export function hasVerifiedToolResultReadback(input, scope, { directory, now = D
+-    for (const item of input) {
++    for (let index = input.length - 1; index >= 0; index -= 1) {
++      const item = input[index];
+@@ -76,9 +96,9 @@ export function hasVerifiedToolResultReadback(input, scope, { directory, now = D
+-      const text = typeof item.output === "string" ? item.output
+-        : Array.isArray(item.output) ? item.output.map(part => part?.text || "").join("") : "";
+-      for (const match of (text || "").matchAll(/"readbackProof"\s*:\s*"([A-Za-z0-9_-]{1,512})\.([A-Za-z0-9_-]{43})"/gu)) {
+-        const expected = Buffer.from(signProof(key, match[1]));
+-        const signature = Buffer.from(match[2]);
+-        if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) continue;
+-        const proof = JSON.parse(Buffer.from(match[1], "base64url").toString("utf8"));
+-        if (proof.scope === sha256(String(scope)) && Number.isSafeInteger(proof.expiresAt) &&
+-            proof.expiresAt > now && proof.expiresAt <= now + PROOF_TTL_MS) return true;
++      for (const text of readbackTexts(item.output)) {
++        for (const match of text.matchAll(/"readbackProof"\s*:\s*"([A-Za-z0-9_-]{1,512})\.([A-Za-z0-9_-]{43})"/gu)) {
++          const expected = Buffer.from(signProof(key, match[1]));
++          const signature = Buffer.from(match[2]);
++          if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) continue;
++          const proof = JSON.parse(Buffer.from(match[1], "base64url").toString("utf8"));
++          if (proof.scope === sha256(String(scope)) && Number.isSafeInteger(proof.expiresAt) &&
++              proof.expiresAt > now && proof.expiresAt <= now + PROOF_TTL_MS) return true;
++        }
+@@ -233,0 +254,50 @@ export async function withRetainedToolResultsLock(operation, { directory = TOOL_
++export function searchRetainedToolResults(handle, {
++  directory = TOOL_RESULT_RETENTION_DIR, ttlMs = retentionTtlMs(), now = Date.now(),
++  find, limit = 2000, cursor = 0, index,
++} = {}) {
++  if (typeof find !== "string" || !find || find.length > 2000) throw failure("invalid_search");
++  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16000 ||
++      !Number.isSafeInteger(cursor) || cursor < 0) throw failure("invalid_range");
++  const root = storeRoot(directory);
++  // Reuse the existing authenticated reader for the reference and every
++  // candidate. A reference handle grants lookup only in its own signed scope.
++  const reference = readRetainedToolResult(handle, {directory: root, ttlMs, now, limit: 1});
++  const proofScope = result => JSON.parse(Buffer.from(result.readbackProof.split(".")[0], "base64url").toString("utf8")).scope;
++  const scope = proofScope(reference);
++  const files = readdirSync(root).filter(name => /^[A-Za-z0-9_-]{43}\.result$/u.test(name)).sort();
++  const fingerprint = sha256(JSON.stringify(files));
++  if (cursor > files.length || (cursor > 0 && index !== fingerprint) ||
++      (index !== undefined && index !== fingerprint)) throw failure("search_changed");
++  const matches = [];
++  let bytes = 0, characters = 0, searched = 0, unavailable = 0, position = cursor;
++  const started = Date.now();
++  for (; position < files.length; position += 1) {
++    if (position > cursor && (bytes >= 16 * 1024 * 1024 || Date.now() - started > 1000 ||
++        characters >= limit || matches.length >= 32)) break;
++    const candidate = files[position].slice(0, -7);
++    let result;
++    try {
++      bytes += lstatSync(path.join(root, files[position])).size;
++      result = readRetainedToolResult(candidate, {directory: root, ttlMs, now, find,
++        limit: Math.max(1, limit - characters)});
++    } catch {
++      // Unknown/corrupt/expired entries cannot establish absence. Do not leak
++      // their handles or contents; report an incomplete search instead.
++      unavailable += 1;
++      continue;
++    }
++    if (proofScope(result) !== scope) continue;
++    searched += 1;
++    if (result.found === false) continue;
++    characters += result.text.length;
++    matches.push(Object.fromEntries(["handle","sha256","offset","nextOffset","eof","text"]
++      .map(key => [key, result[key]])));
++  }
++  return {
++    matches, searched, complete: position === files.length && unavailable === 0,
++    nextCursor: position < files.length ? position : null, index: fingerprint,
++    unavailable, matchPolicy: "first occurrence per archive; use individual --offset for later occurrences",
++    readbackProof: reference.readbackProof,
++  };
++}
++
+@@ -251,0 +322 @@ export function recoveryInstruction(snapshot) {
++    "If the matching archive is unknown, use this handle with --scope-search --find 'literal text'; it searches only this conversation/permission scope. " +
+@@ -255 +326,16 @@ export function recoveryInstruction(snapshot) {
+-export async function ageToolResultsWithRecovery(input, { tools, scope = "", retain = retainToolResult, ...options } = {}) {
++function hasFailedReadbackAttempt(input) {
++  const completed = new Map(input.filter(item =>
++    ["function_call_output", "custom_tool_call_output"].includes(item?.type))
++    .map(item => [item.call_id, item.output]));
++  return input.some(item => {
++    if (!["function_call", "custom_tool_call"].includes(item?.type) || !completed.has(item.call_id)) return false;
++    const args = typeof item.arguments === "string" ? item.arguments : String(item.input || "");
++    if (!args.includes("tool-result-read.mjs")) return false;
++    // An attempted read that returned no proof must not create an automatic
++    // retry loop. This only suppresses the optional hint; it never authorizes
++    // omission. A past successful proof can be renewed after it expires.
++    return ![...readbackTexts(completed.get(item.call_id))].some(text => text.includes('"readbackProof"'));
++  });
++}
++
++export async function ageToolResultsWithRecovery(input, { tools, scope = "", retain = retainToolResult, readbackHint = false, minSavingsBytes = 0, ...options } = {}) {
+@@ -261 +347 @@ export async function ageToolResultsWithRecovery(input, { tools, scope = "", ret
+-  ageToolResults(input, { ...options, retain(text, info) {
++  const planned = ageToolResults(input, { ...options, retain(text, info) {
+@@ -264,0 +351,9 @@ export async function ageToolResultsWithRecovery(input, { tools, scope = "", ret
++  // A probe and cache rebuild can cost more than a small omission saves.
++  // For an explicitly configured threshold, fall back to the existing policy
++  // before writing snapshots or changing the wire history when the potential
++  // is too small. Defaults and callers without this opt-in are unchanged.
++  if (Number.isFinite(minSavingsBytes) && minSavingsBytes > 0 &&
++      planned.stats.toolResultBytesSaved < minSavingsBytes) {
++    return ageToolResultsWithRecovery(input, { tools, scope, retain,
++      ...options, minBytes: undefined, readbackHint: false });
++  }
+@@ -297,0 +393,18 @@ export async function ageToolResultsWithRecovery(input, { tools, scope = "", ret
++  if (readbackHint && pending.size && !hasFailedReadbackAttempt(input)) {
++    // A per-model opt-in, constructed solely from this request's committed
++    // snapshots. Keep the permission proof requirement; never synthesize one
++    // from the router's own filesystem access. This notice is a wire-only
++    // addition and does not mutate the client's persisted conversation.
++    const first = [...committed.values()].find(({ snapshot, info }) =>
++      pending.has(info.index) && !verified.get(snapshot.directory));
++    if (first) result.input = [...result.input, {
++      type: "message", role: "developer", content: [{ type: "input_text", text:
++        "Router archive access check: before continuing, use an available local execution tool once " +
++        "to run the exact read-only archive reader below with --limit 1. This verifies local access " +
++        "so old results can be omitted safely in later requests. Then continue the user task. " +
++        "For an unknown archive, use --scope-search --find with any shown handle instead of guessing handles. " +
++        "Respect user restrictions and permission policy; if a local read is disallowed, continue with the full text. " +
++        "Do not rerun historical commands merely to reconstruct archived output.\n" + first.instruction,
++      }],
++    }];
++  }
+diff --git a/test/tool-result-aging-state.test.mjs b/test/tool-result-aging-state.test.mjs
+--- a/test/tool-result-aging-state.test.mjs
++++ b/test/tool-result-aging-state.test.mjs
+@@ -19,0 +20,3 @@ const {
++  toolResultAgingOptions,
++  setToolResultAgingMinBytes,
++  setToolResultReadbackHint,
+@@ -24,0 +28,36 @@ const DAY_MS = 24 * 60 * 60 * 1000;
++test("per-model floors and readback hints are opt-in and survive unrelated settings", () => {
++  forgetState();
++  const model = "custom/z-ai/glm-5.3";
++  assert.deepEqual(toolResultAgingOptions(model), {minBytes: 32768, readbackHint: false});
++  setToolResultAgingMinBytes(model, 16384);
++  setToolResultReadbackHint(model, true);
++  setToolResultAgingEnabled(true);
++  setNativeToolResultAgingEnabled(false);
++  setRetentionTtlDays(5);
++  assert.deepEqual(toolResultAgingOptions(model), {minBytes: 16384, readbackHint: true, minSavingsBytes: 131072});
++  for (const other of [undefined, "gpt-6.1-sol", "custom/other"]) {
++    assert.deepEqual(toolResultAgingOptions(other), {minBytes: 32768, readbackHint: false});
++  }
++  assert.equal(readToolResultAgingSettings().retentionTtlDays, 5);
++  setToolResultAgingMinBytes(model, undefined);
++  assert.deepEqual(toolResultAgingOptions(model), {minBytes: 32768, readbackHint: true, minSavingsBytes: 131072});
++  setToolResultReadbackHint(model, false);
++  assert.equal("modelMinBytes" in readToolResultAgingSettings(), false);
++  assert.equal("readbackHintModels" in readToolResultAgingSettings(), false);
++  forgetState();
++});
++
++test("malformed model policies cannot lower an unrelated floor or enable hints", () => {
++  forgetState();
++  for (const bad of [null, [], "16384", {"custom/test": 1}, {"custom/test": "16384"}, {"custom/test": 16384.5}]) {
++    writeFileSync(TOOL_RESULT_AGING_STATE_PATH, JSON.stringify({version: 1, enabled: true, modelMinBytes: bad, readbackHintModels: "custom/test"}));
++    assert.deepEqual(toolResultAgingOptions("custom/test"), {minBytes: 32768, readbackHint: false});
++  }
++  for (const bad of [null, 0, -1, 8191, 32769, NaN, Infinity, 16384.5, "16384"]) {
++    assert.throws(() => setToolResultAgingMinBytes("custom/test", bad));
++  }
++  assert.throws(() => setToolResultReadbackHint("custom/test", "true"));
++  assert.throws(() => setToolResultAgingMinBytes("../outside\n", 16384));
++  forgetState();
++});
++

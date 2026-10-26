@@ -1616,11 +1616,8 @@
       "url": "https://github.com/TruthNian/codex-router/pull/24",
       "publishedHead": "6eaa21eb98417b090025be9947c303e02ff5e2f2",
       "isDraft": true,
-      "remainingSourceFiles": [
-        "src/caller-key-rotation.mjs",
-        "src/file-security.mjs"
-      ],
-      "extractionNotes": "Ten earlier consumers, credential metadata #1084 and Codex config #1085 actually merged. Windows launcher #1083 is green and OPEN; Kimi token sync #1086 is submitted with its cohesive shared fsync option. Rotation and the two afterReplace primitive hunks remain, alongside historical fixture/adopted-provider fragments. Keep backups #12/#24; filenames are not a PR count.",
+      "remainingSourceFiles": [],
+      "extractionNotes": "All archived runtime writer changes now have upstream PR mappings; this does not complete the topic. Kimi #1086 actually merged. Windows launcher #1083 is green and OPEN, and caller rotation #1087 is submitted. Four historical test groups and the transferred adopted-provider snapshot still need explicit final coverage/disposition. Keep backups #12/#24 open; all original 24 topics remain in the total index.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -2209,7 +2206,7 @@
         },
         "kimi_private_writer": {
           "id": "kimi_private_writer",
-          "status": "ci_running",
+          "status": "merged",
           "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-kimi-private-20261026",
           "branch": "fix/kimi-durable-private-writer-20261026",
           "base": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
@@ -2231,28 +2228,20 @@
           "commit": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
           "pr": 1086,
           "url": "https://github.com/duolahypercho/codex-router/pull/1086",
-          "prState": "OPEN",
+          "prState": "MERGED",
           "title": "fix: preserve Kimi token sync through the private writer",
           "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
           "backupState": "OPEN",
           "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
           "ciCheckpoint": {
-            "checkedAt": "2026-10-26T05:31:13.104043+00:00",
+            "checkedAt": "2026-10-26T06:34:52.170421+00:00",
             "head": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
-            "state": "OPEN",
+            "state": "MERGED",
             "counts": {
-              "PENDING": 6,
-              "SUCCESS": 3,
+              "SUCCESS": 9,
               "SKIPPED": 2
             },
-            "pending": [
-              "test (ubuntu-latest)",
-              "test (macos-latest)",
-              "test (windows-latest)",
-              "Electron control center (Linux)",
-              "Electron control center (Windows)",
-              "Unified native macOS app"
-            ],
+            "pending": [],
             "comments": 0,
             "reviews": 0
           },
@@ -2294,7 +2283,91 @@
           "ciRun": 40274526058,
           "discoveryRun": 40274526075,
           "additionalRuns": [],
-          "topic": "private-writers/kimi-token-sync"
+          "topic": "private-writers/kimi-token-sync",
+          "mergedAt": "2026-10-26T06:16:12Z",
+          "mergeCommit": "ff4af8b1d1bd27794ce63a435762338795770a9b",
+          "verifiedInMain": "ff4af8b1d1bd27794ce63a435762338795770a9b"
+        },
+        "rotation_private_replace": {
+          "id": "rotation_private_replace",
+          "status": "ci_running",
+          "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-rotation-private-20261026",
+          "branch": "refactor/caller-rotation-private-replace-20261026",
+          "base": "ff4af8b1d1bd27794ce63a435762338795770a9b",
+          "head": "c8f1dbd6af4271c6be17a87c9578ba98681155bb",
+          "backupPr": 24,
+          "sourceTopic": "private-writers",
+          "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\rotation-private-pr-body.md",
+          "acceptance": {
+            "baseline": "verified: default Windows helpers 3 on old swap vs2 on candidate; custom remains3",
+            "ordering": "verified: before/after callbacks occur once at intended boundaries; custom temporary/final hooks preserved",
+            "rollback": "verified: all original generation formats and recovery behavior retained; unlink-before-restore observed, rollback failure retains old backup and subsequent restore succeeds",
+            "consumers": "verified: 29 rotation/maintenance, 51 shared/Kimi/cleanup and1 profile copy tests pass;1 POSIX platform skip",
+            "focused": "verified:27 focused cases including six exact callback thrown values pass on final source",
+            "controls": "verified:10 baseline/mutation controls fail intended oracles and source/helper restored exact",
+            "review": "verified:7/7 final hunks accepted, syntax and whitespace passed",
+            "platformCI": "pending:full applicable CI required before next submission"
+          },
+          "commit": "c8f1dbd6af4271c6be17a87c9578ba98681155bb",
+          "pr": 1087,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1087",
+          "prState": "OPEN",
+          "title": "refactor: share private replacement during caller-key rotation",
+          "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
+          "backupState": "OPEN",
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "ciCheckpoint": {
+            "checkedAt": "2026-10-26T06:37:13.877429+00:00",
+            "head": "c8f1dbd6af4271c6be17a87c9578ba98681155bb",
+            "state": "OPEN",
+            "counts": {
+              "PENDING": 6,
+              "SUCCESS": 3,
+              "SKIPPED": 2
+            },
+            "pending": [
+              "test (ubuntu-latest)",
+              "test (macos-latest)",
+              "test (windows-latest)",
+              "Electron control center (Linux)",
+              "Electron control center (Windows)",
+              "Unified native macOS app"
+            ],
+            "comments": 0,
+            "reviews": 0
+          },
+          "mergeValidation": {
+            "head": "c8f1dbd6af4271c6be17a87c9578ba98681155bb",
+            "main": "ff4af8b1d1bd27794ce63a435762338795770a9b",
+            "merge": "e3274484ec3e0ec60deeb55c7afd12fac34e0333",
+            "parents": [
+              "ff4af8b1d1bd27794ce63a435762338795770a9b",
+              "c8f1dbd6af4271c6be17a87c9578ba98681155bb"
+            ],
+            "files": [
+              "changelog.d/caller-rotation-private-replace.md",
+              "src/caller-key-rotation.mjs",
+              "src/file-security.mjs",
+              "test/caller-rotation-private-replace.test.mjs"
+            ],
+            "sourceHelperTestBlobsMatchLocal": true
+          },
+          "dependsOnMerged": [],
+          "requiredUpstreamMerges": [
+            1009
+          ],
+          "sharedCleanupFix": "06bdc15704ea327e679cef69a412a0dadd348b01",
+          "sourceHunkIds": [
+            "src/caller-key-rotation.mjs#0",
+            "src/caller-key-rotation.mjs#1",
+            "src/caller-key-rotation.mjs#2",
+            "src/file-security.mjs#2",
+            "src/file-security.mjs#3"
+          ],
+          "ciRun": 40280760812,
+          "discoveryRun": 40280760791,
+          "additionalRuns": [],
+          "topic": "private-writers/caller-rotation"
         }
       },
       "promotionStatus": "partially_promoted",
@@ -2351,18 +2424,22 @@
       "remainingExtractionConstraints": [
         {
           "path": "src/kimi-oauth-session.mjs",
-          "status": "implemented_pending_upstream_ci",
+          "status": "verified_merged",
           "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
           "reason": "Archived caller passes fsync:true, but current writePrivateFile does not accept or execute fsync. Preserve write -> fsync -> close -> harden -> rename and falsy primary/secondary close failures. Do not promote caller alone.",
           "upstreamPr": 1086,
           "upstreamHead": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
-          "verifiedBase": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1"
+          "verifiedBase": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
+          "mergeCommit": "ff4af8b1d1bd27794ce63a435762338795770a9b"
         },
         {
           "path": "src/caller-key-rotation.mjs",
-          "status": "requires_cohesive_callback_and_rollback_review",
+          "status": "implemented_pending_upstream_ci",
           "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-          "reason": "Archived rotation passes afterReplace to set newSecretLive. Current replacePrivateFile does not invoke it. Preserve callback immediately after rename and before custom final protection, plus exact backup/rollback generation semantics; caller alone is unsafe."
+          "reason": "Archived rotation passes afterReplace to set newSecretLive. Current replacePrivateFile does not invoke it. Preserve callback immediately after rename and before custom final protection, plus exact backup/rollback generation semantics; caller alone is unsafe.",
+          "upstreamPr": 1087,
+          "upstreamHead": "c8f1dbd6af4271c6be17a87c9578ba98681155bb",
+          "verifiedBase": "ff4af8b1d1bd27794ce63a435762338795770a9b"
         },
         {
           "path": "src/provider-credential-store.mjs",
@@ -2402,13 +2479,52 @@
             "test/private-writer-specialized.test.mjs#0"
           ],
           "status": "partially_covered_remaining_consumer_review",
-          "covered": "Kimi/direct-fsync behavior independently covered by new #1086 tests; shared async identity cleanup already has merged dedicated coverage.",
+          "covered": "Kimi/fsync independently covered by merged #1086; caller rotation/callback generation behavior by submitted #1087; shared async identity cleanup already merged. Original combined custom-copy/remaining assertions still require final coverage audit.",
           "deferred": "Retain original rotation/custom-copy assertions for review alongside their remaining consumer boundaries. Do not blindly apply the entire combined specialized test."
+        },
+        {
+          "id": "private-writer-consolidation-historical-coverage",
+          "sourcePath": "test/private-writer-consolidation.test.mjs",
+          "backupPr": 24,
+          "sourceHunkIds": [
+            "test/private-writer-consolidation.test.mjs#0"
+          ],
+          "status": "remaining_historical_coverage_audit",
+          "reason": "Runtime consumers were independently promoted with focused failure tests. Compare every original combined assertion against current main before deciding covered, redundant, adapted or still needed; do not apply the old combined fixture blindly."
+        },
+        {
+          "id": "private-writer-consolidation-more-historical-coverage",
+          "sourcePath": "test/private-writer-consolidation-more.test.mjs",
+          "backupPr": 24,
+          "sourceHunkIds": [
+            "test/private-writer-consolidation-more.test.mjs#0"
+          ],
+          "status": "remaining_historical_coverage_audit",
+          "reason": "Runtime consumers were independently promoted with focused failure tests. Compare every original combined assertion against current main before deciding covered, redundant, adapted or still needed; do not apply the old combined fixture blindly."
         }
       ],
-      "remainingSharedPrimitiveHunks": [
-        "src/file-security.mjs#2",
-        "src/file-security.mjs#3"
+      "remainingSharedPrimitiveHunks": [],
+      "remainingBoundaries": [
+        {
+          "id": "submitted-runtime-parts-awaiting-actual-merge",
+          "prs": [
+            1083,
+            1087
+          ]
+        },
+        {
+          "id": "historical-test-coverage-audit",
+          "fields": [
+            "historicalTestFragments"
+          ]
+        },
+        {
+          "id": "adopted-provider-read-snapshot",
+          "fields": [
+            "transferredSourceFragments"
+          ],
+          "targetTopic": "adopted-catalog"
+        }
       ]
     },
     {
@@ -4033,7 +4149,7 @@
     },
     "private-writers/kimi-token-sync": {
       "id": "kimi_private_writer",
-      "status": "ci_running",
+      "status": "merged",
       "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-kimi-private-20261026",
       "branch": "fix/kimi-durable-private-writer-20261026",
       "base": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
@@ -4050,33 +4166,25 @@
         "rebase": "verified: 34 focused +30 newly merged config writer cases pass on latest main; relevant source/test blobs identical to pre-rebase validation",
         "controls": "verified: 10 asserted baseline/mutation controls fail expected oracles, source/helper restored exact",
         "review": "verified: 14/14 final published hunks accepted, no findings; syntax and whitespace passed",
-        "fullPlatformCI": "pending: complete applicable CI required before next submission"
+        "fullPlatformCI": "verified:9 SUCCESS and2 conditional SKIPPED on exact head; actually merged into latest main"
       },
       "commit": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
       "pr": 1086,
       "url": "https://github.com/duolahypercho/codex-router/pull/1086",
-      "prState": "OPEN",
+      "prState": "MERGED",
       "title": "fix: preserve Kimi token sync through the private writer",
       "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
       "backupState": "OPEN",
       "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
       "ciCheckpoint": {
-        "checkedAt": "2026-10-26T05:31:13.104043+00:00",
+        "checkedAt": "2026-10-26T06:34:52.170421+00:00",
         "head": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
-        "state": "OPEN",
+        "state": "MERGED",
         "counts": {
-          "PENDING": 6,
-          "SUCCESS": 3,
+          "SUCCESS": 9,
           "SKIPPED": 2
         },
-        "pending": [
-          "test (ubuntu-latest)",
-          "test (macos-latest)",
-          "test (windows-latest)",
-          "Electron control center (Linux)",
-          "Electron control center (Windows)",
-          "Unified native macOS app"
-        ],
+        "pending": [],
         "comments": 0,
         "reviews": 0
       },
@@ -4118,11 +4226,95 @@
       "ciRun": 40274526058,
       "discoveryRun": 40274526075,
       "additionalRuns": [],
-      "topic": "private-writers/kimi-token-sync"
+      "topic": "private-writers/kimi-token-sync",
+      "mergedAt": "2026-10-26T06:16:12Z",
+      "mergeCommit": "ff4af8b1d1bd27794ce63a435762338795770a9b",
+      "verifiedInMain": "ff4af8b1d1bd27794ce63a435762338795770a9b"
+    },
+    "private-writers/caller-rotation": {
+      "id": "rotation_private_replace",
+      "status": "ci_running",
+      "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-rotation-private-20261026",
+      "branch": "refactor/caller-rotation-private-replace-20261026",
+      "base": "ff4af8b1d1bd27794ce63a435762338795770a9b",
+      "head": "c8f1dbd6af4271c6be17a87c9578ba98681155bb",
+      "backupPr": 24,
+      "sourceTopic": "private-writers",
+      "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\rotation-private-pr-body.md",
+      "acceptance": {
+        "baseline": "verified: default Windows helpers 3 on old swap vs2 on candidate; custom remains3",
+        "ordering": "verified: before/after callbacks occur once at intended boundaries; custom temporary/final hooks preserved",
+        "rollback": "verified: all original generation formats and recovery behavior retained; unlink-before-restore observed, rollback failure retains old backup and subsequent restore succeeds",
+        "consumers": "verified: 29 rotation/maintenance, 51 shared/Kimi/cleanup and1 profile copy tests pass;1 POSIX platform skip",
+        "focused": "verified:27 focused cases including six exact callback thrown values pass on final source",
+        "controls": "verified:10 baseline/mutation controls fail intended oracles and source/helper restored exact",
+        "review": "verified:7/7 final hunks accepted, syntax and whitespace passed",
+        "platformCI": "pending:full applicable CI required before next submission"
+      },
+      "commit": "c8f1dbd6af4271c6be17a87c9578ba98681155bb",
+      "pr": 1087,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1087",
+      "prState": "OPEN",
+      "title": "refactor: share private replacement during caller-key rotation",
+      "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
+      "backupState": "OPEN",
+      "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+      "ciCheckpoint": {
+        "checkedAt": "2026-10-26T06:37:13.877429+00:00",
+        "head": "c8f1dbd6af4271c6be17a87c9578ba98681155bb",
+        "state": "OPEN",
+        "counts": {
+          "PENDING": 6,
+          "SUCCESS": 3,
+          "SKIPPED": 2
+        },
+        "pending": [
+          "test (ubuntu-latest)",
+          "test (macos-latest)",
+          "test (windows-latest)",
+          "Electron control center (Linux)",
+          "Electron control center (Windows)",
+          "Unified native macOS app"
+        ],
+        "comments": 0,
+        "reviews": 0
+      },
+      "mergeValidation": {
+        "head": "c8f1dbd6af4271c6be17a87c9578ba98681155bb",
+        "main": "ff4af8b1d1bd27794ce63a435762338795770a9b",
+        "merge": "e3274484ec3e0ec60deeb55c7afd12fac34e0333",
+        "parents": [
+          "ff4af8b1d1bd27794ce63a435762338795770a9b",
+          "c8f1dbd6af4271c6be17a87c9578ba98681155bb"
+        ],
+        "files": [
+          "changelog.d/caller-rotation-private-replace.md",
+          "src/caller-key-rotation.mjs",
+          "src/file-security.mjs",
+          "test/caller-rotation-private-replace.test.mjs"
+        ],
+        "sourceHelperTestBlobsMatchLocal": true
+      },
+      "dependsOnMerged": [],
+      "requiredUpstreamMerges": [
+        1009
+      ],
+      "sharedCleanupFix": "06bdc15704ea327e679cef69a412a0dadd348b01",
+      "sourceHunkIds": [
+        "src/caller-key-rotation.mjs#0",
+        "src/caller-key-rotation.mjs#1",
+        "src/caller-key-rotation.mjs#2",
+        "src/file-security.mjs#2",
+        "src/file-security.mjs#3"
+      ],
+      "ciRun": 40280760812,
+      "discoveryRun": 40280760791,
+      "additionalRuns": [],
+      "topic": "private-writers/caller-rotation"
     }
   },
   "upstreamStateSnapshot": {
-    "verifiedMain": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
+    "verifiedMain": "ff4af8b1d1bd27794ce63a435762338795770a9b",
     "merged": [
       1062,
       1063,
@@ -4143,15 +4335,16 @@
       1081,
       1082,
       1084,
-      1085
+      1085,
+      1086
     ],
     "open": [
       1065,
       1068,
       1083,
-      1086
+      1087
     ],
-    "updatedAt": "2026-10-26T05:31:13.104043+00:00"
+    "updatedAt": "2026-10-26T06:37:13.877429+00:00"
   },
-  "verifiedMain": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1"
+  "verifiedMain": "ff4af8b1d1bd27794ce63a435762338795770a9b"
 }

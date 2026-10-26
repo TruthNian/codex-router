@@ -514,6 +514,85 @@
           "mergeCommit": "7432b02d670dd7889696fc91971257a427016d34",
           "mergedAt": "2026-10-25T05:25:06Z",
           "verifiedInMain": "7432b02d670dd7889696fc91971257a427016d34"
+        },
+        "windows_launcher_private_writer": {
+          "id": "windows_launcher_private_writer",
+          "status": "ci_running",
+          "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+          "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+          "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
+          "branch": "fix/windows-launcher-private-writer-20261026",
+          "sourceTopic": "selected-services",
+          "targetTopic": "private-writers",
+          "backupPr": 12,
+          "crossReferenceBackupPr": 24,
+          "sourceHunkIds": [
+            "src/service-windows.mjs#0",
+            "src/service-windows.mjs#1",
+            "src/service-windows.mjs#2",
+            "src/service-windows.mjs#3"
+          ],
+          "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\windows-launcher-private-pr-body.md",
+          "acceptance": {
+            "encoding": "verified: exact renderer UTF-8 CMD/BOM UTF-16LE VBS bytes, Unicode/percent/quote paths, proxy credentials and repeated install; wrong-encoding mutation fails",
+            "privacy": "verified: actual owner-only permission checks before rename and at target; 2 Windows ACL operations for two launchers vs 4 baseline; skipped-hardener mutation fails",
+            "ownership": "verified: baseline consumes PID-only foreign files for CMD and VBS; exclusive collisions, write/close/ACL/rename, cleanup failure and replaced-leaf ESTALE preserve old target and foreign evidence",
+            "failure": "verified: installer preserves existing catch/recovery/report contract and exits nonzero when publication fails; no pairwise transaction claimed",
+            "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
+            "adjacent": "verified: 15 focused and 47 adjacent pass; 23 POSIX/stub assertions skip on Windows; real UTF-16 VBS exit forwarding case also passes",
+            "review": "verified: 6/6 final hunks accepted, no findings, unchanged boundary; full check 7 apps / 138 fragments and whitespace pass; final added assertion syntax verified",
+            "ci": "Running on exact published head; next submission requires every applicable check to pass."
+          },
+          "dependsOnMerged": [],
+          "preparedAt": "2026-10-26T01:40:16.950144+00:00",
+          "commit": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+          "pr": 1083,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1083",
+          "prState": "OPEN",
+          "title": "fix: publish Windows launchers with the private writer",
+          "ciCheckpoint": {
+            "checkedAt": "2026-10-26T01:55:59.835964+00:00",
+            "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+            "state": "OPEN",
+            "counts": {
+              "PENDING": 10,
+              "SUCCESS": 2,
+              "SKIPPED": 2
+            },
+            "pending": [
+              "test (ubuntu-latest)",
+              "ubuntu-latest / python 3.12",
+              "test (macos-latest)",
+              "macos-latest / python 3.12",
+              "test (windows-latest)",
+              "windows-latest / python 3.12",
+              "Electron control center (Linux)",
+              "Electron control center (Windows)",
+              "Unified native macOS app",
+              "GitGuardian Security Checks"
+            ],
+            "comments": 0,
+            "reviews": 0
+          },
+          "backupUrl": "https://github.com/TruthNian/codex-router/pull/12",
+          "backupState": "OPEN",
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "mergeValidation": {
+            "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+            "main": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+            "merge": "f461461f851b79c96961b6d86dca98a6663f78f4",
+            "parents": [
+              "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+              "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+            ],
+            "files": [
+              "changelog.d/windows-launcher-private-writer.md",
+              "src/service-windows.mjs",
+              "test/windows-launcher-private-writer.test.mjs"
+            ],
+            "sourceHelperTestBlobsMatchLocal": true
+          },
+          "topic": "private-writers/windows-launcher"
         }
       },
       "promotionStatus": "partially_promoted"

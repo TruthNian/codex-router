@@ -462,12 +462,15 @@
             "src/service-windows.mjs#3"
           ],
           "targetTopic": "private-writers",
-          "status": "waiting_independent_extraction",
-          "notes": "The old archive assigned these adjacent imports/writeAtomic hunks to selected-services. They consolidate launcher writes on writePrivateFile and are excluded from runtime-hop selection. Preserve the immutable source patch; independently test encoding, ACL and collision ownership before proposing."
+          "status": "upstream_submitted",
+          "notes": "The old archive assigned these adjacent imports/writeAtomic hunks to selected-services. They consolidate launcher writes on writePrivateFile and are excluded from runtime-hop selection. Preserve the immutable source patch; independently test encoding, ACL and collision ownership before proposing.",
+          "upstreamPr": 1083,
+          "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1083",
+          "upstreamHead": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
         }
       ],
       "backupState": "OPEN",
-      "extractionNotes": "Only runtime-hop selection is independently implemented in upstream #1077. Keep this archive open; remainingBoundaries and transferredSourceFragments retain the unpromoted source. Direct Responses is already merged via #1069; redirect/delivery and per-model aging remain separately gated.",
+      "extractionNotes": "Runtime-hop selection is merged as #1077. Windows launcher private publication is separately submitted as #1083; all remainingBoundaries, adopted-provider fragments and other source hunks remain pending. Preserve this partial archive.",
       "upstreamParts": {
         "selected_runtime_services": {
           "topic": "selected-services/runtime-hops",
@@ -1502,10 +1505,9 @@
         "src/config-manager.mjs",
         "src/file-security.mjs",
         "src/kimi-oauth-session.mjs",
-        "src/provider-credential-store.mjs",
-        "src/service-windows.mjs"
+        "src/provider-credential-store.mjs"
       ],
-      "extractionNotes": "Nine independent private-writer consumer PRs (#1070-1075 and #1079-1081) are actually merged. Legacy migration records are independently submitted as #1082. Six remaining source-file candidates still need disposition; retain backup #24, Windows launcher fragments in backup #12 and the transferred adopted-provider read API in archive #20. This is not a required-PR count.",
+      "extractionNotes": "Nine private-writer consumer PRs (#1070-1075 and #1079-1081) are merged. Legacy record PR #1082 has all applicable CI passed; Windows launcher PR #1083 is separately submitted from backup #12. Five remaining source-file candidates need disposition. Keep partial backups #12/#24 and the adopted-provider read API in archive #20; this is not a required-PR count.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -1760,7 +1762,7 @@
         },
         "legacy_migration_private_writer": {
           "id": "legacy_migration_private_writer",
-          "status": "ci_running",
+          "status": "ci_passed_waiting_merge",
           "pr": 1082,
           "url": "https://github.com/duolahypercho/codex-router/pull/1082",
           "prState": "OPEN",
@@ -1785,26 +1787,17 @@
             "local": "verified: 14 focused + 15 adjacent + 1 config defaults/profiles pass on final rebased source; one POSIX-only assertion skipped on Windows. Earlier combined broad config suite timed out at 900 seconds across host suspend/resume and is explicitly not counted as passing.",
             "review": "verified: all five final hunks accepted; unchanged boundary and no findings.",
             "syntax": "verified: full npm check validates 7 applications, 138 fragments and syntax; committed whitespace check passes.",
-            "ci": "running on exact published head; do not submit next item before all applicable checks pass."
+            "ci": "9 SUCCESS and 2 conditional SKIPPED on exact published head 1fcb6630001b8404b2cc92446d20ce49aa4faa02; state OPEN."
           },
           "ciCheckpoint": {
-            "checkedAt": "2026-10-26T01:26:14.352979+00:00",
+            "checkedAt": "2026-10-26T01:55:59.835964+00:00",
             "head": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
             "state": "OPEN",
             "counts": {
-              "PENDING": 7,
-              "SUCCESS": 2,
+              "SUCCESS": 9,
               "SKIPPED": 2
             },
-            "pending": [
-              "test (ubuntu-latest)",
-              "test (macos-latest)",
-              "test (windows-latest)",
-              "Electron control center (Linux)",
-              "Electron control center (Windows)",
-              "Unified native macOS app",
-              "GitGuardian Security Checks"
-            ],
+            "pending": [],
             "comments": 0,
             "reviews": 0
           },
@@ -1828,6 +1821,85 @@
           "topic": "private-writers/legacy-migration",
           "head": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
           "sourceTopic": "private-writers"
+        },
+        "windows_launcher_private_writer": {
+          "id": "windows_launcher_private_writer",
+          "status": "ci_running",
+          "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+          "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+          "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
+          "branch": "fix/windows-launcher-private-writer-20261026",
+          "sourceTopic": "selected-services",
+          "targetTopic": "private-writers",
+          "backupPr": 12,
+          "crossReferenceBackupPr": 24,
+          "sourceHunkIds": [
+            "src/service-windows.mjs#0",
+            "src/service-windows.mjs#1",
+            "src/service-windows.mjs#2",
+            "src/service-windows.mjs#3"
+          ],
+          "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\windows-launcher-private-pr-body.md",
+          "acceptance": {
+            "encoding": "verified: exact renderer UTF-8 CMD/BOM UTF-16LE VBS bytes, Unicode/percent/quote paths, proxy credentials and repeated install; wrong-encoding mutation fails",
+            "privacy": "verified: actual owner-only permission checks before rename and at target; 2 Windows ACL operations for two launchers vs 4 baseline; skipped-hardener mutation fails",
+            "ownership": "verified: baseline consumes PID-only foreign files for CMD and VBS; exclusive collisions, write/close/ACL/rename, cleanup failure and replaced-leaf ESTALE preserve old target and foreign evidence",
+            "failure": "verified: installer preserves existing catch/recovery/report contract and exits nonzero when publication fails; no pairwise transaction claimed",
+            "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
+            "adjacent": "verified: 15 focused and 47 adjacent pass; 23 POSIX/stub assertions skip on Windows; real UTF-16 VBS exit forwarding case also passes",
+            "review": "verified: 6/6 final hunks accepted, no findings, unchanged boundary; full check 7 apps / 138 fragments and whitespace pass; final added assertion syntax verified",
+            "ci": "Running on exact published head; next submission requires every applicable check to pass."
+          },
+          "dependsOnMerged": [],
+          "preparedAt": "2026-10-26T01:40:16.950144+00:00",
+          "commit": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+          "pr": 1083,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1083",
+          "prState": "OPEN",
+          "title": "fix: publish Windows launchers with the private writer",
+          "ciCheckpoint": {
+            "checkedAt": "2026-10-26T01:55:59.835964+00:00",
+            "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+            "state": "OPEN",
+            "counts": {
+              "PENDING": 10,
+              "SUCCESS": 2,
+              "SKIPPED": 2
+            },
+            "pending": [
+              "test (ubuntu-latest)",
+              "ubuntu-latest / python 3.12",
+              "test (macos-latest)",
+              "macos-latest / python 3.12",
+              "test (windows-latest)",
+              "windows-latest / python 3.12",
+              "Electron control center (Linux)",
+              "Electron control center (Windows)",
+              "Unified native macOS app",
+              "GitGuardian Security Checks"
+            ],
+            "comments": 0,
+            "reviews": 0
+          },
+          "backupUrl": "https://github.com/TruthNian/codex-router/pull/12",
+          "backupState": "OPEN",
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "mergeValidation": {
+            "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+            "main": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+            "merge": "f461461f851b79c96961b6d86dca98a6663f78f4",
+            "parents": [
+              "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+              "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+            ],
+            "files": [
+              "changelog.d/windows-launcher-private-writer.md",
+              "src/service-windows.mjs",
+              "test/windows-launcher-private-writer.test.mjs"
+            ],
+            "sourceHelperTestBlobsMatchLocal": true
+          },
+          "topic": "private-writers/windows-launcher"
         }
       },
       "promotionStatus": "partially_promoted",
@@ -1874,8 +1946,31 @@
             "src/service-windows.mjs#3"
           ],
           "targetTopic": "private-writers",
-          "status": "waiting_independent_extraction",
-          "notes": "The old archive assigned these adjacent imports/writeAtomic hunks to selected-services. They consolidate launcher writes on writePrivateFile and are excluded from runtime-hop selection. Preserve the immutable source patch; independently test encoding, ACL and collision ownership before proposing."
+          "status": "upstream_submitted",
+          "notes": "The old archive assigned these adjacent imports/writeAtomic hunks to selected-services. They consolidate launcher writes on writePrivateFile and are excluded from runtime-hop selection. Preserve the immutable source patch; independently test encoding, ACL and collision ownership before proposing.",
+          "upstreamPr": 1083,
+          "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1083",
+          "upstreamHead": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+        }
+      ],
+      "remainingExtractionConstraints": [
+        {
+          "path": "src/kimi-oauth-session.mjs",
+          "status": "requires_cohesive_primitive_and_consumer_review",
+          "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+          "reason": "Archived caller passes fsync:true, but current writePrivateFile does not accept or execute fsync. Preserve write -> fsync -> close -> harden -> rename and falsy primary/secondary close failures. Do not promote caller alone."
+        },
+        {
+          "path": "src/caller-key-rotation.mjs",
+          "status": "requires_cohesive_callback_and_rollback_review",
+          "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+          "reason": "Archived rotation passes afterReplace to set newSecretLive. Current replacePrivateFile does not invoke it. Preserve callback immediately after rename and before custom final protection, plus exact backup/rollback generation semantics; caller alone is unsafe."
+        },
+        {
+          "path": "src/provider-credential-store.mjs",
+          "status": "preserve_validation_boundary",
+          "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+          "reason": "Keep atomicPrivateBytes path/symlink validation and requested directory mode behavior around shared writer. Independently validate referenced credential identity and parent ownership; do not copy adjacent broader fixture edits blindly."
         }
       ]
     },
@@ -3167,7 +3262,7 @@
     },
     "private-writers/legacy-migration": {
       "id": "legacy_migration_private_writer",
-      "status": "ci_running",
+      "status": "ci_passed_waiting_merge",
       "pr": 1082,
       "url": "https://github.com/duolahypercho/codex-router/pull/1082",
       "prState": "OPEN",
@@ -3192,26 +3287,17 @@
         "local": "verified: 14 focused + 15 adjacent + 1 config defaults/profiles pass on final rebased source; one POSIX-only assertion skipped on Windows. Earlier combined broad config suite timed out at 900 seconds across host suspend/resume and is explicitly not counted as passing.",
         "review": "verified: all five final hunks accepted; unchanged boundary and no findings.",
         "syntax": "verified: full npm check validates 7 applications, 138 fragments and syntax; committed whitespace check passes.",
-        "ci": "running on exact published head; do not submit next item before all applicable checks pass."
+        "ci": "9 SUCCESS and 2 conditional SKIPPED on exact published head 1fcb6630001b8404b2cc92446d20ce49aa4faa02; state OPEN."
       },
       "ciCheckpoint": {
-        "checkedAt": "2026-10-26T01:26:14.352979+00:00",
+        "checkedAt": "2026-10-26T01:55:59.835964+00:00",
         "head": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
         "state": "OPEN",
         "counts": {
-          "PENDING": 7,
-          "SUCCESS": 2,
+          "SUCCESS": 9,
           "SKIPPED": 2
         },
-        "pending": [
-          "test (ubuntu-latest)",
-          "test (macos-latest)",
-          "test (windows-latest)",
-          "Electron control center (Linux)",
-          "Electron control center (Windows)",
-          "Unified native macOS app",
-          "GitGuardian Security Checks"
-        ],
+        "pending": [],
         "comments": 0,
         "reviews": 0
       },
@@ -3235,6 +3321,85 @@
       "topic": "private-writers/legacy-migration",
       "head": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
       "sourceTopic": "private-writers"
+    },
+    "private-writers/windows-launcher": {
+      "id": "windows_launcher_private_writer",
+      "status": "ci_running",
+      "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+      "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+      "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
+      "branch": "fix/windows-launcher-private-writer-20261026",
+      "sourceTopic": "selected-services",
+      "targetTopic": "private-writers",
+      "backupPr": 12,
+      "crossReferenceBackupPr": 24,
+      "sourceHunkIds": [
+        "src/service-windows.mjs#0",
+        "src/service-windows.mjs#1",
+        "src/service-windows.mjs#2",
+        "src/service-windows.mjs#3"
+      ],
+      "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\windows-launcher-private-pr-body.md",
+      "acceptance": {
+        "encoding": "verified: exact renderer UTF-8 CMD/BOM UTF-16LE VBS bytes, Unicode/percent/quote paths, proxy credentials and repeated install; wrong-encoding mutation fails",
+        "privacy": "verified: actual owner-only permission checks before rename and at target; 2 Windows ACL operations for two launchers vs 4 baseline; skipped-hardener mutation fails",
+        "ownership": "verified: baseline consumes PID-only foreign files for CMD and VBS; exclusive collisions, write/close/ACL/rename, cleanup failure and replaced-leaf ESTALE preserve old target and foreign evidence",
+        "failure": "verified: installer preserves existing catch/recovery/report contract and exits nonzero when publication fails; no pairwise transaction claimed",
+        "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
+        "adjacent": "verified: 15 focused and 47 adjacent pass; 23 POSIX/stub assertions skip on Windows; real UTF-16 VBS exit forwarding case also passes",
+        "review": "verified: 6/6 final hunks accepted, no findings, unchanged boundary; full check 7 apps / 138 fragments and whitespace pass; final added assertion syntax verified",
+        "ci": "Running on exact published head; next submission requires every applicable check to pass."
+      },
+      "dependsOnMerged": [],
+      "preparedAt": "2026-10-26T01:40:16.950144+00:00",
+      "commit": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+      "pr": 1083,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1083",
+      "prState": "OPEN",
+      "title": "fix: publish Windows launchers with the private writer",
+      "ciCheckpoint": {
+        "checkedAt": "2026-10-26T01:55:59.835964+00:00",
+        "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+        "state": "OPEN",
+        "counts": {
+          "PENDING": 10,
+          "SUCCESS": 2,
+          "SKIPPED": 2
+        },
+        "pending": [
+          "test (ubuntu-latest)",
+          "ubuntu-latest / python 3.12",
+          "test (macos-latest)",
+          "macos-latest / python 3.12",
+          "test (windows-latest)",
+          "windows-latest / python 3.12",
+          "Electron control center (Linux)",
+          "Electron control center (Windows)",
+          "Unified native macOS app",
+          "GitGuardian Security Checks"
+        ],
+        "comments": 0,
+        "reviews": 0
+      },
+      "backupUrl": "https://github.com/TruthNian/codex-router/pull/12",
+      "backupState": "OPEN",
+      "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+      "mergeValidation": {
+        "head": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+        "main": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+        "merge": "f461461f851b79c96961b6d86dca98a6663f78f4",
+        "parents": [
+          "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+          "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+        ],
+        "files": [
+          "changelog.d/windows-launcher-private-writer.md",
+          "src/service-windows.mjs",
+          "test/windows-launcher-private-writer.test.mjs"
+        ],
+        "sourceHelperTestBlobsMatchLocal": true
+      },
+      "topic": "private-writers/windows-launcher"
     }
   },
   "upstreamStateSnapshot": {
@@ -3261,9 +3426,10 @@
     "open": [
       1065,
       1068,
-      1082
+      1082,
+      1083
     ],
-    "updatedAt": "2026-10-26T01:26:14.352979+00:00"
+    "updatedAt": "2026-10-26T01:55:59.835964+00:00"
   },
   "verifiedMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
 }

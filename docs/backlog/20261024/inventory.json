@@ -2059,6 +2059,85 @@
               "fixedAt": "2026-10-26T02:35:57.729250+00:00"
             }
           ]
+        },
+        "credential_metadata_private_writer": {
+          "id": "credential_metadata_private_writer",
+          "status": "ci_running",
+          "head": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
+          "base": "e31f423071fe2284ee285440ad2a6f94a19d1919",
+          "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-credential-metadata-private-20261026",
+          "branch": "fix/credential-metadata-private-writer-20261026",
+          "sourceTopic": "private-writers",
+          "backupPr": 24,
+          "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\credential-metadata-private-pr-body.md",
+          "dependsOnMerged": [],
+          "requiredUpstreamMerges": [
+            1009
+          ],
+          "sharedCleanupFix": "06bdc15704ea327e679cef69a412a0dadd348b01",
+          "acceptance": {
+            "local": "13 focused + 8 applicable metadata + 15 adjacent passed; 2 platform skips",
+            "realSymlinkLimit": "4 existing tests reproduce EPERM at symlink creation on candidate and unchanged main; not counted as passed/skipped, require full CI",
+            "controls": "7 meaningful baseline/mutation controls fail as expected, candidate restored exact",
+            "review": "6/6 final hunks accepted, no findings; syntax 7 apps / 139 fragments, whitespace passed",
+            "format": "verified: metadata roundtrip, Unicode and CRLF snapshot buffers remain exact; explicit parent chmod stays intact",
+            "validation": "verified: outside-state, secret fields and reported symlink components reject before writer; real-link tests require CI",
+            "ownership": "verified: wx collisions retain foreign files; write/close/ACL/rename/cleanup/race faults preserve old generation and diagnostics",
+            "migration": "verified: late pointer publication failure restores legacy bytes; changed-target rollback refuses; reencoded snapshot and omitted restore controls fail",
+            "ci": "Running on exact head; all applicable checks required before next PR"
+          },
+          "commit": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
+          "pr": 1084,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1084",
+          "prState": "OPEN",
+          "title": "fix: publish credential metadata with the private writer",
+          "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
+          "backupState": "OPEN",
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "ciCheckpoint": {
+            "checkedAt": "2026-10-26T03:11:48.726385+00:00",
+            "head": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
+            "state": "OPEN",
+            "counts": {
+              "PENDING": 6,
+              "SUCCESS": 3,
+              "SKIPPED": 2
+            },
+            "pending": [
+              "test (ubuntu-latest)",
+              "test (macos-latest)",
+              "test (windows-latest)",
+              "Electron control center (Linux)",
+              "Electron control center (Windows)",
+              "Unified native macOS app"
+            ],
+            "comments": 0,
+            "reviews": 0
+          },
+          "mergeValidation": {
+            "head": "3fc2996fa61ea1a98b14f0cd438b929e15bf895a",
+            "main": "e31f423071fe2284ee285440ad2a6f94a19d1919",
+            "merge": "71283fef8702aabc05492802a28f5e4de3eff69d",
+            "parents": [
+              "e31f423071fe2284ee285440ad2a6f94a19d1919",
+              "3fc2996fa61ea1a98b14f0cd438b929e15bf895a"
+            ],
+            "files": [
+              "changelog.d/credential-metadata-private-writer.md",
+              "src/provider-credential-store.mjs",
+              "test/credential-metadata-private-writer.test.mjs"
+            ],
+            "sourceHelperTestBlobsMatchLocal": true
+          },
+          "ciRun": 40262631686,
+          "discoveryRun": 40262631086,
+          "sourceHunkIds": [
+            "src/provider-credential-store.mjs#0",
+            "src/provider-credential-store.mjs#1",
+            "src/provider-credential-store.mjs#2",
+            "src/provider-credential-store.mjs#3"
+          ],
+          "topic": "private-writers/credential-metadata"
         }
       },
       "promotionStatus": "partially_promoted",

@@ -1757,6 +1757,77 @@
           "mergedAt": "2026-10-25T09:17:10Z",
           "mergeCommit": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
           "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+        },
+        "legacy_migration_private_writer": {
+          "id": "legacy_migration_private_writer",
+          "status": "ci_running",
+          "pr": 1082,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1082",
+          "prState": "OPEN",
+          "commit": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
+          "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+          "branch": "fix/legacy-migration-private-writer-20261025",
+          "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-legacy-migration-private-20261025",
+          "dependsOnMerged": [],
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "backupPr": 24,
+          "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
+          "backupState": "OPEN",
+          "title": "fix: publish migration records with the private writer",
+          "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\legacy-private-pr-body.md",
+          "acceptance": {
+            "baseline": "verified: baseline consumes foreign PID-only temporaries for both manifest and latest pointer; both fail intended ownership assertions. Baseline also fails four-vs-two Windows ACL assertion.",
+            "format": "verified: absent and existing records retain two-space JSON plus LF, version/schema, pointer resolution and Unicode paths; existing migration suite executes real config-manager disable and exact restoration.",
+            "ownership": "verified: exclusive collision preserves foreign file, descriptor closes, write/close/ACL/rename failures preserve old target, cleanup errors attach without replacing primary and leaf races preserve foreign/displaced files with ESTALE.",
+            "failClosed": "verified: pointer failure retains previous valid pointer and recoverable prior snapshot; no service plist/config mutation before both records publish. New manifest may remain after pointer failure, matching existing non-transactional order.",
+            "rollback": "verified: actual existing rollback restores config/plist bytes after synthetic partial disable failure; legacy state retained. Deliberately skipping config restoration fails oracle.",
+            "isolation": "verified: synthetic homes, scrubbed aliases/keys/proxies, blocked service/network commands, actual ACL operations limited to fixture, positive outside-read control and deliberate output leak fail as intended.",
+            "local": "verified: 14 focused + 15 adjacent + 1 config defaults/profiles pass on final rebased source; one POSIX-only assertion skipped on Windows. Earlier combined broad config suite timed out at 900 seconds across host suspend/resume and is explicitly not counted as passing.",
+            "review": "verified: all five final hunks accepted; unchanged boundary and no findings.",
+            "syntax": "verified: full npm check validates 7 applications, 138 fragments and syntax; committed whitespace check passes.",
+            "ci": "running on exact published head; do not submit next item before all applicable checks pass."
+          },
+          "ciCheckpoint": {
+            "checkedAt": "2026-10-26T01:26:14.352979+00:00",
+            "head": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
+            "state": "OPEN",
+            "counts": {
+              "PENDING": 7,
+              "SUCCESS": 2,
+              "SKIPPED": 2
+            },
+            "pending": [
+              "test (ubuntu-latest)",
+              "test (macos-latest)",
+              "test (windows-latest)",
+              "Electron control center (Linux)",
+              "Electron control center (Windows)",
+              "Unified native macOS app",
+              "GitGuardian Security Checks"
+            ],
+            "comments": 0,
+            "reviews": 0
+          },
+          "ciRun": 40254083290,
+          "discoveryRun": 40254083254,
+          "mergeValidation": {
+            "head": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
+            "main": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+            "merge": "225fc376f5f3489247bb23590912c3a3001a7025",
+            "parents": [
+              "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+              "1fcb6630001b8404b2cc92446d20ce49aa4faa02"
+            ],
+            "files": [
+              "changelog.d/legacy-migration-private-writer.md",
+              "src/legacy-migration.mjs",
+              "test/legacy-migration-private-writer.test.mjs"
+            ],
+            "sourceHelperTestBlobsMatchLocal": true
+          },
+          "topic": "private-writers/legacy-migration",
+          "head": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
+          "sourceTopic": "private-writers"
         }
       },
       "promotionStatus": "partially_promoted",

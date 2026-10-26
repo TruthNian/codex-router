@@ -1618,10 +1618,9 @@
       "isDraft": true,
       "remainingSourceFiles": [
         "src/caller-key-rotation.mjs",
-        "src/file-security.mjs",
-        "src/kimi-oauth-session.mjs"
+        "src/file-security.mjs"
       ],
-      "extractionNotes": "Ten earlier consumers and credential metadata #1084 are actually merged. Windows launcher #1083 is green and OPEN; Codex configuration #1085 is submitted. Three runtime source files remain (rotation, shared primitive extensions, Kimi durability), alongside historical fixture/adopted-provider fragments. Keep backups #12/#24; filenames are not a PR count.",
+      "extractionNotes": "Ten earlier consumers, credential metadata #1084 and Codex config #1085 actually merged. Windows launcher #1083 is green and OPEN; Kimi token sync #1086 is submitted with its cohesive shared fsync option. Rotation and the two afterReplace primitive hunks remain, alongside historical fixture/adopted-provider fragments. Keep backups #12/#24; filenames are not a PR count.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -2131,7 +2130,7 @@
         },
         "codex_config_private_writer": {
           "id": "codex_config_private_writer",
-          "status": "ci_running",
+          "status": "merged",
           "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-codex-config-private-20261026",
           "branch": "fix/codex-config-private-writer-20261026",
           "base": "9eb347b35aeb1829603aa1800bb0467b91f53343",
@@ -2152,32 +2151,20 @@
           "commit": "9c232fedc0002863e74eec2711ca52246a76988a",
           "pr": 1085,
           "url": "https://github.com/duolahypercho/codex-router/pull/1085",
-          "prState": "OPEN",
+          "prState": "MERGED",
           "title": "fix: publish Codex configuration with the private writer",
           "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
           "backupState": "OPEN",
           "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
           "ciCheckpoint": {
-            "checkedAt": "2026-10-26T04:39:01.463510+00:00",
+            "checkedAt": "2026-10-26T05:28:27.936257+00:00",
             "head": "9c232fedc0002863e74eec2711ca52246a76988a",
-            "state": "OPEN",
+            "state": "MERGED",
             "counts": {
-              "PENDING": 10,
-              "SKIPPED": 2,
-              "SUCCESS": 1
+              "SUCCESS": 12,
+              "SKIPPED": 2
             },
-            "pending": [
-              "test (ubuntu-latest)",
-              "ubuntu-latest / python 3.12",
-              "Deterministic discovery tests",
-              "test (macos-latest)",
-              "macos-latest / python 3.12",
-              "test (windows-latest)",
-              "windows-latest / python 3.12",
-              "Electron control center (Linux)",
-              "Electron control center (Windows)",
-              "Unified native macOS app"
-            ],
+            "pending": [],
             "comments": 0,
             "reviews": 0
           },
@@ -2215,7 +2202,99 @@
           "additionalRuns": [
             40270071127
           ],
-          "topic": "private-writers/codex-config"
+          "topic": "private-writers/codex-config",
+          "mergedAt": "2026-10-26T05:23:03Z",
+          "mergeCommit": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
+          "verifiedInMain": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1"
+        },
+        "kimi_private_writer": {
+          "id": "kimi_private_writer",
+          "status": "ci_running",
+          "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-kimi-private-20261026",
+          "branch": "fix/kimi-durable-private-writer-20261026",
+          "base": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
+          "head": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
+          "backupPr": 24,
+          "sourceTopic": "private-writers",
+          "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\kimi-private-pr-body.md",
+          "acceptance": {
+            "durability": "verified: actual Kimi refresh/tombstone and direct binary writer perform write -> fsync -> close -> harden -> rename; omitted/false/async remain unsynced",
+            "failures": "verified: six primary thrown values across write/fsync/close retain primary even with secondary close failure; cleanup/ACL/rename/race diagnostics checked",
+            "ownership": "verified: PID and exclusive collisions preserve foreign bytes; fsync failures clean only owned temporaries; old saver leaks a temporary on fsync failure",
+            "session": "verified: 13 existing session/region cases use local fake upstream; refresh/recovery/revocation and lock release remain intact",
+            "sharedRegression": "verified: 43 shared/metadata/secret tests pass, 1 POSIX-only skip on Windows",
+            "rebase": "verified: 34 focused +30 newly merged config writer cases pass on latest main; relevant source/test blobs identical to pre-rebase validation",
+            "controls": "verified: 10 asserted baseline/mutation controls fail expected oracles, source/helper restored exact",
+            "review": "verified: 14/14 final published hunks accepted, no findings; syntax and whitespace passed",
+            "fullPlatformCI": "pending: complete applicable CI required before next submission"
+          },
+          "commit": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
+          "pr": 1086,
+          "url": "https://github.com/duolahypercho/codex-router/pull/1086",
+          "prState": "OPEN",
+          "title": "fix: preserve Kimi token sync through the private writer",
+          "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
+          "backupState": "OPEN",
+          "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+          "ciCheckpoint": {
+            "checkedAt": "2026-10-26T05:31:13.104043+00:00",
+            "head": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
+            "state": "OPEN",
+            "counts": {
+              "PENDING": 6,
+              "SUCCESS": 3,
+              "SKIPPED": 2
+            },
+            "pending": [
+              "test (ubuntu-latest)",
+              "test (macos-latest)",
+              "test (windows-latest)",
+              "Electron control center (Linux)",
+              "Electron control center (Windows)",
+              "Unified native macOS app"
+            ],
+            "comments": 0,
+            "reviews": 0
+          },
+          "mergeValidation": {
+            "head": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
+            "main": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
+            "merge": "faa6101754a3aed7b71ba90ffbce587d439a1a0e",
+            "parents": [
+              "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
+              "6c5d7fc581a077d7b9baf6f932468bce9b73c75e"
+            ],
+            "files": [
+              "changelog.d/kimi-private-writer.md",
+              "src/file-security.mjs",
+              "src/kimi-oauth-session.mjs",
+              "test/kimi-private-writer.test.mjs"
+            ],
+            "sourceHelperTestBlobsMatchLocal": true
+          },
+          "dependsOnMerged": [],
+          "requiredUpstreamMerges": [
+            1009
+          ],
+          "sharedCleanupFix": "06bdc15704ea327e679cef69a412a0dadd348b01",
+          "sourceHunkIds": [
+            "src/kimi-oauth-session.mjs#0",
+            "src/kimi-oauth-session.mjs#1",
+            "src/kimi-oauth-session.mjs#2",
+            "src/kimi-oauth-session.mjs#3",
+            "src/kimi-oauth-session.mjs#4",
+            "src/kimi-oauth-session.mjs#5",
+            "src/file-security.mjs#0",
+            "src/file-security.mjs#4",
+            "src/file-security.mjs#5",
+            "src/file-security.mjs#6",
+            "src/file-security.mjs#7",
+            "src/file-security.mjs#8"
+          ],
+          "ciRun": 40274526058,
+          "discoveryRun": 40274526075,
+          "additionalRuns": [],
+          "topic": "private-writers/kimi-token-sync"
         }
       },
       "promotionStatus": "partially_promoted",
@@ -2272,9 +2351,12 @@
       "remainingExtractionConstraints": [
         {
           "path": "src/kimi-oauth-session.mjs",
-          "status": "requires_cohesive_primitive_and_consumer_review",
+          "status": "implemented_pending_upstream_ci",
           "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-          "reason": "Archived caller passes fsync:true, but current writePrivateFile does not accept or execute fsync. Preserve write -> fsync -> close -> harden -> rename and falsy primary/secondary close failures. Do not promote caller alone."
+          "reason": "Archived caller passes fsync:true, but current writePrivateFile does not accept or execute fsync. Preserve write -> fsync -> close -> harden -> rename and falsy primary/secondary close failures. Do not promote caller alone.",
+          "upstreamPr": 1086,
+          "upstreamHead": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
+          "verifiedBase": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1"
         },
         {
           "path": "src/caller-key-rotation.mjs",
@@ -2311,7 +2393,22 @@
           "status": "partially_covered_remaining_portability_review",
           "covered": "Post-publication pointer fault and exact rollback independently covered by merged #1084; remaining isolation/real-link portability review stays deferred.",
           "deferred": "Historical forced discovery/isolation edits and Windows file-link-to-junction substitutions are retained in the archive, not applied blindly. Re-review fixture portability separately while preserving real file-symlink coverage; current PR leaves the existing real-link tests intact."
+        },
+        {
+          "id": "specialized-private-writer-regressions",
+          "sourcePath": "test/private-writer-specialized.test.mjs",
+          "backupPr": 24,
+          "sourceHunkIds": [
+            "test/private-writer-specialized.test.mjs#0"
+          ],
+          "status": "partially_covered_remaining_consumer_review",
+          "covered": "Kimi/direct-fsync behavior independently covered by new #1086 tests; shared async identity cleanup already has merged dedicated coverage.",
+          "deferred": "Retain original rotation/custom-copy assertions for review alongside their remaining consumer boundaries. Do not blindly apply the entire combined specialized test."
         }
+      ],
+      "remainingSharedPrimitiveHunks": [
+        "src/file-security.mjs#2",
+        "src/file-security.mjs#3"
       ]
     },
     {
@@ -3857,7 +3954,7 @@
     },
     "private-writers/codex-config": {
       "id": "codex_config_private_writer",
-      "status": "ci_running",
+      "status": "merged",
       "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-codex-config-private-20261026",
       "branch": "fix/codex-config-private-writer-20261026",
       "base": "9eb347b35aeb1829603aa1800bb0467b91f53343",
@@ -3873,37 +3970,25 @@
         "compatibility": "verified: 61 existing CLI cases pass /1 original conditional skip, 26 refresh/rollback and 17 security pass /1 platform skip; strengthened single rollback case rerun after edit",
         "negativeControls": "verified: 9 expected failures including no-rollback, candidate/helper restored exact",
         "review": "verified: 12/12 final hunks accepted; syntax/check 7 apps/140 fragments and whitespace passed",
-        "fullPlatformCI": "pending: full npm test and platform builds run in upstream CI; no production or paid probes"
+        "fullPlatformCI": "verified: 12 SUCCESS and 2 conditional SKIPPED on exact head; actually merged into main"
       },
       "commit": "9c232fedc0002863e74eec2711ca52246a76988a",
       "pr": 1085,
       "url": "https://github.com/duolahypercho/codex-router/pull/1085",
-      "prState": "OPEN",
+      "prState": "MERGED",
       "title": "fix: publish Codex configuration with the private writer",
       "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
       "backupState": "OPEN",
       "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
       "ciCheckpoint": {
-        "checkedAt": "2026-10-26T04:39:01.463510+00:00",
+        "checkedAt": "2026-10-26T05:28:27.936257+00:00",
         "head": "9c232fedc0002863e74eec2711ca52246a76988a",
-        "state": "OPEN",
+        "state": "MERGED",
         "counts": {
-          "PENDING": 10,
-          "SKIPPED": 2,
-          "SUCCESS": 1
+          "SUCCESS": 12,
+          "SKIPPED": 2
         },
-        "pending": [
-          "test (ubuntu-latest)",
-          "ubuntu-latest / python 3.12",
-          "Deterministic discovery tests",
-          "test (macos-latest)",
-          "macos-latest / python 3.12",
-          "test (windows-latest)",
-          "windows-latest / python 3.12",
-          "Electron control center (Linux)",
-          "Electron control center (Windows)",
-          "Unified native macOS app"
-        ],
+        "pending": [],
         "comments": 0,
         "reviews": 0
       },
@@ -3941,11 +4026,103 @@
       "additionalRuns": [
         40270071127
       ],
-      "topic": "private-writers/codex-config"
+      "topic": "private-writers/codex-config",
+      "mergedAt": "2026-10-26T05:23:03Z",
+      "mergeCommit": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
+      "verifiedInMain": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1"
+    },
+    "private-writers/kimi-token-sync": {
+      "id": "kimi_private_writer",
+      "status": "ci_running",
+      "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-kimi-private-20261026",
+      "branch": "fix/kimi-durable-private-writer-20261026",
+      "base": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
+      "head": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
+      "backupPr": 24,
+      "sourceTopic": "private-writers",
+      "bodyFile": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-queue-20261024\\kimi-private-pr-body.md",
+      "acceptance": {
+        "durability": "verified: actual Kimi refresh/tombstone and direct binary writer perform write -> fsync -> close -> harden -> rename; omitted/false/async remain unsynced",
+        "failures": "verified: six primary thrown values across write/fsync/close retain primary even with secondary close failure; cleanup/ACL/rename/race diagnostics checked",
+        "ownership": "verified: PID and exclusive collisions preserve foreign bytes; fsync failures clean only owned temporaries; old saver leaks a temporary on fsync failure",
+        "session": "verified: 13 existing session/region cases use local fake upstream; refresh/recovery/revocation and lock release remain intact",
+        "sharedRegression": "verified: 43 shared/metadata/secret tests pass, 1 POSIX-only skip on Windows",
+        "rebase": "verified: 34 focused +30 newly merged config writer cases pass on latest main; relevant source/test blobs identical to pre-rebase validation",
+        "controls": "verified: 10 asserted baseline/mutation controls fail expected oracles, source/helper restored exact",
+        "review": "verified: 14/14 final published hunks accepted, no findings; syntax and whitespace passed",
+        "fullPlatformCI": "pending: complete applicable CI required before next submission"
+      },
+      "commit": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
+      "pr": 1086,
+      "url": "https://github.com/duolahypercho/codex-router/pull/1086",
+      "prState": "OPEN",
+      "title": "fix: preserve Kimi token sync through the private writer",
+      "backupUrl": "https://github.com/TruthNian/codex-router/pull/24",
+      "backupState": "OPEN",
+      "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
+      "ciCheckpoint": {
+        "checkedAt": "2026-10-26T05:31:13.104043+00:00",
+        "head": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
+        "state": "OPEN",
+        "counts": {
+          "PENDING": 6,
+          "SUCCESS": 3,
+          "SKIPPED": 2
+        },
+        "pending": [
+          "test (ubuntu-latest)",
+          "test (macos-latest)",
+          "test (windows-latest)",
+          "Electron control center (Linux)",
+          "Electron control center (Windows)",
+          "Unified native macOS app"
+        ],
+        "comments": 0,
+        "reviews": 0
+      },
+      "mergeValidation": {
+        "head": "6c5d7fc581a077d7b9baf6f932468bce9b73c75e",
+        "main": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
+        "merge": "faa6101754a3aed7b71ba90ffbce587d439a1a0e",
+        "parents": [
+          "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
+          "6c5d7fc581a077d7b9baf6f932468bce9b73c75e"
+        ],
+        "files": [
+          "changelog.d/kimi-private-writer.md",
+          "src/file-security.mjs",
+          "src/kimi-oauth-session.mjs",
+          "test/kimi-private-writer.test.mjs"
+        ],
+        "sourceHelperTestBlobsMatchLocal": true
+      },
+      "dependsOnMerged": [],
+      "requiredUpstreamMerges": [
+        1009
+      ],
+      "sharedCleanupFix": "06bdc15704ea327e679cef69a412a0dadd348b01",
+      "sourceHunkIds": [
+        "src/kimi-oauth-session.mjs#0",
+        "src/kimi-oauth-session.mjs#1",
+        "src/kimi-oauth-session.mjs#2",
+        "src/kimi-oauth-session.mjs#3",
+        "src/kimi-oauth-session.mjs#4",
+        "src/kimi-oauth-session.mjs#5",
+        "src/file-security.mjs#0",
+        "src/file-security.mjs#4",
+        "src/file-security.mjs#5",
+        "src/file-security.mjs#6",
+        "src/file-security.mjs#7",
+        "src/file-security.mjs#8"
+      ],
+      "ciRun": 40274526058,
+      "discoveryRun": 40274526075,
+      "additionalRuns": [],
+      "topic": "private-writers/kimi-token-sync"
     }
   },
   "upstreamStateSnapshot": {
-    "verifiedMain": "9eb347b35aeb1829603aa1800bb0467b91f53343",
+    "verifiedMain": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1",
     "merged": [
       1062,
       1063,
@@ -3965,15 +4142,16 @@
       1080,
       1081,
       1082,
-      1084
+      1084,
+      1085
     ],
     "open": [
       1065,
       1068,
       1083,
-      1085
+      1086
     ],
-    "updatedAt": "2026-10-26T04:39:01.463510+00:00"
+    "updatedAt": "2026-10-26T05:31:13.104043+00:00"
   },
-  "verifiedMain": "9eb347b35aeb1829603aa1800bb0467b91f53343"
+  "verifiedMain": "1c5bc28898e6d3926e18d57917f026ed5adaa7a1"
 }

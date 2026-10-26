@@ -466,7 +466,7 @@
           "notes": "The old archive assigned these adjacent imports/writeAtomic hunks to selected-services. They consolidate launcher writes on writePrivateFile and are excluded from runtime-hop selection. Preserve the immutable source patch; independently test encoding, ACL and collision ownership before proposing.",
           "upstreamPr": 1083,
           "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1083",
-          "upstreamHead": "23429ec0cdc45ab5444e1caad75b74965a1acf52"
+          "upstreamHead": "5a825ae07a179c9a34facb0af97624ca1fb0ea11"
         }
       ],
       "backupState": "OPEN",
@@ -518,8 +518,8 @@
         "windows_launcher_private_writer": {
           "id": "windows_launcher_private_writer",
           "status": "ci_running",
-          "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
-          "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+          "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
+          "base": "e31f423071fe2284ee285440ad2a6f94a19d1919",
           "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
           "branch": "fix/windows-launcher-private-writer-20261026",
           "sourceTopic": "selected-services",
@@ -539,62 +539,71 @@
             "ownership": "verified: baseline consumes PID-only foreign files for CMD and VBS; exclusive collisions, write/close/ACL/rename, cleanup failure and replaced-leaf ESTALE preserve old target and foreign evidence",
             "failure": "verified: installer preserves existing catch/recovery/report contract and exits nonzero when publication fails; no pairwise transaction claimed",
             "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
-            "adjacent": "verified: 15 focused and 47 adjacent pass; 23 POSIX/stub assertions skip on Windows; real UTF-16 VBS exit forwarding case also passes",
-            "review": "verified: 6/6 final hunks accepted, no findings, unchanged boundary; full check 7 apps / 138 fragments and whitespace pass; final added assertion syntax verified",
+            "adjacent": "verified: 15 focused + 107 adjacent pass; 23 POSIX/stub skips on Windows. Includes fixed 60-test lifecycle suites and 26 simulated reset scenarios.",
+            "review": "verified: all 15 final hunks accepted, unchanged boundary, no findings.",
             "ci": "Running on exact published head; next submission requires every applicable check to pass.",
-            "scannerFixture": "verified: per-case ephemeral proxy credentials preserve private output and redaction checks; latest-head GitGuardian SUCCESS."
+            "scannerFixture": "verified: per-case ephemeral proxy credentials preserve private output and redaction checks; latest-head GitGuardian SUCCESS.",
+            "lifecycleFixtureRepair": "60 source-executing tests fixed; 15 focused + 107 adjacent pass / 23 platform skips after rebasing on actual merged #1082. Removing exports or bypassing fault hooks reproduces intended failures; all 15 final hunks reviewed.",
+            "syntax": "verified: 7 applications, 139 changelog fragments and all syntax pass on base e31f4230; whitespace passes."
           },
           "dependsOnMerged": [],
           "preparedAt": "2026-10-26T01:40:16.950144+00:00",
-          "commit": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+          "commit": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
           "pr": 1083,
           "url": "https://github.com/duolahypercho/codex-router/pull/1083",
           "prState": "OPEN",
           "title": "fix: publish Windows launchers with the private writer",
           "ciCheckpoint": {
-            "checkedAt": "2026-10-26T02:03:19.596070+00:00",
-            "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+            "checkedAt": "2026-10-26T02:35:57.729250+00:00",
+            "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
             "state": "OPEN",
             "counts": {
-              "PENDING": 8,
-              "SUCCESS": 4,
+              "PENDING": 7,
+              "SUCCESS": 5,
               "SKIPPED": 2
             },
             "pending": [
               "test (ubuntu-latest)",
               "test (macos-latest)",
-              "macos-latest / python 3.12",
               "test (windows-latest)",
               "windows-latest / python 3.12",
               "Electron control center (Linux)",
               "Electron control center (Windows)",
               "Unified native macOS app"
             ],
-            "comments": 1,
+            "comments": 2,
             "reviews": 0
           },
           "backupUrl": "https://github.com/TruthNian/codex-router/pull/12",
           "backupState": "OPEN",
           "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
           "mergeValidation": {
-            "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
-            "main": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-            "merge": "9303ff11cc5f07ecd1f15762bcd93daf9255b024",
+            "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
+            "main": "e31f423071fe2284ee285440ad2a6f94a19d1919",
+            "merge": "a5c748567d4b8bf18edb0d71da96fc4d2a83c430",
             "parents": [
-              "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-              "23429ec0cdc45ab5444e1caad75b74965a1acf52"
+              "e31f423071fe2284ee285440ad2a6f94a19d1919",
+              "5a825ae07a179c9a34facb0af97624ca1fb0ea11"
+            ],
+            "files": [
+              "changelog.d/windows-launcher-private-writer.md",
+              "src/service-windows.mjs",
+              "test/service-stop.test.mjs",
+              "test/startup-attempts-reset.test.mjs",
+              "test/windows-launcher-private-writer.test.mjs"
             ],
             "sourceHelperTestBlobsMatchLocal": true,
-            "runtimeAndAdjacentBlobsUnchangedFrom": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+            "runtimeAndDedicatedWriterTestUnchangedFrom": "23429ec0cdc45ab5444e1caad75b74965a1acf52"
           },
           "topic": "private-writers/windows-launcher",
-          "ciRun": 40256988504,
-          "discoveryRun": 40256988510,
+          "ciRun": 40259721275,
+          "discoveryRun": 40259721267,
           "additionalRuns": [
-            40256988580
+            40259721301
           ],
           "supersededHeads": [
-            "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+            "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+            "23429ec0cdc45ab5444e1caad75b74965a1acf52"
           ],
           "ciFailureHistory": [
             {
@@ -607,6 +616,22 @@
               "fixedAt": "2026-10-26T02:01:54.130993+00:00",
               "newHeadGitGuardian": "SUCCESS",
               "verifiedAt": "2026-10-26T02:03:19.596070+00:00"
+            },
+            {
+              "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+              "ciRun": 40256988504,
+              "failedPlatforms": [
+                "ubuntu-latest",
+                "macos-latest",
+                "windows-latest"
+              ],
+              "failuresPerPlatform": 13,
+              "cause": "Two source-executing lifecycle fixtures lacked writePrivateFile. Strict linking rejects the missing export in startup reset; stripped-import service-stop reaches ReferenceError in install catch before ownership verification, causing secondary false-record assertions.",
+              "fix": "Both exports delegate through the existing fake filesystem/failure hook after observed write guards; preserve all original oracles and add early-write failure case (26 reset scenarios).",
+              "baseline": "Local two-file reproduction has 13 failures, matching all three CI logs.",
+              "validation": "60 source-executing tests fixed; 15 focused + 107 adjacent pass / 23 platform skips after rebasing on actual merged #1082. Removing exports or bypassing fault hooks reproduces intended failures; all 15 final hunks reviewed.",
+              "newHead": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
+              "fixedAt": "2026-10-26T02:35:57.729250+00:00"
             }
           ]
         }
@@ -1602,7 +1627,7 @@
         "src/kimi-oauth-session.mjs",
         "src/provider-credential-store.mjs"
       ],
-      "extractionNotes": "Nine private-writer consumer PRs (#1070-1075 and #1079-1081) are merged. Legacy record PR #1082 has all applicable CI passed; Windows launcher PR #1083 is separately submitted from backup #12. Five remaining source-file candidates need disposition. Keep partial backups #12/#24 and the adopted-provider read API in archive #20; this is not a required-PR count.",
+      "extractionNotes": "Ten earlier private-writer consumer PRs (#1070-1075 and #1079-1082) are merged. Windows launcher #1083 is submitted, with fixture interface failures reproduced and repaired; latest CI is pending. Five remaining source-file candidates and the adopted-provider read API still require disposition. Keep partial source backups #12/#24; this is not a required-PR count.",
       "upstreamParts": {
         "agent_catalog_private_writer": {
           "topic": "private-writers/agent-catalog",
@@ -1857,10 +1882,10 @@
         },
         "legacy_migration_private_writer": {
           "id": "legacy_migration_private_writer",
-          "status": "ci_passed_waiting_merge",
+          "status": "merged",
           "pr": 1082,
           "url": "https://github.com/duolahypercho/codex-router/pull/1082",
-          "prState": "OPEN",
+          "prState": "MERGED",
           "commit": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
           "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
           "branch": "fix/legacy-migration-private-writer-20261025",
@@ -1882,7 +1907,7 @@
             "local": "verified: 14 focused + 15 adjacent + 1 config defaults/profiles pass on final rebased source; one POSIX-only assertion skipped on Windows. Earlier combined broad config suite timed out at 900 seconds across host suspend/resume and is explicitly not counted as passing.",
             "review": "verified: all five final hunks accepted; unchanged boundary and no findings.",
             "syntax": "verified: full npm check validates 7 applications, 138 fragments and syntax; committed whitespace check passes.",
-            "ci": "9 SUCCESS and 2 conditional SKIPPED on exact published head 1fcb6630001b8404b2cc92446d20ce49aa4faa02; state OPEN."
+            "ci": "9 SUCCESS and 2 conditional SKIPPED; actually MERGED at 02:16:06Z into e31f4230."
           },
           "ciCheckpoint": {
             "checkedAt": "2026-10-26T01:55:59.835964+00:00",
@@ -1915,13 +1940,16 @@
           },
           "topic": "private-writers/legacy-migration",
           "head": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
-          "sourceTopic": "private-writers"
+          "sourceTopic": "private-writers",
+          "mergedAt": "2026-10-26T02:16:06Z",
+          "mergeCommit": "e31f423071fe2284ee285440ad2a6f94a19d1919",
+          "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
         },
         "windows_launcher_private_writer": {
           "id": "windows_launcher_private_writer",
           "status": "ci_running",
-          "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
-          "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+          "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
+          "base": "e31f423071fe2284ee285440ad2a6f94a19d1919",
           "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
           "branch": "fix/windows-launcher-private-writer-20261026",
           "sourceTopic": "selected-services",
@@ -1941,62 +1969,71 @@
             "ownership": "verified: baseline consumes PID-only foreign files for CMD and VBS; exclusive collisions, write/close/ACL/rename, cleanup failure and replaced-leaf ESTALE preserve old target and foreign evidence",
             "failure": "verified: installer preserves existing catch/recovery/report contract and exits nonzero when publication fails; no pairwise transaction claimed",
             "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
-            "adjacent": "verified: 15 focused and 47 adjacent pass; 23 POSIX/stub assertions skip on Windows; real UTF-16 VBS exit forwarding case also passes",
-            "review": "verified: 6/6 final hunks accepted, no findings, unchanged boundary; full check 7 apps / 138 fragments and whitespace pass; final added assertion syntax verified",
+            "adjacent": "verified: 15 focused + 107 adjacent pass; 23 POSIX/stub skips on Windows. Includes fixed 60-test lifecycle suites and 26 simulated reset scenarios.",
+            "review": "verified: all 15 final hunks accepted, unchanged boundary, no findings.",
             "ci": "Running on exact published head; next submission requires every applicable check to pass.",
-            "scannerFixture": "verified: per-case ephemeral proxy credentials preserve private output and redaction checks; latest-head GitGuardian SUCCESS."
+            "scannerFixture": "verified: per-case ephemeral proxy credentials preserve private output and redaction checks; latest-head GitGuardian SUCCESS.",
+            "lifecycleFixtureRepair": "60 source-executing tests fixed; 15 focused + 107 adjacent pass / 23 platform skips after rebasing on actual merged #1082. Removing exports or bypassing fault hooks reproduces intended failures; all 15 final hunks reviewed.",
+            "syntax": "verified: 7 applications, 139 changelog fragments and all syntax pass on base e31f4230; whitespace passes."
           },
           "dependsOnMerged": [],
           "preparedAt": "2026-10-26T01:40:16.950144+00:00",
-          "commit": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+          "commit": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
           "pr": 1083,
           "url": "https://github.com/duolahypercho/codex-router/pull/1083",
           "prState": "OPEN",
           "title": "fix: publish Windows launchers with the private writer",
           "ciCheckpoint": {
-            "checkedAt": "2026-10-26T02:03:19.596070+00:00",
-            "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+            "checkedAt": "2026-10-26T02:35:57.729250+00:00",
+            "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
             "state": "OPEN",
             "counts": {
-              "PENDING": 8,
-              "SUCCESS": 4,
+              "PENDING": 7,
+              "SUCCESS": 5,
               "SKIPPED": 2
             },
             "pending": [
               "test (ubuntu-latest)",
               "test (macos-latest)",
-              "macos-latest / python 3.12",
               "test (windows-latest)",
               "windows-latest / python 3.12",
               "Electron control center (Linux)",
               "Electron control center (Windows)",
               "Unified native macOS app"
             ],
-            "comments": 1,
+            "comments": 2,
             "reviews": 0
           },
           "backupUrl": "https://github.com/TruthNian/codex-router/pull/12",
           "backupState": "OPEN",
           "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
           "mergeValidation": {
-            "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
-            "main": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-            "merge": "9303ff11cc5f07ecd1f15762bcd93daf9255b024",
+            "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
+            "main": "e31f423071fe2284ee285440ad2a6f94a19d1919",
+            "merge": "a5c748567d4b8bf18edb0d71da96fc4d2a83c430",
             "parents": [
-              "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-              "23429ec0cdc45ab5444e1caad75b74965a1acf52"
+              "e31f423071fe2284ee285440ad2a6f94a19d1919",
+              "5a825ae07a179c9a34facb0af97624ca1fb0ea11"
+            ],
+            "files": [
+              "changelog.d/windows-launcher-private-writer.md",
+              "src/service-windows.mjs",
+              "test/service-stop.test.mjs",
+              "test/startup-attempts-reset.test.mjs",
+              "test/windows-launcher-private-writer.test.mjs"
             ],
             "sourceHelperTestBlobsMatchLocal": true,
-            "runtimeAndAdjacentBlobsUnchangedFrom": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+            "runtimeAndDedicatedWriterTestUnchangedFrom": "23429ec0cdc45ab5444e1caad75b74965a1acf52"
           },
           "topic": "private-writers/windows-launcher",
-          "ciRun": 40256988504,
-          "discoveryRun": 40256988510,
+          "ciRun": 40259721275,
+          "discoveryRun": 40259721267,
           "additionalRuns": [
-            40256988580
+            40259721301
           ],
           "supersededHeads": [
-            "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+            "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+            "23429ec0cdc45ab5444e1caad75b74965a1acf52"
           ],
           "ciFailureHistory": [
             {
@@ -2009,6 +2046,22 @@
               "fixedAt": "2026-10-26T02:01:54.130993+00:00",
               "newHeadGitGuardian": "SUCCESS",
               "verifiedAt": "2026-10-26T02:03:19.596070+00:00"
+            },
+            {
+              "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+              "ciRun": 40256988504,
+              "failedPlatforms": [
+                "ubuntu-latest",
+                "macos-latest",
+                "windows-latest"
+              ],
+              "failuresPerPlatform": 13,
+              "cause": "Two source-executing lifecycle fixtures lacked writePrivateFile. Strict linking rejects the missing export in startup reset; stripped-import service-stop reaches ReferenceError in install catch before ownership verification, causing secondary false-record assertions.",
+              "fix": "Both exports delegate through the existing fake filesystem/failure hook after observed write guards; preserve all original oracles and add early-write failure case (26 reset scenarios).",
+              "baseline": "Local two-file reproduction has 13 failures, matching all three CI logs.",
+              "validation": "60 source-executing tests fixed; 15 focused + 107 adjacent pass / 23 platform skips after rebasing on actual merged #1082. Removing exports or bypassing fault hooks reproduces intended failures; all 15 final hunks reviewed.",
+              "newHead": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
+              "fixedAt": "2026-10-26T02:35:57.729250+00:00"
             }
           ]
         }
@@ -2061,7 +2114,7 @@
           "notes": "The old archive assigned these adjacent imports/writeAtomic hunks to selected-services. They consolidate launcher writes on writePrivateFile and are excluded from runtime-hop selection. Preserve the immutable source patch; independently test encoding, ACL and collision ownership before proposing.",
           "upstreamPr": 1083,
           "upstreamUrl": "https://github.com/duolahypercho/codex-router/pull/1083",
-          "upstreamHead": "23429ec0cdc45ab5444e1caad75b74965a1acf52"
+          "upstreamHead": "5a825ae07a179c9a34facb0af97624ca1fb0ea11"
         }
       ],
       "remainingExtractionConstraints": [
@@ -2977,7 +3030,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:18:25Z",
       "mergeCommit": "c826e459c9287809fd726bd678894bcafe2a4000",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "generation-redirect": {
       "topic": "generation-redirect",
@@ -2998,7 +3051,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:19:20Z",
       "mergeCommit": "1808d4173c4eb9076a65d866b1fecbe8b3adcbba",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "retention-clock": {
       "topic": "retention-clock",
@@ -3010,7 +3063,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:17:42Z",
       "mergeCommit": "85ef669043ac4b65780ed51982d810385b9e1d20",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "manual-ci-scope": {
       "topic": "manual-ci-scope",
@@ -3031,7 +3084,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:41:14Z",
       "mergeCommit": "186da4897d89a3957e5d22b31e0181678f414957",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "private-writers/agent-catalog": {
       "topic": "private-writers/agent-catalog",
@@ -3044,7 +3097,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:27:49Z",
       "mergeCommit": "fabe3da9e18289a77d25bfc5758ee102bd80d6bd",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "private-writers/model-selection": {
       "topic": "private-writers/model-selection",
@@ -3057,7 +3110,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:28:22Z",
       "mergeCommit": "2fc35abd5363c43412c03279c9508f8b2560b01f",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "private-writers/harness-documents": {
       "topic": "private-writers/harness-documents",
@@ -3070,7 +3123,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:10Z",
       "mergeCommit": "d224835e7d1fa110d27aefff5af2aa52e83bde9d",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "private-writers/provider-state": {
       "topic": "private-writers/provider-state",
@@ -3083,7 +3136,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:29:53Z",
       "mergeCommit": "04d35769dfaf1e733000f9cecf5eb6efd9cbb065",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "private-writers/gateway-config": {
       "topic": "private-writers/gateway-config",
@@ -3096,7 +3149,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:30:43Z",
       "mergeCommit": "9d014b1ec429a2b55a2d0c7cb9c09d9cae7c7c13",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "private-writers/native-source": {
       "topic": "private-writers/native-source",
@@ -3109,7 +3162,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:43:32Z",
       "mergeCommit": "f4671e6e98c10af34e14c7d7a2eab7845e1499d5",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "desktop-readback": {
       "topic": "desktop-readback",
@@ -3122,7 +3175,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T00:47:20Z",
       "mergeCommit": "68fb5380749bed99ce9e4d346c1e37d8b97aec00",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "scoped-archive-search": {
       "topic": "scoped-archive-search",
@@ -3135,7 +3188,7 @@
       "prState": "MERGED",
       "mergeCommit": "3ecc2d9b7681b88cde40778ad15ec5639f404444",
       "mergedAt": "2026-10-25T03:18:10Z",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "selected-services/runtime-hops": {
       "topic": "selected-services/runtime-hops",
@@ -3178,7 +3231,7 @@
       "prState": "MERGED",
       "mergeCommit": "7432b02d670dd7889696fc91971257a427016d34",
       "mergedAt": "2026-10-25T05:25:06Z",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "per-model-history-policy": {
       "topic": "per-model-history-policy",
@@ -3191,7 +3244,7 @@
       "prState": "MERGED",
       "mergedAt": "2026-10-25T06:18:01Z",
       "mergeCommit": "cfea324eedb4b7dc1274fd7ff3532e9c154c253d",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919",
       "ci": {
         "SUCCESS": 12,
         "SKIPPED": 2,
@@ -3253,7 +3306,7 @@
       },
       "mergedAt": "2026-10-25T07:20:06Z",
       "mergeCommit": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "private-writers/provider-credentials": {
       "base": "36e9a0a09b096121825ff4c2922f5f04dc2ef8cc",
@@ -3312,7 +3365,7 @@
       "sourceTopic": "private-writers",
       "mergedAt": "2026-10-25T08:16:36Z",
       "mergeCommit": "a6e120637879ed5d5f81738d7e66d0642ec4c536",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "private-writers/catalog": {
       "topic": "private-writers/catalog",
@@ -3369,14 +3422,14 @@
       },
       "mergedAt": "2026-10-25T09:17:10Z",
       "mergeCommit": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-      "verifiedInMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "private-writers/legacy-migration": {
       "id": "legacy_migration_private_writer",
-      "status": "ci_passed_waiting_merge",
+      "status": "merged",
       "pr": 1082,
       "url": "https://github.com/duolahypercho/codex-router/pull/1082",
-      "prState": "OPEN",
+      "prState": "MERGED",
       "commit": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
       "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
       "branch": "fix/legacy-migration-private-writer-20261025",
@@ -3398,7 +3451,7 @@
         "local": "verified: 14 focused + 15 adjacent + 1 config defaults/profiles pass on final rebased source; one POSIX-only assertion skipped on Windows. Earlier combined broad config suite timed out at 900 seconds across host suspend/resume and is explicitly not counted as passing.",
         "review": "verified: all five final hunks accepted; unchanged boundary and no findings.",
         "syntax": "verified: full npm check validates 7 applications, 138 fragments and syntax; committed whitespace check passes.",
-        "ci": "9 SUCCESS and 2 conditional SKIPPED on exact published head 1fcb6630001b8404b2cc92446d20ce49aa4faa02; state OPEN."
+        "ci": "9 SUCCESS and 2 conditional SKIPPED; actually MERGED at 02:16:06Z into e31f4230."
       },
       "ciCheckpoint": {
         "checkedAt": "2026-10-26T01:55:59.835964+00:00",
@@ -3431,13 +3484,16 @@
       },
       "topic": "private-writers/legacy-migration",
       "head": "1fcb6630001b8404b2cc92446d20ce49aa4faa02",
-      "sourceTopic": "private-writers"
+      "sourceTopic": "private-writers",
+      "mergedAt": "2026-10-26T02:16:06Z",
+      "mergeCommit": "e31f423071fe2284ee285440ad2a6f94a19d1919",
+      "verifiedInMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
     },
     "private-writers/windows-launcher": {
       "id": "windows_launcher_private_writer",
       "status": "ci_running",
-      "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
-      "base": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+      "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
+      "base": "e31f423071fe2284ee285440ad2a6f94a19d1919",
       "path": "C:\\Users\\EDY\\Documents\\Codex\\2026-09-23\\zui-ji\\work\\pr-main-windows-launcher-private-20261026",
       "branch": "fix/windows-launcher-private-writer-20261026",
       "sourceTopic": "selected-services",
@@ -3457,62 +3513,71 @@
         "ownership": "verified: baseline consumes PID-only foreign files for CMD and VBS; exclusive collisions, write/close/ACL/rename, cleanup failure and replaced-leaf ESTALE preserve old target and foreign evidence",
         "failure": "verified: installer preserves existing catch/recovery/report contract and exits nonzero when publication fails; no pairwise transaction claimed",
         "isolation": "verified: synthetic homes/source paths/proxy; skipped service mutations and stub queries; denied reads/commands counted outside swallowed catch paths; omitted guards/cleanup and synthetic output leak fail oracle",
-        "adjacent": "verified: 15 focused and 47 adjacent pass; 23 POSIX/stub assertions skip on Windows; real UTF-16 VBS exit forwarding case also passes",
-        "review": "verified: 6/6 final hunks accepted, no findings, unchanged boundary; full check 7 apps / 138 fragments and whitespace pass; final added assertion syntax verified",
+        "adjacent": "verified: 15 focused + 107 adjacent pass; 23 POSIX/stub skips on Windows. Includes fixed 60-test lifecycle suites and 26 simulated reset scenarios.",
+        "review": "verified: all 15 final hunks accepted, unchanged boundary, no findings.",
         "ci": "Running on exact published head; next submission requires every applicable check to pass.",
-        "scannerFixture": "verified: per-case ephemeral proxy credentials preserve private output and redaction checks; latest-head GitGuardian SUCCESS."
+        "scannerFixture": "verified: per-case ephemeral proxy credentials preserve private output and redaction checks; latest-head GitGuardian SUCCESS.",
+        "lifecycleFixtureRepair": "60 source-executing tests fixed; 15 focused + 107 adjacent pass / 23 platform skips after rebasing on actual merged #1082. Removing exports or bypassing fault hooks reproduces intended failures; all 15 final hunks reviewed.",
+        "syntax": "verified: 7 applications, 139 changelog fragments and all syntax pass on base e31f4230; whitespace passes."
       },
       "dependsOnMerged": [],
       "preparedAt": "2026-10-26T01:40:16.950144+00:00",
-      "commit": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+      "commit": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
       "pr": 1083,
       "url": "https://github.com/duolahypercho/codex-router/pull/1083",
       "prState": "OPEN",
       "title": "fix: publish Windows launchers with the private writer",
       "ciCheckpoint": {
-        "checkedAt": "2026-10-26T02:03:19.596070+00:00",
-        "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+        "checkedAt": "2026-10-26T02:35:57.729250+00:00",
+        "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
         "state": "OPEN",
         "counts": {
-          "PENDING": 8,
-          "SUCCESS": 4,
+          "PENDING": 7,
+          "SUCCESS": 5,
           "SKIPPED": 2
         },
         "pending": [
           "test (ubuntu-latest)",
           "test (macos-latest)",
-          "macos-latest / python 3.12",
           "test (windows-latest)",
           "windows-latest / python 3.12",
           "Electron control center (Linux)",
           "Electron control center (Windows)",
           "Unified native macOS app"
         ],
-        "comments": 1,
+        "comments": 2,
         "reviews": 0
       },
       "backupUrl": "https://github.com/TruthNian/codex-router/pull/12",
       "backupState": "OPEN",
       "sourceCommit": "4c3097d08c2a863771a5d13e5119ca280162b0e8",
       "mergeValidation": {
-        "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
-        "main": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-        "merge": "9303ff11cc5f07ecd1f15762bcd93daf9255b024",
+        "head": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
+        "main": "e31f423071fe2284ee285440ad2a6f94a19d1919",
+        "merge": "a5c748567d4b8bf18edb0d71da96fc4d2a83c430",
         "parents": [
-          "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
-          "23429ec0cdc45ab5444e1caad75b74965a1acf52"
+          "e31f423071fe2284ee285440ad2a6f94a19d1919",
+          "5a825ae07a179c9a34facb0af97624ca1fb0ea11"
+        ],
+        "files": [
+          "changelog.d/windows-launcher-private-writer.md",
+          "src/service-windows.mjs",
+          "test/service-stop.test.mjs",
+          "test/startup-attempts-reset.test.mjs",
+          "test/windows-launcher-private-writer.test.mjs"
         ],
         "sourceHelperTestBlobsMatchLocal": true,
-        "runtimeAndAdjacentBlobsUnchangedFrom": "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+        "runtimeAndDedicatedWriterTestUnchangedFrom": "23429ec0cdc45ab5444e1caad75b74965a1acf52"
       },
       "topic": "private-writers/windows-launcher",
-      "ciRun": 40256988504,
-      "discoveryRun": 40256988510,
+      "ciRun": 40259721275,
+      "discoveryRun": 40259721267,
       "additionalRuns": [
-        40256988580
+        40259721301
       ],
       "supersededHeads": [
-        "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe"
+        "f77ad74cbc765a5f9873b52b5469f3fdd0360bbe",
+        "23429ec0cdc45ab5444e1caad75b74965a1acf52"
       ],
       "ciFailureHistory": [
         {
@@ -3525,12 +3590,28 @@
           "fixedAt": "2026-10-26T02:01:54.130993+00:00",
           "newHeadGitGuardian": "SUCCESS",
           "verifiedAt": "2026-10-26T02:03:19.596070+00:00"
+        },
+        {
+          "head": "23429ec0cdc45ab5444e1caad75b74965a1acf52",
+          "ciRun": 40256988504,
+          "failedPlatforms": [
+            "ubuntu-latest",
+            "macos-latest",
+            "windows-latest"
+          ],
+          "failuresPerPlatform": 13,
+          "cause": "Two source-executing lifecycle fixtures lacked writePrivateFile. Strict linking rejects the missing export in startup reset; stripped-import service-stop reaches ReferenceError in install catch before ownership verification, causing secondary false-record assertions.",
+          "fix": "Both exports delegate through the existing fake filesystem/failure hook after observed write guards; preserve all original oracles and add early-write failure case (26 reset scenarios).",
+          "baseline": "Local two-file reproduction has 13 failures, matching all three CI logs.",
+          "validation": "60 source-executing tests fixed; 15 focused + 107 adjacent pass / 23 platform skips after rebasing on actual merged #1082. Removing exports or bypassing fault hooks reproduces intended failures; all 15 final hunks reviewed.",
+          "newHead": "5a825ae07a179c9a34facb0af97624ca1fb0ea11",
+          "fixedAt": "2026-10-26T02:35:57.729250+00:00"
         }
       ]
     }
   },
   "upstreamStateSnapshot": {
-    "verifiedMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b",
+    "verifiedMain": "e31f423071fe2284ee285440ad2a6f94a19d1919",
     "merged": [
       1062,
       1063,
@@ -3548,15 +3629,15 @@
       1078,
       1079,
       1080,
-      1081
+      1081,
+      1082
     ],
     "open": [
       1065,
       1068,
-      1082,
       1083
     ],
-    "updatedAt": "2026-10-26T01:55:59.835964+00:00"
+    "updatedAt": "2026-10-26T02:35:57.729250+00:00"
   },
-  "verifiedMain": "e1a2e2db47e2e550f0218553cc6a2818be8a419b"
+  "verifiedMain": "e31f423071fe2284ee285440ad2a6f94a19d1919"
 }

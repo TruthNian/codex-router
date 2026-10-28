@@ -1,5 +1,7 @@
 # Development guide
 
+English · [简体中文](zh-CN/DEVELOPMENT.md) · [日本語](ja/DEVELOPMENT.md)
+
 ## Architecture
 
 - `config/` is the split provider and model registry tree.
@@ -56,7 +58,8 @@ live miss.
 7. Install in isolated state and run
    `bin/test-model provider/model --live --yes`; verify text, streaming, tool
    calls, and compaction before setting `listed: true`.
-8. Update the README model table and provider-specific setup documentation.
+8. Update the provider guide and corresponding English, Simplified Chinese,
+   and Japanese documentation.
 
 The shared API forwarder strips host and internal authentication before
 injecting the selected provider key. It supports the registry's tested
@@ -123,8 +126,8 @@ default. User-curated entries can add the same field directly in
 `user-models.json`; duplicate tier IDs are rejected.
 
 Set `listed: false` for compatibility aliases that must remain routable but
-should not appear in the app picker. Every model, listed or hidden, receives a
-generated LiteLLM route.
+should not appear in the app picker. The selected-route plan determines each model's direct Responses or
+LiteLLM path.
 
 An alternate registry can be tested in a development process with
 `CODEX_ROUTER_REGISTRY=/path/file.json`. Installed background services use the
@@ -138,9 +141,9 @@ model a registry update later ships — skips the entry and surfaces it in
 never take the router down. The listed-model live-test requirement applies to
 registry submissions; curated entries are explicitly local-only.
 
-Curated entries get their metadata from the user, not from any online
-catalog: interactive curation asks for each new model's context window,
-image support, and reasoning efforts (`--efforts` sets the effort ladder in
+Interactive curation asks for each new model's context window, image support,
+and reasoning efforts, using provider-advertised context metadata as the offered
+default when present (`--efforts` sets the effort ladder in
 the deterministic `--models` form), and everything defaults conservatively
 when unanswered. The stored entries in `user-models.json` are plain local
 state — edit any value in place and re-run `./bin/install` to apply.

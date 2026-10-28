@@ -1,5 +1,7 @@
 # Optional compatibility layer
 
+English · [简体中文](zh-CN/compatibility-layer.md) · [日本語](ja/compatibility-layer.md)
+
 The LiteLLM compatibility layer is enabled by default for existing installations.
 An installation which uses only native GPT and Responses-native provider routes
 can explicitly disable it. This preserves model IDs, provider selections, endpoint

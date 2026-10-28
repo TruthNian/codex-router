@@ -1,5 +1,7 @@
 # Desktop tray and Control Center
 
+English · [简体中文](zh-CN/DESKTOP-TRAY.md) · [日本語](ja/DESKTOP-TRAY.md)
+
 The desktop app combines the Codex Router tray and full Electron Control Center
 in one visible installation. It uses the same local control plane and health
 endpoint as the command line, so provider selection, quota data, and token
@@ -141,9 +143,11 @@ Windows SmartScreen may warn about the unsigned installer. On Linux, extract
 the tarball before launching its AppImage; the archive preserves its executable
 permission. Do not copy the AppImage out through a tool that strips file modes.
 
-Tagged releases do not publish an ad-hoc-signed macOS app. An ad-hoc signature
-only proves bundle integrity on the machine that built it; public macOS
-distribution waits for Developer ID signing and notarization.
+The release workflow supports a macOS universal package when the repository's
+signing trust pin and required signing/notarization credentials are configured.
+The installer validates checksums, bundle layout, the pinned Developer ID and
+source metadata. See [signed release installation](MACOS-TRAY.md#signed-release-installation)
+for selection, verification and local-build fallback.
 
 **From a CI run (for unreleased changes).** Open the **Actions** tab, pick a
 green **CI** run, and download the Control Center artifact for Windows/Linux or

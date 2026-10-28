@@ -1,5 +1,7 @@
 # Tool-result aging benchmark
 
+English · [简体中文](zh-CN/tool-result-aging-benchmark.md) · [日本語](ja/tool-result-aging-benchmark.md)
+
 This report separates provider-reported evidence from replay estimates.
 
 ## Live provider A/B

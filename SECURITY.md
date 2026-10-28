@@ -1,5 +1,7 @@
 # Security model
 
+English · [简体中文](SECURITY.zh-CN.md) · [日本語](SECURITY.ja.md)
+
 The router has its own trust root separate from Codex's: a random caller key,
 an internal service key, a private state directory, per-provider credential
 files, and a dedicated service identity and port range. Kimi OAuth is the
@@ -154,9 +156,10 @@ suite requires both `--live` and `--yes` because it sends prompts and consumes
 provider quota. Repository workflows receive provider keys only through GitHub
 Secrets; pull-request CI never receives them.
 
-Support bundles exclude logs by default and are never uploaded automatically.
-The optional redacted log tail can still contain private prompt or response text
-and must be inspected before sharing.
+Support bundles contain versions, diagnostic checks, service state and file
+metadata. They exclude credential values, prompts, responses and log contents.
+The legacy `--include-logs` option is a no-op; inspect the local bundle before
+choosing to share it.
 
 Network-facing error handlers do not return or log raw exception text. Detailed
 credential state is available only through authenticated local health checks and

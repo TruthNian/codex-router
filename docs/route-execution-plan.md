@@ -1,5 +1,7 @@
 # Selected-route execution plans
 
+English · [简体中文](zh-CN/route-execution-plan.md) · [日本語](ja/route-execution-plan.md)
+
 `createExecutionPlan` compiles an already loaded registry and explicit selection
 into an immutable set of services, a gateway requirement and a deterministic
 route fingerprint. The pure compiler does not import credentials, discovery,
@@ -39,9 +41,10 @@ The first prints selected services and gateway necessity as JSON, including an
 exact pending proof's readiness exception. The second prints `required` or
 `unused` and skips pending-proof credential inspection.
 
-The mapping describes the intended direct-forwarder execution boundary;
-this query is not an inventory of the currently running stack.
-
-This additive API/query does not yet change service startup, installer
-provisioning, Router dispatch, health reporting or client publication. Each
-consumer can adopt the shared decision in its own independently reviewed PR.
+The mapping describes route requirements, not an inventory of the currently
+running stack. Startup, Router dispatch, and health reporting consume the
+execution plan. Source dependency installation still follows the separately
+stored [compatibility-layer policy](compatibility-layer.md): with compatibility
+enabled, the installer provisions Python even when selected routes currently
+need no gateway. Disabling it skips Python provisioning and excludes dependent
+routes from effective catalogs. The query itself changes no service or selection.

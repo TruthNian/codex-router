@@ -1,5 +1,7 @@
 # ChatGPT native account switching
 
+English · [简体中文](zh-CN/CHATGPT-ACCOUNT-MODES.md) · [日本語](ja/CHATGPT-ACCOUNT-MODES.md)
+
 Codex Router keeps each ChatGPT login in its own isolated profile. The feature is deliberately switch-only: selecting an account changes the native Codex login for the next restart. It does not run automatic quota or round-robin routing.
 
 ## Select an account

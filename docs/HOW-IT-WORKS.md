@@ -1,54 +1,72 @@
 # How Codex Router works
 
-The provider core has one app frontend: Codex uses the Responses API and a
-merged native catalog.
+English · [简体中文](zh-CN/HOW-IT-WORKS.md) · [日本語](ja/HOW-IT-WORKS.md)
+
+One local router plane serves Codex and the other supported clients. Codex uses
+the Responses API and a merged native/external catalog. Other clients use the
+managed client adapters described in [Compatible clients](COMPATIBLE-APPS.md).
 
 ## Why a router is needed
 
-The Codex App expects the Responses API and a Codex-shaped model catalog.
-Kimi and DeepSeek expose OpenAI-compatible Chat Completions APIs with different
-authentication and request details. Codex Router bridges those contracts while
-leaving native GPT traffic on the normal ChatGPT Codex backend.
+Clients and model providers expose different protocols, credentials, model IDs,
+and capabilities. The router selects a registered route, applies its declared
+capabilities and local policy, and delivers the response in the client's
+contract. The client continues to run tools and enforce permissions.
 
 Four pieces make the integration work:
 
-- A generated catalog places external models beside native GPT models.
-- A dispatcher chooses native or external routing by namespaced model ID.
-- LiteLLM translates Responses requests, streams, and tool calls.
-- Credential forwarders inject only the selected provider's authentication.
+- Catalog publication exposes eligible models to installed clients.
+- The authenticated router distinguishes native GPT from registered external routes.
+- Responses-native routes use the credential-isolating API forwarder directly.
+- Routes needing translation use LiteLLM plus their API, OAuth, or Ollama adapter.
 
 ## Request flow
 
 ```mermaid
 sequenceDiagram
-  participant C as Codex
-  participant R as Router :4202
-  participant L as LiteLLM :4200
-  participant O as Kimi OAuth :4201
-  participant A as API forwarder :4203
+  participant C as Client
+  participant R as Local router
+  participant A as API forwarder
+  participant L as LiteLLM
+  participant F as API / OAuth / Ollama adapter
   participant G as ChatGPT Codex
   participant P as External provider
 
-  alt Native GPT model
-    C->>R: Capability URL + Responses request + Codex auth
-    R->>G: Allow-listed Codex headers + native model
-    G-->>R: Responses stream
-    R-->>C: Responses stream
-  else Registry model
-    C->>R: Capability URL + Responses request + namespaced model
-    R->>L: Gateway model + internal key
-    L->>L: Responses to Chat Completions
-    alt Kimi Code OAuth
-      L->>O: Chat request + internal key
-      O->>P: Kimi model + refreshed OAuth bearer
-    else API-key provider
-      L->>A: Chat request + internal key
-      A->>P: Upstream model + selected provider key
-    end
-    P-->>L: Chat Completions stream
-    L-->>C: Responses events through router
+  C->>R: Authenticated request
+  alt Native GPT (no redirect or login-free alias)
+    R->>G: Native request with filtered Codex authentication
+    G-->>R: Native response
+  else Registered Responses-native route
+    R->>A: Canonical Responses request
+    A->>P: Request with selected provider credential
+    P-->>A: Responses result or stream
+    A-->>R: Validated response
+  else Route requiring translation
+    R->>L: Request with internal service key
+    L->>F: Translated provider request
+    F->>P: Request with selected credential or local runtime
+    P-->>F: Provider response
+    F-->>L: Provider response
+    L-->>R: Responses events
   end
+  R-->>C: Client response
 ```
+
+The exact route descriptor decides the path, not the vendor name or picker
+visibility alone. HTTP and WebSocket Responses provider routes use the API
+forwarder; Chat Completions, Messages, Vertex, supported OAuth, and the native
+Ollama adapter use the compatibility path. Client-side Messages or Gemini
+adapters are separate from the selected model's upstream protocol.
+
+Runtime startup and health checks consume the selected-route execution plan.
+A Responses-only runtime can omit the Python gateway even while compatibility
+remains enabled. Source dependency provisioning is a separate decision: the
+installer still prepares Python while compatibility is enabled.
+[Explicitly disabling compatibility](compatibility-layer.md) skips its installation
+and probes and withholds gateway-dependent models without deleting stored
+credentials or model definitions. Homebrew retains its formula dependencies.
+
+See the [execution-plan contract](route-execution-plan.md) for service mapping.
 
 ## One registry, multiple consumers
 
@@ -88,33 +106,13 @@ the slug mapping; the router consults it when dispatching `/responses`, and
 pickers highlight the active model. Signed-in catalog builds clear the alias
 map, which restores native GPT routing.
 
-| Picker model | Public slug | Gateway model | Upstream model |
-| --- | --- | --- | --- |
-| K2.7 Coding Highspeed OAuth | `kimi-oauth/kimi-for-coding-highspeed` | `kimi-oauth-kimi-for-coding-highspeed` | `kimi-for-coding-highspeed` |
-| K2.7 Coding OAuth | `kimi-oauth/kimi-for-coding` | `kimi-oauth-kimi-for-coding` | `kimi-for-coding` |
-| Kimi K3 OAuth | `kimi-oauth/k3` | `kimi-oauth-k3` | `k3` |
-| Kimi K3 API | `kimi-api/kimi-k3` | `kimi-api-k3` | `kimi-k3` |
-| DeepSeek V4 Flash | `deepseek/deepseek-v4-flash` | `deepseek-v4-flash` | `deepseek-v4-flash` |
-| DeepSeek V4 Pro | `deepseek/deepseek-v4-pro` | `deepseek-v4-pro` | `deepseek-v4-pro` |
-| Grok 4.5 OAuth | `grok-oauth/grok-4.5` | `grok-oauth-grok-4-5` | `grok-4.5` |
-| Grok 4.5 | `grok-api/grok-4.5` | `grok-api-grok-4-5` | `grok-4.5` |
-| Claude Opus 4.8 | `anthropic-api/claude-opus-4.8` | `anthropic-api-claude-opus-4-8` | `claude-opus-4-8` |
-| GLM-5.2 Ollama Cloud | `ollama-cloud/glm-5.2` | `ollama-cloud-glm-5-2` | `glm-5.2` |
-| GLM-5.3 Ollama Cloud | `ollama-cloud/glm-5.3` | `ollama-cloud-glm-5-3` | `glm-5.3:cloud` |
-| GLM-5.3-Flash Ollama Cloud | `ollama-cloud/glm-5.3-flash` | `ollama-cloud-glm-5-3-flash` | `glm-5.3-flash:cloud` |
-| Kimi K2.7 Code Ollama Cloud | `ollama-cloud/kimi-k2.7-code` | `ollama-cloud-kimi-k2-7-code` | `kimi-k2.7-code` |
-| MiniMax M3 Ollama Cloud | `ollama-cloud/minimax-m3` | `ollama-cloud-minimax-m3` | `minimax-m3` |
-| DeepSeek V4 Pro Ollama Cloud | `ollama-cloud/deepseek-v4-pro` | `ollama-cloud-deepseek-v4-pro` | `deepseek-v4-pro` |
-| Qwen3.7 Max Plan | `qwen-plan/qwen3.7-max` | `qwen-plan-qwen3-7-max` | `qwen3.7-max` |
-| Qwen3.7 Plus Plan | `qwen-plan/qwen3.7-plus` | `qwen-plan-qwen3-7-plus` | `qwen3.7-plus` |
-| GLM-5.3 Coding Plan | `zai-coding/glm-5.3` | `zai-coding-glm-5-3` | `glm-5.3` |
-| GLM-5.2 Coding Plan | `zai-coding/glm-5.2` | `zai-coding-glm-5-2` | `glm-5.2` |
-| GLM-5-Turbo Coding Plan | `zai-coding/glm-5-turbo` | `zai-coding-glm-5-turbo` | `glm-5-turbo` |
-| GLM-5.3-Flash Z.ai API | `zai-api/glm-5.3-flash` | `zai-api-glm-5-3-flash` | `glm-5.3-flash` |
-| GLM-5.3 Z.ai API | `zai-api/glm-5.3` | `zai-api-glm-5-3` | `glm-5.3` |
-| GLM-5.2 Z.ai API | `zai-api/glm-5.2` | `zai-api-glm-5-2` | `glm-5.2` |
-| GLM-4.7 Z.ai API | `zai-api/glm-4.7` | `zai-api-glm-4-7` | `glm-4.7` |
-| GLM-5.3 opencode Go | `opencode-go/glm-5.3` | `opencode-go-glm-5-3` | `glm-5.3` |
+Registered external routes distinguish the public picker slug, an internal
+gateway ID where needed, and the upstream model ID. For example,
+`deepseek/deepseek-v4-pro` is the public slug while `deepseek-v4-pro` is
+the upstream ID. Direct Responses routes do not need a gateway hop.
+The [registry](https://github.com/duolahypercho/codex-router/tree/main/config/)
+is the source of current mappings; the [provider guide](PROVIDERS.md) explains
+authentication and local curation.
 
 The native catalog objects are preserved rather than reconstructed, which keeps
 current instructions and capability metadata from the installed Codex build.

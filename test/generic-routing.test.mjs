@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { userModelEntry } from "../src/user-models.mjs";
+import { waitForHealth } from "../src/health-probe.mjs";
 import { openPort } from "./port-pool.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -43,8 +44,8 @@ async function close(server) {
   await new Promise((resolve) => server.close(resolve));
 }
 
-function runForwarder(env) {
-  const child = spawn(process.execPath, [path.join(root, "src", "api-forwarder.mjs")], {
+function runForwarder(env, execArgv = []) {
+  const child = spawn(process.execPath, [...execArgv, path.join(root, "src", "api-forwarder.mjs")], {
     cwd: root,
     env: {
       ...process.env,
@@ -64,23 +65,21 @@ function runForwarder(env) {
   return child;
 }
 
-async function waitForForwarder(port, child) {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`Forwarder exited early (${child.exitCode}): ${child.testErrors()}`);
-    }
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/health`, {
-        headers: { Authorization: `Bearer ${INTERNAL_KEY}` },
-      });
-      if (response.ok) return;
-    } catch {
-      // Listener is not ready yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+async function waitForForwarder(port, child, timeoutMs = 30_000) {
+  try {
+    // Shared Windows runners can delay process startup beyond five seconds.
+    // Use the service's bounded health gate rather than a second polling loop.
+    await waitForHealth({
+      label: "Generic API forwarder",
+      url: `http://127.0.0.1:${port}/health`,
+      headers: { Authorization: `Bearer ${INTERNAL_KEY}` },
+      expectedService: "codex-router-api-forwarder",
+      child,
+      timeoutMs,
+    });
+  } catch (error) {
+    throw new Error(`${error.message} ${child.testErrors()}`, { cause: error });
   }
-  throw new Error(`Forwarder did not become healthy: ${child.testErrors()}`);
 }
 
 async function stop(child) {
@@ -88,6 +87,45 @@ async function stop(child) {
   child.kill("SIGTERM");
   await new Promise((resolve) => child.once("exit", resolve));
 }
+
+test("generic forwarder readiness accepts startup beyond five seconds", async (t) => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "generic-routing-slow-start-"));
+  const port = await openPort();
+  const child = runForwarder({
+    MODEL_ROUTER_API_PORT: String(port),
+    MODEL_ROUTER_STATE_DIR: path.join(directory, "state"),
+    MODEL_ROUTER_GENERIC_PROVIDERS: path.join(directory, "generic-providers.json"),
+    MODEL_ROUTER_USER_MODELS: path.join(directory, "user-models.json"),
+  }, ["--import", "data:text/javascript,await new Promise(resolve => setTimeout(resolve, 6000));"]);
+  t.after(async () => {
+    await stop(child);
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  await waitForForwarder(port, child);
+  const response = await fetch(`http://127.0.0.1:${port}/health`, {
+    headers: { Authorization: `Bearer ${INTERNAL_KEY}` },
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).service, "codex-router-api-forwarder");
+});
+
+test("generic forwarder readiness reports a child crash with stderr", async () => {
+  await assert.rejects(waitForForwarder(0, {
+    exitCode: 1,
+    signalCode: null,
+    testErrors: () => "synthetic startup failure",
+  }), /exited before becoming healthy.*synthetic startup failure/);
+});
+
+test("generic forwarder readiness still expires when nothing listens", { timeout: 10_000 }, async () => {
+  const port = await openPort();
+  await assert.rejects(waitForForwarder(port, {
+    exitCode: null,
+    signalCode: null,
+    testErrors: () => "synthetic startup stderr",
+  }, 100), /Timed out waiting for Generic API forwarder.*synthetic startup stderr/);
+});
 
 test("one generic gateway routes ordinary and explicitly profiled models without inference", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "generic-routing-"));

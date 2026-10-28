@@ -1,5 +1,7 @@
 # Installation, migration, and upgrades
 
+English · [简体中文](zh-CN/INSTALL.md) · [日本語](ja/INSTALL.md)
+
 This page covers the Codex target:
 
 ```sh
@@ -17,9 +19,15 @@ This page covers the Codex target:
 Required software:
 
 - Node.js 22.19+ (Node.js 24 LTS recommended)
-- `uv`, or Python 3.10+ with `venv`
+- `uv`, or Python 3.10+ with `venv`, for the default compatibility-enabled
+  source install. Explicitly [disabling the compatibility layer](compatibility-layer.md)
+  skips Python installation and probes, including forced repair. Merely choosing
+  Responses-only models does not disable that install policy. Homebrew still
+  installs Python as a formula dependency.
 - Git for managed one-command installation and rollback
-- At least one Kimi OAuth, Kimi API, or DeepSeek API credential
+- Authentication and account access for the providers you choose. The router
+  supports more than Kimi and DeepSeek; catalog-only providers also need local
+  model selection. The explicit credential-free idle mode below needs no login.
 - On Windows, Windows PowerShell in `FullLanguage` mode with application-control
   policy that permits `Add-Type`. The bounded process-tree owner fails before
   launching a mutation command when that host capability is unavailable.
@@ -102,6 +110,77 @@ number (`a` selects all, `n` clears, Enter continues) with a live
 ready/needs-key/needs-sign-in status per provider, credential onboarding for
 anything you selected that is not connected yet, and a review summary before
 any change is made.
+
+## Homebrew router and CLI only
+
+Codex Router is not in `homebrew/core` yet, so `brew install codex-router` by
+itself does not work. For now, add this repository as a tap once:
+
+```sh
+brew tap duolahypercho/codex-router https://github.com/duolahypercho/codex-router
+brew install codex-router
+codex-router setup --guided
+```
+
+The tap URL is needed only once. Homebrew installs the formula's Node.js,
+Python, and build dependencies; `codex-router setup --guided` performs the
+one-time provider selection, credential-safe authentication, background
+service installation, and Codex integration. When setup finishes, fully quit
+and reopen Codex, create a new task, and choose a routed model from the picker.
+
+Homebrew is the **router/CLI-only** installation. It deliberately does not
+build or download the Electron Control Center, tray/menu-bar app, or macOS
+desktop widget during setup. If you want those, use the recommended installer
+in the [README](../README.md) instead.
+
+Upgrade an existing Homebrew installation with:
+
+```sh
+brew upgrade codex-router
+```
+
+### Homebrew command equivalents
+
+A Homebrew install puts a single `codex-router` command on your PATH instead
+of this repository's `bin/` directory. Wherever the project documentation shows
+`./bin/model-router codex <command>` or `./bin/<command>`, run:
+
+```sh
+codex-router <command>
+```
+
+List everything the packaged build exposes with:
+
+```sh
+codex-router help
+```
+
+To add a custom provider's models — the packaged equivalent of
+`./bin/curate-models <provider>` — run:
+
+```sh
+codex-router curate-models <provider>
+```
+
+`codex-router install` is deliberately unavailable: a Homebrew install has no
+writable checkout to rewrite, and `brew upgrade codex-router` performs that
+step itself.
+
+Before removing the formula, remove the per-user service and managed Codex
+configuration that Homebrew does not own:
+
+```sh
+codex-router uninstall
+brew uninstall codex-router
+```
+
+The first Homebrew install can take considerably longer than the guided
+source installer because the formula builds the locked Python dependencies from
+source. The release workflow generates `Formula/codex-router.rb` from
+`requirements/python.txt` and refreshes it for each release.
+
+Maintainers preparing the eventual `homebrew/core` submission should follow
+[`docs/HOMEBREW_CORE.md`](HOMEBREW_CORE.md).
 
 ## Authentication choices
 
@@ -325,23 +404,30 @@ Setup performs these operations in order:
 1. Validates provider selection and credential presence.
 2. Detects other model-catalog owners and earlier Codex Router variants.
 3. With approval, snapshots and stops only recognized older variants.
-4. Installs locked Node dependencies and pinned LiteLLM in `.venv`.
+4. Installs locked Node dependencies. With compatibility enabled it also
+   prepares pinned LiteLLM in `.venv`; an explicit compatibility opt-out skips
+   Python installation and probes.
 5. Generates separate random Codex caller and internal-service keys.
 6. Captures the native Codex model catalog and adds only selected provider models.
-7. Generates gateway routes from the split registry tree under `config/`.
+7. Prepares routes from the split registry tree under `config/`, respecting
+   the stored compatibility policy. Runtime startup uses only the services
+   required by selected routes.
 8. Adds the marked capability-bearing base URL and catalog block. When the user
    has not set an agent concurrency limit, it also configures six spawned-agent
    slots so native Kimi/Grok/GPT collaboration does not remain on Codex's small
    v2 default. Existing `[agents]` limits are preserved.
 9. Protects the Codex config and its backup for the current user.
 10. Installs the platform's per-user background service.
-11. Waits for every local layer to report its expected service identity.
+11. Waits for each required local service to report its expected identity.
 12. Records the installed commit and provider selection.
 13. Runs the doctor.
 
-If config or service installation fails, the new service and marked config block
-are removed. If a legacy migration was part of the transaction, its exact config
-and service definition are restored as well.
+On a rollback-eligible config or service installation failure, the new service
+and marked config block are removed. A registered service that is still starting
+or in its reported startup cooldown is preserved with a temporary-failure status;
+this temporary-failure case is not treated as a completed rollback.
+For rollback-eligible failures during a recognized legacy migration, its saved
+config and service definition are restored as part of recovery.
 
 The installer does not kill an unknown process on ports 4200–4203 and does not
 replace an unmarked user-owned `openai_base_url`, `model_catalog_json`, or agent
@@ -525,33 +611,39 @@ Windows:
 ./codex-router.ps1 rollback
 ```
 
-The updater requires the recognized GitHub origin and a checkout with no edits
-to tracked files. It fetches `origin/main`, retains the current revision under
+The managed checkout updater requires the recognized GitHub origin and a
+checkout with no edits to tracked files. It fetches `origin/main`, retains the current revision under
 `refs/codex-router/rollback`, fast-forwards, and reinstalls. A failed install
 automatically checks out and reinstalls the previous revision. `update check`
-only compares the revisions and changes nothing.
+fetches remote Git metadata and compares revisions without reinstalling or
+restarting the service.
 
 Untracked files never block an update; only edits to tracked files do, and the
 refusal names them. Keep them with `git -C <checkout> stash`, or discard them by
 re-running the same command with `--force` (`./bin/update --force`,
 `./bin/rollback --force`, `./codex-router.ps1 rollback --force`). The bootstrap
 installers take the same escape: `--force` for the `curl | sh` script and
-`-Force` for the `irm | iex` one. Every force path discards tracked edits only;
-none of them delete untracked files.
+`-Force` for the PowerShell installer. Every force path discards tracked edits
+only; none of them delete untracked files.
 
-Setup distinguishes a broken checkout from unfinished configuration. When it
-exits 2 — a declined prompt, a missing credential, an invalid `--providers`
-value — the update is kept, because none of those say anything about the code
-that was just fetched, and discarding it means the next attempt repeats the
-same failure with the same code. Rolling back there is what made a setup-path
-bug impossible to fix by updating: the fix was fetched and then thrown away.
-Any other non-zero exit still restores the previous revision, leaving HEAD
-detached at that commit so the running service keeps the last known-good
-tree. The next `install.sh` / `install.ps1` run, or `./bin/update`, switches
-back to `main` before fetching; a named non-`main` branch is still refused.
-Re-run setup to
-continue, or `./bin/rollback` (`./codex-router.ps1 rollback` on Windows) to
-return to the retained revision deliberately.
+### Managed checkout updater
+
+The updater restores the previous revision and attempts to reinstall it when
+the new installation fails. If automatic recovery also fails, it reports both
+errors and the previous commit instead of claiming recovery succeeded. Rollback
+can leave HEAD detached at the restored revision; the next updater switches it
+back to `main`. A named development branch is still refused.
+
+### Bootstrap setup
+
+The source bootstrap installers run guided setup after fetching the checkout.
+When that setup exits 2 (for example, after a declined prompt or a missing
+credential), the update is kept. Re-run setup to finish configuring, or use the
+rollback command to return to the retained revision.
+
+For other setup failures, the bootstrap restores the previous source revision
+when one was available, leaving HEAD detached at that commit. The next bootstrap
+installer switches back to `main` before fetching.
 
 For checkout installs, the reinstall skips dependency work whose inputs are
 unchanged, so an update that carries no `package-lock.json` or LiteLLM pin
@@ -596,7 +688,8 @@ Windows:
 ./codex-router.ps1 uninstall
 ```
 
-Uninstall removes the marked integration config and current background service.
+Uninstall removes the selected client's marked integration. The shared
+background service is retired only when no installed client still uses it.
 It intentionally retains the checkout, native catalog cache, logs, backups,
 migration snapshots, internal key, and provider credentials. This prevents a
 routine uninstall from silently destroying authentication or recovery data.

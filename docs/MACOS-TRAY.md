@@ -1,5 +1,7 @@
 # macOS native tray and Control Center
 
+English · [简体中文](zh-CN/MACOS-TRAY.md) · [日本語](ja/MACOS-TRAY.md)
+
 `Codex Router.app` is one installed macOS app with two coordinated surfaces.
 Its Swift host owns the native menu-bar item and optional Dynamic-Island-style
 overlay; its embedded Electron app supplies the full Control Center window.

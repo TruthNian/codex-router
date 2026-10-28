@@ -1,5 +1,7 @@
 # Per-model history policy
 
+English · [简体中文](zh-CN/tool-result-model-policy.md) · [日本語](ja/tool-result-model-policy.md)
+
 The default remains 32KiB, with native OpenAI aging disabled. Explicit model
 settings in the private `tool-result-aging.json` file can opt a routed model
 into a smaller size floor and a local readback notice:

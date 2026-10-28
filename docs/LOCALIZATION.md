@@ -1,4 +1,23 @@
-# Chinese interface localization
+# Documentation and interface localization
+
+English · [简体中文](zh-CN/LOCALIZATION.md) · [日本語](ja/LOCALIZATION.md)
+
+## Documentation languages
+
+The root homepages and companion operating guides are available in English,
+Simplified Chinese and Japanese. Localized guides in `docs/zh-CN/` and `docs/ja/`
+are organized around the same tasks and link to matching-language pages.
+Update the corresponding procedures, capability limits and examples together.
+Preserve commands, configuration keys, environment variables, model IDs and
+argument values. Verify language navigation, local links and section anchors.
+
+Source code, registries, historical research, release history and license text
+retain their source files and are linked from the guides.
+
+The Control Center already has a Japanese overlay in
+`apps/control-center/src/locales/overlays.ts`. UI coverage follows that catalog
+and its fallback behavior. The semantic Chinese interface rules below remain
+the contributor contract for Simplified and Traditional Chinese.
 
 ## Ownership and scope
 

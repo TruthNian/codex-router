@@ -534,9 +534,11 @@ test("every failure the checks can emit is explained in the guide", () => {
   }
 });
 
-test("the guide is reachable from the README index rather than only from a link someone remembers", () => {
+test("the guide is reachable through the README provider index", () => {
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  assert.match(readme, /\(docs\/DEVIN-CLI-PROBE\.md\)/);
+  assert.match(readme, /\(docs\/PROVIDERS\.md\)/);
+  const providers = readFileSync(new URL("../docs/PROVIDERS.md", import.meta.url), "utf8");
+  assert.match(providers, /\(DEVIN-CLI-PROBE\.md\)/);
 });
 
 // A `.cmd` shim is what npm installs on Windows, and `spawnableCommand` answers

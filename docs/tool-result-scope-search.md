@@ -1,5 +1,7 @@
 # Exact lookup without guessing archive handles
 
+English · [简体中文](zh-CN/tool-result-scope-search.md) · [日本語](ja/tool-result-scope-search.md)
+
 The existing reader accepts `--scope-search --find 'literal identifier'` with
 any valid reference handle. It returns exact excerpts only from archives with
 the same signed conversation/permission scope. It reuses the original reader's

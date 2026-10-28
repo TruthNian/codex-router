@@ -1,5 +1,7 @@
 # Desktop archive readback proofs
 
+English · [简体中文](zh-CN/tool-result-readback-proof.md) · [日本語](ja/tool-result-readback-proof.md)
+
 Signed proofs in bounded Desktop JSON result wrappers are decoded and verified
 with the same signature, expiry and conversation/permission scope checks as
 direct exec output. Wrapping is never permission to omit data.

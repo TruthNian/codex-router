@@ -1,5 +1,7 @@
 # Local LLMs through Ollama
 
+English · [简体中文](zh-CN/LOCAL-MODELS.md) · [日本語](ja/LOCAL-MODELS.md)
+
 Codex Router treats Ollama as a managed, headless local runtime. The model
 files remain in Ollama's store; the router only keeps selection, download
 progress, benchmark, and catalog state under `~/.codex/codex-router`.

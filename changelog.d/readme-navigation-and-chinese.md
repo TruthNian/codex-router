@@ -1,0 +1,1 @@
+- **The README and companion guides are available in English, Simplified Chinese and Japanese.** The homepage now focuses on setup and common operations, with provider, Codex and client detail in linked guides. Routing, Python prerequisites, archive readback and lifecycle descriptions follow the current implementation.

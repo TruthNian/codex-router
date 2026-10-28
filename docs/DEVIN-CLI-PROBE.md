@@ -1,5 +1,7 @@
 # Verifying the Devin CLI provider (`bin/devin-probe`)
 
+English · [简体中文](zh-CN/DEVIN-CLI-PROBE.md) · [日本語](ja/DEVIN-CLI-PROBE.md)
+
 This page is for someone who has a Devin account and is willing to spend about
 five minutes and a few cents of ACU credit settling a question no maintainer of
 this repository can answer.

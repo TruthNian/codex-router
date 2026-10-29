@@ -413,9 +413,8 @@ test("a health wait that runs out is marked retryable", async () => {
 });
 
 test("a crash loop and a dead launcher are not marked retryable", async () => {
-  // Both of these are genuinely broken, so the installer's rollback must still
-  // tear the service out. Tagging them would keep a task that relaunches a
-  // failing router at every logon.
+  // These are hard failures requiring status/repair, rather than a retryable
+  // cold start. The outer installer preserves the service definition.
   let restarts = 0;
   await assert.rejects(
     waitForServiceReadiness({

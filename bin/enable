@@ -88,11 +88,9 @@ fi
 node src/provider-selection.mjs ensure-configured >/dev/null
 node src/secret.mjs ensure
 config_enabled=false
-service_installed=false
 rollback() {
-  if [ "$service_installed" = true ]; then
-    node src/service.mjs uninstall >/dev/null 2>&1 || true
-  fi
+  # Preserve the shared service definition; only its platform controller can
+  # prove which registration a failed command is entitled to roll back.
   if [ "$config_enabled" = true ]; then
     node "$config_manager" "$config_disable_command" >/dev/null 2>&1 || true
   elif [ "$adopt_native_catalog" = true ]; then
@@ -138,11 +136,18 @@ if [ "$adopt_native_catalog" = true ]; then
 else
   node "$config_manager" "$config_enable_command"
 fi
-service_installed=true
-node src/service.mjs install
+service_status=0
+node src/service.mjs install || service_status=$?
+if [ "$service_status" -eq 75 ]; then
+  # The service owns the readiness wait. Keep the published client in place
+  # when a cold start needs longer, exactly as the full installer does.
+  trap - EXIT HUP INT TERM
+  exit "$service_status"
+elif [ "$service_status" -ne 0 ]; then
+  exit "$service_status"
+fi
 node src/wait-health.mjs
 config_enabled=false
-service_installed=false
 trap - EXIT HUP INT TERM
 if [ "$target" = dsh ]; then
   echo "External model routes published to DeepSeek Harness. It reloads them on the next request."

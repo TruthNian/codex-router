@@ -259,7 +259,6 @@ $ConfigManager = switch ($Target) {
 $ConfigEnableCommand = if ($Target -eq "codex") { "enable" } else { "install" }
 $ConfigDisableCommand = if ($Target -eq "codex") { "disable" } else { "uninstall" }
 $ConfigEnabled = $false
-$ServiceInstalled = $false
 # `service.mjs install` exits 75 when the service is installed and running but
 # the router did not answer /health inside the readiness budget -- a slow cold
 # start, not a failed install. The rollback must then leave both the service
@@ -274,7 +273,6 @@ $AdoptionPending = $false
 $HadForeignStateOverride = $null -ne (Get-Item Env:\MODEL_ROUTER_ALLOW_FOREIGN_STATE -ErrorAction SilentlyContinue)
 $SavedForeignStateOverride = $env:MODEL_ROUTER_ALLOW_FOREIGN_STATE
 $ConfigWasEnabled = $false
-$ServiceWasInstalled = $false
 $TrayWasInstalled = $false
 Push-Location $ScriptDirectory
 
@@ -304,7 +302,6 @@ try {
     "openclaw" { (Get-InstallerStateField @($ConfigManager, "status") "installed") -eq $true }
     default { (Get-InstallerStateField @($ConfigManager, "status") "mode") -eq "router" }
   }
-  $ServiceWasInstalled = (Get-InstallerStateField @("src\service.mjs", "status") "installed") -eq $true
   $TrayWasInstalled = (Get-InstallerStateField @("src\tray-service.mjs", "status") "installed") -eq $true
   if ($Target -eq "codex") {
     $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
@@ -541,7 +538,6 @@ try {
   # the whole readiness budget while the ownership transfer never ran.
   & node src/install-manifest.mjs record | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Install-manifest recording failed." }
-  $ServiceInstalled = $true
   & node src/service.mjs install
   if ($LASTEXITCODE -eq 75) {
     # Installed and running, just not healthy yet. Stop without rolling
@@ -620,17 +616,11 @@ try {
     Write-Host "Installed the selected external model routes. Fully quit and reopen Codex."
   }
 } catch {
-  # Undo only what this run created, and only when the run actually broke
-  # something. The router health wait can time out on a cold-starting gateway
-  # with a large model set -- retryable, not broken -- so a router that is
-  # merely slow to start is left exactly as installed. Gating this on
-  # $ServiceWasInstalled alone covered only a reinstall over a working router;
-  # a first install on a clean machine still had its task and launchers deleted
-  # the moment a cold start overran the wait, which is #760.
+  # Only the platform controller owns registration rollback. A pre-install
+  # query cannot prove this outer run created the shared task or launchers.
+  # Preserve them for status/repair, and retain client config on a cold-start
+  # readiness timeout as well.
   if ($ReadinessTimedOut) { throw }
-  if ($ServiceInstalled -and -not $ServiceWasInstalled) {
-    & node src/service.mjs uninstall 2>$null | Out-Null
-  }
   if ($ConfigEnabled) {
     if (-not $ConfigWasEnabled) {
       & node $ConfigManager $ConfigDisableCommand 2>$null | Out-Null

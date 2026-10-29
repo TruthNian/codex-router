@@ -1,0 +1,1 @@
+- Stop automatically uninstalling the shared background service from outer install/enable failure handlers: those handlers cannot prove they created its current definition. A failure can now retain the definition for status/repair; platform-owned registration rollback, client restoration, and the readiness-timeout contract remain in place.

@@ -1,0 +1,1 @@
+- Preserve the installed at-most-once transport policy: provider error text cannot authorize replay without trusted local delivery evidence; availability remains an explicit opt-in.

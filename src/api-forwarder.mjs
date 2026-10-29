@@ -118,7 +118,7 @@ import {
   wsTransportAvailable,
 } from "./responses-ws-client.mjs";
 import { providerPoolRegistry } from "./provider-ws-pool.mjs";
-import { providerTransportError } from "./transport-failure.mjs";
+import { providerTransportError, PROVIDER_DELIVERY_STATE_HEADER } from "./transport-failure.mjs";
 import {
   endpointCapabilityError,
   supportsOpenAIModelEndpoint,
@@ -2421,6 +2421,7 @@ const server = http.createServer((request, response) => {
       `[api-forwarder] request failed: ${formatErrorChain(error, { messages: false })}`,
     );
     if (!response.headersSent) {
+      if (transport) response.setHeader(PROVIDER_DELIVERY_STATE_HEADER, transport.deliveryState);
       writeJson(response, status, {
         error: error.code === "compatibility_layer_disabled"
           ? compatibilityLayerError("the requested route").error : transport || (error?.code === "upstream_redirect_refused" ? {

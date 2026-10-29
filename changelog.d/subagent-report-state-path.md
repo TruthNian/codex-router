@@ -1,0 +1,1 @@
+- **The subagent readiness report reads the configured router state directory.** Reuse the shared path resolver for state aliases, CODEX_HOME and the Windows user profile.

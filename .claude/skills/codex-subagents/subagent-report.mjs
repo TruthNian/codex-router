@@ -10,9 +10,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
-const STATE_DIR =
-  process.env.MODEL_ROUTER_STATE_DIR ||
-  path.join(process.env.HOME || "", ".codex", "codex-router");
+import { STATE_DIR } from "../../../src/paths.mjs";
 
 const CATALOG_PATH = path.join(STATE_DIR, "merged-models.json");
 const SETTINGS_PATH = path.join(STATE_DIR, "multi-agent-settings.json");

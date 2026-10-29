@@ -51,9 +51,12 @@ async function serveRenderer() {
     response.end(readFileSync(target));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { url: `http://127.0.0.1:${server.address().port}/`, close: () => new Promise((resolve) => {
+  const close = () => new Promise((resolve) => {
     server.close(resolve); server.closeAllConnections();
-  }) };
+  });
+  // Register at the listener owner: browser launch can fail before finally.
+  test.after(close);
+  return { url: `http://127.0.0.1:${server.address().port}/`, close };
 }
 
 const chromiumPath = [process.env.CODEX_ROUTER_TEST_CHROMIUM, chromium.executablePath(),

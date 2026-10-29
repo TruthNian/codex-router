@@ -2,12 +2,12 @@ import "./helpers/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { runTrayUpdate, withTrayUpdateOwner } from "../src/tray-update-owner.mjs";
+import { ownerLifetimeDescriptor, runTrayUpdate, withTrayUpdateOwner } from "../src/tray-update-owner.mjs";
 import { launchDetached } from "../src/tray-detached-launch.mjs";
 import { posixShell } from "./helpers/posix-shell.mjs";
 
@@ -17,6 +17,7 @@ test("one owner excludes recovery while the first complete native transaction is
   let held = false;
   const kernel = {
     root, waitMs: 0,
+    descriptor: () => undefined,
     start: async () => { if (held) throw Object.assign(new Error("busy"), { code: "EADDRINUSE" }); held = true; return {}; },
     close: async () => { held = false; },
   };
@@ -37,27 +38,45 @@ test("one owner excludes recovery while the first complete native transaction is
 
 test("macOS checkouts and delayed recovery use the same installed-package owner identity", async () => {
   const endpoints = [];
-  const options = { home: process.env.HOME, platform: "darwin", start: async (endpoint) => { endpoints.push(endpoint); return {}; }, close: async () => {} };
+  const options = { home: process.env.HOME, platform: "darwin", descriptor: () => undefined, start: async (endpoint) => { endpoints.push(endpoint); return {}; }, close: async () => {} };
   await withTrayUpdateOwner(async () => {}, { ...options, root: "/synthetic/checkout-a" });
   await withTrayUpdateOwner(async () => {}, { ...options, root: "/synthetic/checkout-b" });
   assert.deepEqual(endpoints[0], endpoints[1]);
 });
 
-test("the native body executes inside the owner, preserving argv and status 75", async () => {
+test("the native body executes inside the owner, preserving argv and native exit statuses", async () => {
   const calls = [];
   let held = false;
-  const execute = async (command, args, options) => { assert.equal(held, true); calls.push({ command, args, options }); return { status: 75 }; };
-  for (const mode of ["posix", "windows"]) {
+  let nativeStatus;
+  const execute = async (command, args, options) => { assert.equal(held, true); calls.push({ command, args, options }); return { status: nativeStatus }; };
+  for (nativeStatus of [0, 17, 75]) for (const mode of ["posix", "windows"]) {
     const result = await runTrayUpdate([mode, "tray", "--preserve-window", "a b"], {
-      withOwner: async (run) => { held = true; try { return await run(); } finally { held = false; } },
+      withOwner: async (run) => { held = true; try { return await run(mode === "posix" ? 123 : undefined); } finally { held = false; } },
       run: execute, runOperation: execute,
     });
-    assert.equal(result, 75);
+    assert.equal(result, nativeStatus);
     assert.equal(held, false);
   }
   assert.ok(calls[0].args[0].endsWith("tray-update-posix.sh"));
   assert.ok(calls[1].args.some((arg) => arg.endsWith("router-commands-windows.ps1")));
+  assert.equal(calls[0].options.ownerLifetimeFd, 123);
+  assert.equal(calls[1].options.ownerLifetimeFd, undefined);
   for (const call of calls) assert.deepEqual(call.args.slice(-3), ["tray", "--preserve-window", "a b"]);
+});
+
+test("an unavailable POSIX socket descriptor refuses mutation and Windows needs no fd", async (t) => {
+  let mutated = false;
+  let closed = false;
+  await assert.rejects(withTrayUpdateOwner(() => { mutated = true; }, {
+    root: process.cwd(), platform: "linux", start: async () => ({}), close: async () => { closed = true; },
+  }), /cannot pass the tray update/);
+  assert.equal(mutated, false);
+  assert.equal(closed, true);
+  assert.equal(ownerLifetimeDescriptor({}, "win32"), undefined);
+  const root = mkdtempSync(path.join(os.tmpdir(), "tray-nonsocket-fd-"));
+  const fd = openSync(path.join(root, "regular-file"), "w");
+  t.after(() => { closeSync(fd); rmSync(root, { recursive: true, force: true }); });
+  assert.throws(() => ownerLifetimeDescriptor({ _handle: { fd } }, "linux"), /cannot pass the tray update/);
 });
 
 test("detached GUI launch keeps the exact pid under the existing readiness owner and clears inherited operation epochs", async () => {

@@ -21,12 +21,12 @@ function fixture(platform, withOwner) {
     process: { platform, env: {}, stdout: { write() {} } }, routerNodeBinary: () => "synthetic-node",
     operationDeadlineFromEnvironment: () => undefined,
     spawnSync: (command, args) => { events.push(command === "powershell.exe" ? "public-transaction" : `read:${args.at(-1)}`); return { status: 0 }; },
-    runProcessTree: async (_command, args) => { assert.equal(held, true); events.push(`mutate:${args.at(-1)}`); return { status: 0 }; },
+    runProcessTree: async (_command, args, options) => { assert.equal(held, true); assert.equal(options.ownerLifetimeFd, platform === "win32" ? undefined : 123); events.push(`mutate:${args.at(-1)}`); return { status: 0 }; },
     fixtureTrayOwner: async (run) => {
       events.push("owner");
       return (withOwner || (async (operation) => operation()))(async () => {
         held = true;
-        try { return await run(); }
+        try { return await run(platform === "win32" ? undefined : 123); }
         finally { held = false; }
       });
     },

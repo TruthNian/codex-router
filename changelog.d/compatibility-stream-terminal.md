@@ -1,1 +1,2 @@
 - Certify streaming from framed output and a real successful response terminal instead of quoted completion words.
+- Certify final snapshots only from assistant output text, so echoed input and reasoning cannot pass the streaming probe.

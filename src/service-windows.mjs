@@ -641,7 +641,23 @@ if (command === "render") {
     Number.isSafeInteger(inheritedDeadline) && inheritedDeadline > 0 ? inheritedDeadline : Number.POSITIVE_INFINITY);
   try {
     installed = taskExists({ strict: true, deadline });
-    if (!installed) state = "stopped";
+    if (!installed) {
+      state = "stopped";
+      // Unregistering a task does not terminate its managed process tree.
+      // Reuse only our existing record and shutdown ownership/port probes;
+      // an absent registration alone cannot authorize stopped-state writes.
+      const record = readServiceProcessState(undefined, { strict: true });
+      if (record) {
+        const ownership = probeOwnership(record, deadline);
+        if (ownership === "owned") {
+          loaded = true;
+          state = "running";
+        } else if (!serviceRecordSettled({
+          ownership,
+          portListening: ownership === "foreign" ? managedPortStillListening(record, deadline) : undefined,
+        })) state = "unknown";
+      }
+    }
     else {
       state = taskState({ deadline });
       if (!["running", "ready", "disabled", "queued"].includes(state)) state = "unknown";

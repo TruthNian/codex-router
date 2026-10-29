@@ -9,6 +9,7 @@ import vm from "node:vm";
 import { normalizeServiceStatus } from "../src/service-status.mjs";
 import { managedServiceIsRunning, recoverPendingCallerKeyRotation, runCallerKeyRotation } from "../src/caller-key.mjs";
 import { routerServiceStatus } from "../src/router-restart.mjs";
+import { readServiceProcessState, serviceRecordSettled } from "../src/service-process.mjs";
 
 async function platformStatus(file, nextCommand, mocks) {
   const source = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
@@ -21,6 +22,7 @@ async function platformStatus(file, nextCommand, mocks) {
     normalizeServiceStatus, existsSync: () => true,
     LAUNCH_AGENT_PATH: "/synthetic/agent", unitPath: "/synthetic/unit", unitName: "synthetic.service",
     TASK_STOP_TIMEOUT_MS: 15_000,
+    readServiceProcessState: () => undefined, serviceRecordSettled,
     process: { env: {}, stdout: { write: (text) => { output += text; } } },
     ...mocks,
   };
@@ -37,6 +39,53 @@ test("all platforms preserve denied and inconclusive status instead of inventing
     assert.equal(status.statusUnknown, true);
     assert.throws(() => managedServiceIsRunning(status), /could not be verified/);
   }
+});
+
+test("a missing Windows task retains the existing managed process record's evidence", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "windows-record-status-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const recordPath = path.join(root, "service-process.json");
+  const record = { version: 1, managed: true, pid: 525252, processIdentity: "synthetic-start",
+    commandLine: "synthetic-node synthetic-start.mjs", sourceRoot: root, stateDir: root };
+  writeFileSync(recordPath, JSON.stringify(record), { mode: 0o600 });
+  for (const [ownership, portListening, expected] of [
+    ["owned", undefined, "running"],
+    ["unknown", false, "unknown"],
+    ["foreign", true, "unknown"],
+    ["foreign", undefined, "unknown"],
+    ["foreign", false, "stopped"],
+  ]) {
+    let ownershipProbes = 0;
+    let portProbes = 0;
+    const status = await platformStatus("service-windows.mjs", "stop", {
+      taskExists: () => false,
+      readServiceProcessState: (_unused, options) => {
+        assert.equal(options.strict, true);
+        return readServiceProcessState(recordPath, options);
+      },
+      probeOwnership: (observed, deadline) => {
+        assert.deepEqual(observed, record);
+        assert.ok(Number.isFinite(deadline));
+        ownershipProbes += 1;
+        return ownership;
+      },
+      managedPortStillListening: (observed) => { assert.deepEqual(observed, record); portProbes += 1; return portListening; },
+    });
+    assert.equal(status.installed, false);
+    assert.equal(status.loaded, ownership === "owned");
+    assert.equal(status.state, expected);
+    assert.equal(status.statusUnknown === true, expected === "unknown");
+    assert.equal(ownershipProbes, 1);
+    assert.equal(portProbes, ownership === "foreign" ? 1 : 0);
+    if (expected === "unknown") assert.throws(() => managedServiceIsRunning(status), /could not be verified/);
+    else assert.equal(managedServiceIsRunning(status), expected === "running");
+  }
+  writeFileSync(recordPath, "{malformed");
+  const corrupt = await platformStatus("service-windows.mjs", "stop", {
+    taskExists: () => false,
+    readServiceProcessState: (_unused, options) => readServiceProcessState(recordPath, options),
+  });
+  assert.equal(corrupt.statusUnknown, true);
 });
 
 test("conclusive stopped and loaded observations remain distinct", async () => {

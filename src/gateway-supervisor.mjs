@@ -137,7 +137,7 @@ async function waitForExitOrUnhealthy(
   current,
   {
     label,
-    waitForExit,
+    exited,
     healthCheck,
     healthIntervalMs,
     healthFailures,
@@ -146,7 +146,7 @@ async function waitForExitOrUnhealthy(
     sleep,
   },
 ) {
-  const exit = waitForExit(current, label).then((result) => ({ kind: "exit", result }));
+  const exit = exited.then((result) => ({ kind: "exit", result }));
   let stopped = false;
   const watchdog = (async () => {
     let consecutive = 0;
@@ -198,7 +198,9 @@ export async function superviseGateway({
   start,
   waitForExit,
   waitForHealth,
-  stop = (target) => target.kill("SIGTERM"),
+  stop = (target, signal) => target.kill(signal),
+  stopGraceMs = 5_000,
+  stopExitWaitMs = 5_000,
   isShuttingDown = () => false,
   log = (message) => console.error(message),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -213,15 +215,39 @@ export async function superviseGateway({
   startupBudgets = DEFAULT_STARTUP_BUDGETS,
 } = {}) {
   let current = child;
+  let currentExit = waitForExit(current, label);
   let restarts = 0;
   const failures = [];
   const healthMonitored = typeof healthCheck === "function";
+  const waitWithin = async (exited, timeoutMs) => {
+    let timer;
+    try {
+      return await Promise.race([
+        exited.then(() => true),
+        new Promise((resolve) => { timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs)); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const stopAndConfirmExit = async () => {
+    for (const [signal, budget] of [["SIGTERM", stopGraceMs], ["SIGKILL", stopExitWaitMs]]) {
+      // Signal only this exact spawned handle. A port or reused PID is never
+      // evidence of ownership, and a successful kill request is not an exit.
+      try { if (isRunning(current)) stop(current, signal); }
+      catch (error) { log(`${label} could not receive ${signal}: ${reason(error)}.`); }
+      if (await waitWithin(currentExit, budget)) return true;
+    }
+    log(`${label} termination could not be confirmed; no replacement will be started.`);
+    return false;
+  };
+  const unconfirmedExit = () => ({ label, code: 1, signal: null, restarts, exhausted: true, terminationUnconfirmed: true });
 
   for (;;) {
     const outcome = healthMonitored
       ? await waitForExitOrUnhealthy(current, {
           label,
-          waitForExit,
+          exited: currentExit,
           healthCheck,
           healthIntervalMs,
           healthFailures,
@@ -229,7 +255,7 @@ export async function superviseGateway({
           isShuttingDown,
           sleep,
         })
-      : { kind: "exit", result: await waitForExit(current, label) };
+      : { kind: "exit", result: await currentExit };
     const exit = outcome.result;
     if (isShuttingDown()) return { ...exit, restarts };
 
@@ -267,13 +293,13 @@ export async function superviseGateway({
       );
       // The process is alive but its listener is not. Stop it and wait for the
       // exit so the replacement can bind the same port.
-      if (isRunning(current)) stop(current);
-      await waitForExit(current, label);
+      if (!(await stopAndConfirmExit())) return unconfirmedExit();
     }
 
     restarts += 1;
     try {
       current = start();
+      currentExit = waitForExit(current, label);
       // A replacement that is still running when its health budget runs out is
       // usually a starved import, not a broken one: killing it restarts the
       // import from zero under the same load, and the loop never converges.
@@ -296,7 +322,7 @@ export async function superviseGateway({
       // A child that is alive but never became healthy would leave the loop
       // parked on a `waitForExit` that resolves only when something else kills
       // it, so end it here and let the next iteration count it.
-      if (isRunning(current)) stop(current);
+      if (!(await stopAndConfirmExit())) return unconfirmedExit();
     }
   }
 }

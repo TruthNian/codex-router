@@ -421,3 +421,45 @@ test("a replacement still starting after one budget is waited on, not killed", a
   supervisor.spawned[1].exit(0);
   await supervisor.done;
 });
+
+for (const phase of ["watchdog", "startup"]) {
+  for (const behavior of ["graceful", "force", "never"]) {
+    test(`${phase} termination is bounded when exit is ${behavior}`, { timeout: 2_000 }, async () => {
+      const spawned = [];
+      const observed = new Map();
+      const start = () => {
+        const child = fakeChild(spawned.length);
+        child.kill = (signal) => {
+          child.killed.push(signal);
+          if (behavior === "graceful" || (behavior === "force" && signal === "SIGKILL")) child.exit(0, signal);
+        };
+        spawned.push(child);
+        if (phase === "watchdog" && spawned.length === 2) queueMicrotask(() => child.exit(0));
+        return child;
+      };
+      const first = start();
+      const done = superviseGateway({
+        child: first, start, maxRestarts: 1, startupBudgets: 1, backoffMs: 0,
+        stopGraceMs: 5, stopExitWaitMs: 5, healthIntervalMs: 1, healthFailures: 1,
+        waitForExit: (child, label) => {
+          observed.set(child, (observed.get(child) || 0) + 1);
+          return new Promise((resolve) => child.resolvers.push(({ code, signal }) => resolve({ label, code, signal })));
+        },
+        waitForHealth: async () => { if (phase === "startup") throw new Error("startup refused"); },
+        ...(phase === "watchdog" ? { healthCheck: async () => { throw new Error("listener refused"); } } : {}),
+        isShuttingDown: () => phase === "watchdog" && spawned.length > 1,
+        log() {}, sleep: () => new Promise((resolve) => setTimeout(resolve, 1)),
+      });
+      if (phase === "startup") first.exit(1);
+      const result = await done;
+      const stopped = phase === "watchdog" ? first : spawned[1];
+      assert.deepEqual(stopped.killed, behavior === "graceful" ? ["SIGTERM"] : ["SIGTERM", "SIGKILL"]);
+      assert.equal(observed.get(stopped), 1, "reuse the one spawn-time exit observation");
+      if (behavior === "never") {
+        assert.equal(result.terminationUnconfirmed, true);
+        assert.equal(result.exhausted, true);
+        assert.equal(spawned.length, phase === "watchdog" ? 1 : 2, "unproven exit cannot authorize another spawn");
+      } else assert.equal(result.terminationUnconfirmed, undefined);
+    });
+  }
+}

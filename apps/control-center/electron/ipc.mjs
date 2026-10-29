@@ -2226,9 +2226,9 @@ export function registerIpcHandlers({
         pending: true,
       };
     } catch (error) {
-      if (loginFinalization) {
-        try { await loginFinalization; } catch {}
-      } else {
+      // An attached writer already owns finalization, queued after this
+      // mutation. Leave its attempt intact and release the queue so it can run.
+      if (!loginFinalization) {
         releaseSubscriptionLogin(id);
         try {
           // Synchronous validation can fail after reservation but before a
@@ -2245,8 +2245,8 @@ export function registerIpcHandlers({
             homesDir: path.dirname(profileHome),
           });
         } catch {}
+        subscriptionLoginAttempts.delete(id);
       }
-      subscriptionLoginAttempts.delete(id);
       throw error;
     }
   });

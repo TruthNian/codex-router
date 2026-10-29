@@ -91,6 +91,79 @@ test("harness detection does not launch version commands for installed clients",
   assert.equal(versionCommands, 0);
 });
 
+test("failed ChatGPT handoff releases the queue while its writer finalizes once", { timeout: 2_000 }, async () => {
+  const source = await readFile(new URL("../apps/control-center/electron/ipc.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("export function registerIpcHandlers(");
+  assert.ok(start >= 0);
+  for (const scenario of ["handoff-failure", "success", "finalize-failure", "before-spawn"]) {
+    const handlers = new Map();
+    let finalized = 0;
+    let cleared = 0;
+    let releaseFinalization;
+    const finalization = new Promise((resolve) => { releaseFinalization = resolve; });
+    const noop = () => {};
+    const register = vm.runInNewContext(
+      `${source.slice(start).replace(/^export /, "")}\nregisterIpcHandlers;`,
+      {
+        process: { pid: 1234, env: {} }, path: path.win32, Buffer, Error, URL,
+        os: { homedir: () => "C:/fixture" }, randomUUID: () => "operation",
+        cleanText: String, stringValue: String, CHATGPT_ACCOUNT_ID: /^acct_fixture$/,
+        CHATGPT_LOGIN_COMPLETION_TIMEOUT_MS: 600_000, CATALOG_MUTATION_TIMEOUT_MS: 1_320_000,
+        assertMutationCompatibility: noop, executablePath: () => "C:/fixture/codex.exe",
+        discoverSourceRoot: () => "C:/fixture/router",
+        createChatGPTLoginLease: () => ({ token: "fixture" }),
+        attachChatGPTLoginLease: (_id, lease) => lease,
+        chatGPTLoginAuthChanged: () => false,
+        clearChatGPTLoginLease: () => { cleared += 1; },
+        runJson: async (args) => {
+          if (args[1] === "status") return { accounts: { acct_fixture: { state: "active", subscription: { usable: false } } } };
+          if (args[1] === "home") return { home: "C:/fixture/pool/acct_fixture" };
+          assert.equal(args[1], "login-finalize");
+          finalized += 1;
+          await finalization;
+          if (scenario === "finalize-failure") throw new Error("finalizer failed");
+          return { loginFinalizationPending: false };
+        },
+        openBrowserCommand: (_executable, _args, _cwd, options) => {
+          if (scenario === "before-spawn") throw new Error("before-spawn");
+          options.onSpawn({ pid: 2345 });
+          queueMicrotask(() => options.onExit({ code: scenario === "success" ? 0 : 1 }));
+          return scenario === "handoff-failure" ? Promise.reject(new Error("handoff-failure")) : Promise.resolve({ opened: true });
+        },
+        readInstalledControlHealth: noop, cursorConnectorInstallSpec: noop,
+        runCursorConnectorCommand: noop, discoverInstalledCursorTunnelHostname: noop,
+        readRunningCursorProcesses: noop, runControlJson: noop, getHarnessSnapshot: noop,
+        cursorDesktopPath: noop, openclawDesktopPath: noop,
+        projectChatGPTSubscriptionLoginAttempts,
+      },
+    );
+    const lifecycle = register({
+      ipcMain: { handle: (name, callback) => handlers.set(name, callback) },
+      BrowserWindow: { getAllWindows: () => [] }, shell: { openExternal: async () => {} },
+    });
+    const login = handlers.get("router-control:loginChatGptSubscriptionAccount")({}, { accountId: "acct_fixture" });
+    if (scenario === "success" || scenario === "finalize-failure") assert.equal((await login).opened, true);
+    else await assert.rejects(login, new RegExp(scenario));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(finalized, scenario === "before-spawn" ? 0 : 1);
+    assert.equal(cleared, scenario === "before-spawn" ? 1 : 0);
+    assert.equal(lifecycle.hasActiveMutations(), scenario !== "before-spawn");
+    let drained = false;
+    const idle = lifecycle.whenMutationsIdle().then(() => { drained = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(drained, scenario === "before-spawn");
+    releaseFinalization();
+    await idle;
+    assert.equal(lifecycle.hasActiveMutations(), false);
+    if (scenario === "finalize-failure") {
+      const pool = await handlers.get("router-control:getChatGptAccountPool")({});
+      assert.equal(pool.loginAttempts.acct_fixture.status, "failed");
+      assert.equal(pool.loginAttempts.acct_fixture.error, "finalizer failed");
+    }
+    await handlers.get("router-control:openExternal")({}, { url: "https://example.com" });
+  }
+});
+
 test("ChatGPT browser login reports a terminal retry after child close without auth", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "router-browser-login-"));
   const windows = process.platform === "win32";
@@ -2050,7 +2123,7 @@ test("harness and context IPC remain fixed and session-scoped", async () => {
       < chatgptLogin.indexOf("const opened = await openedPromise"),
     "every attached credential writer must own finalization before browser handoff settles",
   );
-  assert.match(chatgptLogin, /if \(loginFinalization\) \{[\s\S]*?await loginFinalization/);
+  assert.doesNotMatch(chatgptLogin, /await loginFinalization/);
   const chatgptRemove = source.match(/handleAction\("removeChatGptSubscriptionAccount"[\s\S]*?\n  \}\);/)?.[0];
   assert.ok(chatgptRemove, "ChatGPT subscription removal handler should be readable");
   assert.match(chatgptRemove, /"chatgpt-account-pool", "status"/);

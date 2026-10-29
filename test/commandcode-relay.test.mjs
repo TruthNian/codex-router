@@ -221,5 +221,104 @@ test("a mid-stream failure is reported inside the stream and still terminates", 
   });
   assert.equal(status.status, 200);
   assert.match(response.captured.body, /premium_credits_exhausted/);
-  assert.ok(response.captured.body.endsWith("data: [DONE]\n\n"));
+  assert.doesNotMatch(response.captured.body, /\[DONE\]|"finish_reason":"stop"/);
+});
+
+test("incomplete Command Code generations cannot become successful answers or deferred retries", async () => {
+  const prefix = TURN.slice(0, -1).map((event) => `${JSON.stringify(event)}\n`).join("");
+  const cases = [
+    Buffer.from(prefix),
+    Buffer.from(`${prefix}${JSON.stringify({ type: "finish-step", finishReason: "error" })}\n`),
+    Buffer.from(`${prefix}${JSON.stringify({ type: "finish-step", finishReason: "error" })}\n${JSON.stringify(TURN.at(-1))}\n`),
+    Buffer.from(`${prefix}${JSON.stringify({ type: "finish", finishReason: "unknown" })}\n`),
+    Buffer.from(`${prefix}{"type":"text-delta","text":"PRIVATE_BAD_EVENT"\n${JSON.stringify(TURN.at(-1))}\n`),
+    Buffer.concat([Buffer.from(prefix), Buffer.from([0xe4, 0xb8])]),
+  ];
+  for (const provider of [OPENAI_PROVIDER, ANTHROPIC_PROVIDER]) {
+    for (const stream of [false, true]) {
+      for (const bytes of cases) {
+        const response = fakeResponse();
+        let submissions = 0;
+        const outcome = await relayCommandCodeGenerate({
+          payload: { model: "x", stream, messages: [] },
+          model: MODEL, provider, apiKey: "synthetic_key",
+          baseUrl: "https://fixture.invalid/provider/v1", response, deferErrors: true, at: AT,
+          fetchImpl: async () => {
+            submissions += 1;
+            return { ok: true, status: 200, headers: new Headers(), body: Readable.from([bytes]) };
+          },
+        });
+        assert.equal(outcome.committed, true);
+        assert.equal(response.captured.ended, true);
+        assert.equal(submissions, 1);
+        if (stream) {
+          assert.equal(response.captured.status, 200);
+          assert.match(response.captured.body, /error/);
+          assert.doesNotMatch(response.captured.body, /\[DONE\]|"finish_reason":"stop"|"stop_reason":"end_turn"/);
+        } else {
+          assert.equal(response.captured.status, 502);
+          assert.equal(JSON.parse(response.captured.body).error.type, "commandcode_generate_error");
+        }
+        assert.doesNotMatch(response.captured.body, /PRIVATE_BAD_EVENT/);
+      }
+    }
+  }
+});
+
+test("a truncated generation commits its failure before a second pooled key can run", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { upsertProviderApiKey, runProviderApiKeyAttempts } = await import("../src/provider-api-key-pool.mjs");
+  const directory = mkdtempSync(join(tmpdir(), "commandcode-truncated-pool-"));
+  const filePath = join(directory, "pools.json");
+  try {
+    for (const id of ["cred_first_12345678", "cred_second_12345678"]) {
+      await upsertProviderApiKey("commandcode", { id }, { filePath });
+    }
+    for (const stream of [false, true]) {
+      let submissions = 0;
+      const response = fakeResponse();
+      const result = await runProviderApiKeyAttempts("commandcode", {
+        filePath, resolveCredential: (id) => id, backoffMs: 0,
+        isResponseCommitted: () => response.captured.ended,
+        send: ({ apiKey }) => relayCommandCodeGenerate({
+          payload: { model: "x", stream, messages: [] }, model: MODEL, provider: OPENAI_PROVIDER,
+          apiKey, baseUrl: "https://fixture.invalid/provider/v1", response, deferErrors: true, at: AT,
+          fetchImpl: async () => { submissions += 1; return upstreamOk(TURN.slice(0, -1)); },
+        }),
+      });
+      assert.equal(submissions, 1);
+      assert.equal(response.captured.status, stream ? 200 : 502);
+      assert.equal(result.committed, true);
+      assert.equal(result.attempts.length, 1);
+      // The pool records HTTP/credential health, not the generation outcome.
+      // An already-committed 200 stream carries the latter in its error frame.
+      assert.equal(result.attempts[0].ok, stream);
+      assert.match(response.captured.body, /error/);
+      assert.doesNotMatch(response.captured.body, /\[DONE\]|"finish_reason":"stop"/);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("unreadable buffered Anthropic tool input fails once instead of becoming an empty tool call", async () => {
+  const response = fakeResponse();
+  const outcome = await relayCommandCodeGenerate({
+    payload: { stream: false, messages: [] }, model: MODEL, provider: ANTHROPIC_PROVIDER,
+    apiKey: "synthetic_key", baseUrl: "https://fixture.invalid/provider/v1",
+    response, deferErrors: true, at: AT,
+    fetchImpl: async () => upstreamOk([
+      { type: "tool-input-start", id: "t", toolName: "read_file" },
+      { type: "tool-input-delta", id: "t", delta: '{"path":' },
+      { type: "tool-input-end", id: "t" },
+      { type: "finish-step", finishReason: "tool-calls" },
+    ]),
+  });
+  assert.equal(response.captured.status, 502);
+  assert.equal(outcome.committed, true);
+  assert.match(response.captured.body, /unreadable tool arguments/);
+  assert.doesNotMatch(response.captured.body, /"input":\{\}/);
 });

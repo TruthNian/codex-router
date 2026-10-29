@@ -50,8 +50,9 @@ function errorBody(status, raw) {
 /**
  * Run one turn through `/alpha/generate` and answer in the caller's protocol.
  *
- * Returns `{ status, ok, headers }`: the status for the forwarder's log line,
- * and the upstream's own headers so this route's quota reporting and cooldowns
+ * Returns `{ status, ok, headers }` as HTTP/credential health, not generation
+ * success: a committed stream reports generation failure in its error frame.
+ * The upstream's own headers keep this route's quota reporting and cooldowns
  * work exactly as they do for a provider forwarded intact. Nothing here throws
  * for an upstream refusal -- a refusal is a response, and the caller sees the
  * gateway's own message rather than a generic proxy error.
@@ -83,13 +84,13 @@ export async function relayCommandCodeGenerate({
     signal,
   });
 
-  const finishError = async (status, raw) => {
+  const finishError = async (status, raw, { mayDefer = deferErrors } = {}) => {
     const body = JSON.stringify(errorBody(status, raw));
     const responseHeaders = {
       "Content-Type": "application/json",
       "Content-Length": String(Buffer.byteLength(body)),
     };
-    if (deferErrors) {
+    if (mayDefer) {
       return {
         status,
         ok: false,
@@ -121,10 +122,13 @@ export async function relayCommandCodeGenerate({
     // The route only streams. A caller that asked for a whole response gets
     // one assembled here rather than a stream it never agreed to parse.
     for await (const event of readGenerateEvents(upstream.body)) translator.push(event);
+    const answer = translator.body();
     if (translator.error) {
-      return finishError(502, JSON.stringify({ message: translator.error }));
+      // HTTP 200 already started a generation. Committing its failure prevents
+      // an API-key pool from replaying that possibly executed request.
+      return finishError(502, JSON.stringify({ message: translator.error }), { mayDefer: false });
     }
-    const body = JSON.stringify(translator.body());
+    const body = JSON.stringify(answer);
     response.writeHead(200, {
       "Content-Type": "application/json",
       "Content-Length": Buffer.byteLength(body),
@@ -138,6 +142,7 @@ export async function relayCommandCodeGenerate({
     const chunk = translator.push(event);
     if (chunk) response.write(chunk);
   }
+  const terminal = translator.finish();
   if (translator.error) {
     // The head is long gone, so the only honest place left to report a
     // mid-stream failure is inside the stream. Terminating cleanly afterwards
@@ -151,8 +156,9 @@ export async function relayCommandCodeGenerate({
           })}\n\n`
         : `data: ${JSON.stringify(errorBody(502, JSON.stringify({ message: translator.error })))}\n\n`,
     );
+  } else {
+    response.write(terminal);
   }
-  response.write(translator.finish());
   response.end();
   return outcome(200);
 }

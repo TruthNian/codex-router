@@ -145,7 +145,14 @@ async function streaming(model, reasoningEffort) {
     if (["response.completed", "response.done"].includes(event.type) &&
         event.response && typeof event.response === "object" && !Array.isArray(event.response)) {
       completed = true;
-      if (!streamedText) streamedText = responseText(event.response);
+      if (!streamedText) {
+        streamedText = typeof event.response.output_text === "string" ? event.response.output_text
+          : (Array.isArray(event.response.output) ? event.response.output : [])
+            .filter((item) => item?.type === "message" && item.role === "assistant")
+            .flatMap((item) => Array.isArray(item.content) ? item.content : [])
+            .filter((part) => part?.type === "output_text" && typeof part.text === "string")
+            .map((part) => part.text).join("\n");
+      }
     }
   }
   const markerReceived = streamedText.includes(marker);

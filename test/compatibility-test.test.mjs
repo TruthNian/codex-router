@@ -230,6 +230,9 @@ test("stream certification requires real output and a successful framed terminal
     [frame(delta) + frame(terminal), true],
     [frame({ type: "response.output_text.done", text: "CODEX_ROUTER_STREAM_OK" }) + frame(terminal), true],
     [frame({ ...terminal, response: { status: "completed", output_text: "CODEX_ROUTER_STREAM_OK" } }), true],
+    [frame({ ...terminal, response: { status: "completed", output: [{ type: "message", role: "user", content: [{ type: "input_text", text: "CODEX_ROUTER_STREAM_OK" }] }] } }), false],
+    [frame({ ...terminal, response: { status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "reasoning_text", text: "CODEX_ROUTER_STREAM_OK" }] }] } }), false],
+    [frame({ ...terminal, response: { status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "CODEX_ROUTER_STREAM_OK" }] }] } }), true],
     [frame(delta) + 'data: {"type":"response.done",\ndata: "response":{"status":"completed"}}\n\n', true],
   ]) {
     const mock = await startCompatibilityServer({ streamBody: body.replaceAll("\n", "\r\n") });

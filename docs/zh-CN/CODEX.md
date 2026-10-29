@@ -130,7 +130,6 @@ Windows Desktop 与 WSL 共存时，检查 `CODEX_HOME` 和 `CODEX_ROUTER_STATE_
 ./bin/model-router codex skills approve-external codex-router
 ./bin/model-router codex skills revoke-external codex-router
 node scripts/measure-tool-result-aging.mjs /path/to/rollout.jsonl
-node scripts/aging-benchmark.mjs
 ```
 
 已安装 skill 中的 API 描述对应当前运行时。归档节省量用实际账单 token 和任务结果评估；回读请求、缓存变化和额外模型调用会影响总消耗。

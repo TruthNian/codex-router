@@ -1,0 +1,1 @@
+- Preserve denied, timed-out, malformed, and contradictory service observations as unknown on every platform. Caller-key rotation and recovery now refuse that state before changing a generation, and restart consumers retain the same observation.

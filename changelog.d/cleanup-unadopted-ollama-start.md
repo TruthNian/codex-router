@@ -1,1 +1,1 @@
-Stop the Ollama child created by this operation when readiness, identity verification or ownership-state publication fails.
+- Stop the Ollama child created by this operation when readiness, identity verification or ownership-state publication fails.

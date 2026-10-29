@@ -614,6 +614,12 @@ function ggufHeader(pairs, { magic = 0x46554747, declaredPairs } = {}) {
   for (const [key, type, value] of pairs) {
     chunks.push(str(key), u32(type));
     if (type === 8) chunks.push(str(value));
+    else if (type === 2 || type === 3) {
+      const bytes = Buffer.alloc(2);
+      if (type === 2) bytes.writeUInt16LE(value);
+      else bytes.writeInt16LE(value);
+      chunks.push(bytes);
+    }
     else if (type === 4) chunks.push(u32(value));
     else if (type === 10) chunks.push(u64(value));
     else if (type === 9) {
@@ -716,4 +722,13 @@ test("capabilities without a content ID ignore old tag cache entries", () => {
   assert.deepEqual(localModelCapabilities("retagged:latest", "new-content-id", { spawn, cache }), ["completion"]);
   assert.deepEqual(localModelCapabilities("retagged:latest", "new-content-id", { spawn, cache }), ["completion"]);
   assert.equal(shows, 3, "unchanged content retains the polling cache");
+});
+
+test("16-bit GGUF values preserve the following context metadata", () => {
+  for (const [type, value] of [[2, 65535], [3, -7]]) {
+    const buffer = ggufHeader([["small.value", type, value], ["llama.context_length", 4, 32768]]);
+    assert.equal(parseGgufContextLength(buffer), 32768);
+    assert.equal(parseGgufContextLength(ggufHeader([["llama.context_length", type, 16384]])), 16384);
+    assert.equal(parseGgufContextLength(buffer.subarray(0, 30)), undefined);
+  }
 });

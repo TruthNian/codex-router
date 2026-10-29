@@ -18,7 +18,6 @@ const internalKey = "test-provider-pool-internal-key-with-length";
 process.env.CODEX_HOME = path.join(root, "codex");
 process.env.CODEX_ROUTER_STATE_DIR = stateDir;
 process.env.MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE = credentialStorePath;
-process.env.MODEL_ROUTER_PROVIDER_CREDENTIAL_MIGRATIONS = path.join(stateDir, "migrations", "provider-credentials");
 process.env.MODEL_ROUTER_API_KEY_POOL_PATH = poolStatePath;
 
 const { addEnvironmentCredentialToPool } = await import("../src/provider-api-key-control.mjs");

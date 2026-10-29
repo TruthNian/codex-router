@@ -880,7 +880,8 @@ function walkRollouts(root, archived, files, depth = 0) {
   let entries;
   try { entries = readdirSync(root, { withFileTypes: true }); } catch { return; }
   for (const entry of entries) {
-    if (files.length >= SESSION_LIST_LIMIT * 3 || entry.isSymbolicLink()) break;
+    if (files.length >= SESSION_LIST_LIMIT * 3) break;
+    if (entry.isSymbolicLink()) continue;
     const target = path.join(root, entry.name);
     if (entry.isDirectory()) walkRollouts(target, archived, files, depth + 1);
     else if (entry.isFile() && entry.name.endsWith(".jsonl")) {

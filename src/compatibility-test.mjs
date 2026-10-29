@@ -141,6 +141,7 @@ async function streaming(model, reasoningEffort) {
     if (!event) continue;
     outcome.observe(event);
     if (event.type === "response.output_text.delta" && typeof event.delta === "string") streamedText += event.delta;
+    if (event.type === "response.output_text.done" && typeof event.text === "string" && !streamedText) streamedText = event.text;
     if (["response.completed", "response.done"].includes(event.type) &&
         event.response && typeof event.response === "object" && !Array.isArray(event.response)) {
       completed = true;

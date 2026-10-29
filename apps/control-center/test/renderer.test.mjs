@@ -693,13 +693,14 @@ function serveRenderer() {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
-      resolve({
-        url: `http://127.0.0.1:${address.port}/`,
-        close: () => new Promise((done) => {
-          server.close(done);
-          server.closeAllConnections?.();
-        }),
+      const close = () => new Promise((done) => {
+        server.close(done);
+        server.closeAllConnections?.();
       });
+      // Launch may reject before a test reaches its browser try/finally.
+      // Register cleanup at the one point that owns the listening server.
+      test.after(close);
+      resolve({ url: `http://127.0.0.1:${address.port}/`, close });
     });
   });
 }

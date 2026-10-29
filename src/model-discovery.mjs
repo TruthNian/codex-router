@@ -10,6 +10,7 @@ import {
 } from "./model-catalog-cache.mjs";
 import { modelCatalogMetadata } from "./model-catalog-metadata.mjs";
 import {
+  advertisedContextLength,
   mergeDiscoveredModels,
   modelMetadataFromPreset,
   modelMetadataFromProviderRecord,
@@ -30,7 +31,8 @@ import {
 } from "./opencode-session.mjs";
 import { providerCatalogRouteIds } from "./provider-catalogs.mjs";
 import { readUserModels } from "./user-models.mjs";
-import { credentialStatus, resolveProviderCredential } from "./provider-credentials.mjs";
+import { credentialStatus } from "./provider-credentials.mjs";
+import { resolveProviderApiKeyForRequest } from "./provider-api-key-routing.mjs";
 import { VERSION } from "./version.mjs";
 import {
   fetchUntrustedModelCatalog,
@@ -202,19 +204,6 @@ export function freeModelIds(payload, provider) {
 // rely on: a model that can do 200K reached through an endpoint that serves
 // 131K is a 131K model here. Anything that is not a positive integer is treated
 // as silence -- a string, a float, or a zero is a catalog quirk, not a size.
-function advertisedContextLength(item) {
-  let smallest;
-  for (const value of [
-    item?.context_length,
-    item?.top_provider?.context_length,
-    item?.context_window,
-    item?.capabilities?.limits?.max_context_window_tokens,
-  ]) {
-    if (!Number.isInteger(value) || value < 1) continue;
-    if (smallest === undefined || value < smallest) smallest = value;
-  }
-  return smallest;
-}
 
 // Model id -> input modalities the provider itself stated for that model.
 // Present only where a record said so: curation must be able to tell a served
@@ -254,8 +243,11 @@ async function providerDiscoveryIdentity(provider) {
     const { readDevinSession } = await import("./devin-cli-session.mjs");
     return { kind: "devin", session: readDevinSession() };
   }
-  const credential = resolveProviderCredential(provider);
-  if (!credential) throw new Error(credentialStatus(provider).setup);
+  const routing = await resolveProviderApiKeyForRequest(provider);
+  const credential = routing.credential;
+  if (!credential) throw new Error(routing.pooled
+    ? `Provider API-key pool is unavailable: ${routing.reason || "no eligible credential"}.`
+    : credentialStatus(provider).setup);
   return {
     kind: "api",
     credential,
@@ -322,8 +314,8 @@ async function providerPayload(provider, identity) {
       })),
     };
   }
-  const credential = identity?.credential || resolveProviderCredential(provider);
-  if (!credential) throw new Error(credentialStatus(provider).setup);
+  const credential = identity?.credential;
+  if (!credential) throw new Error("Provider discovery has no authorized credential.");
   // The same loopback guard the api-forwarder applies: a keyless provider's
   // placeholder credential passes the check above, so an unguarded override
   // would send `Bearer local` to whatever host the environment names.

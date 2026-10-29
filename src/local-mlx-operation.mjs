@@ -1,19 +1,14 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
-  chmodSync,
-  closeSync,
   existsSync,
   mkdirSync,
-  openSync,
   readFileSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { protectPrivateFile, writePrivateJson } from "./file-security.mjs";
+import { processStartIdentity } from "./process-identity.mjs";
+import { writePrivateJson } from "./file-security.mjs";
 import {
   claimLocalOperation,
   isLocalOperationActive,
@@ -36,10 +31,7 @@ import { detachedOperationEnvironment } from "./process-tree.mjs";
 export const LOCAL_MLX_OPERATION_PATH =
   process.env.MODEL_ROUTER_LOCAL_MLX_OPERATION_STATE ||
   path.join(STATE_DIR, "local-mlx", "operation.json");
-export const LOCAL_MLX_OPERATION_CLAIM_PATH =
-  process.env.MODEL_ROUTER_LOCAL_MLX_OPERATION_CLAIM || `${LOCAL_MLX_OPERATION_PATH}.claim`;
 
-const CLAIM_STALE_MS = 30_000;
 const HEARTBEAT_MS = 5_000;
 const HEARTBEAT_TIMEOUT_MS = 5 * 60_000;
 export const LOCAL_MLX_ACTIVE_STATUSES = Object.freeze([
@@ -117,47 +109,6 @@ export function readLocalMlxOperation({
   return interrupted;
 }
 
-export function claimLocalMlxOperation({
-  now = Date.now,
-  kill = process.kill,
-  claimPath = LOCAL_MLX_OPERATION_CLAIM_PATH,
-} = {}) {
-  const currentNow = typeof now === "function" ? now() : now;
-  mkdirSync(path.dirname(claimPath), { recursive: true, mode: 0o700 });
-  chmodSync(path.dirname(claimPath), 0o700);
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    let descriptor;
-    const token = `${process.pid}:${currentNow}:${Math.random().toString(36).slice(2)}`;
-    try {
-      descriptor = openSync(claimPath, "wx", 0o600);
-      writeFileSync(descriptor, `${JSON.stringify({ version: 1, pid: process.pid, createdAt: currentNow, token })}\n`);
-      closeSync(descriptor);
-      descriptor = undefined;
-      protectPrivateFile(claimPath);
-      return {
-        acquired: true,
-        release() {
-          try {
-            const owner = JSON.parse(readFileSync(claimPath, "utf8"));
-            if (owner?.token === token) unlinkSync(claimPath);
-          } catch {
-            // The claim was already released or replaced by another controller.
-          }
-        },
-      };
-    } catch (error) {
-      if (descriptor !== undefined) try { closeSync(descriptor); } catch {}
-      if (error?.code !== "EEXIST") throw error;
-      let owner;
-      try { owner = JSON.parse(readFileSync(claimPath, "utf8")); } catch { owner = null; }
-      let fresh = false;
-      try { fresh = currentNow - statSync(claimPath).mtimeMs <= CLAIM_STALE_MS; } catch {}
-      if (processIsAlive(Number(owner?.pid), kill) || fresh) return { acquired: false };
-      try { unlinkSync(claimPath); } catch { return { acquired: false }; }
-    }
-  }
-  return { acquired: false };
-}
 
 function idleOperation() {
   return {
@@ -215,12 +166,13 @@ export async function localMlxUiSnapshot({
   };
 }
 
-export function startLocalMlxOperation({
+export async function startLocalMlxOperation({
   yes = false,
   spawnImpl = spawn,
   now = Date.now,
   platform = process.platform,
   arch = process.arch,
+  identity = processStartIdentity,
   claimGlobalOperation = claimLocalOperation,
   readLocalOperation = readLocalDownload,
 } = {}) {
@@ -234,7 +186,7 @@ export function startLocalMlxOperation({
   // Shared with Ollama's controller. Both runtimes re-check the other's
   // durable state while holding this gate and seed their own state before
   // release, so two simultaneous clicks cannot both observe an idle peer.
-  const globalClaim = claimGlobalOperation(LOCAL_MLX_ID, "mlx-install", { now });
+  const globalClaim = await claimGlobalOperation(LOCAL_MLX_ID, "mlx-install", { now });
   if (!globalClaim.acquired) {
     const localOperation = readLocalOperation();
     if (isLocalOperationActive(localOperation)) {
@@ -253,67 +205,57 @@ export function startLocalMlxOperation({
       const verb = localOperation.status === "uninstalling" ? "being removed" : "downloading";
       throw new Error(`${localOperation.tag || "Another local model"} is already ${verb}.`);
     }
-    const claim = claimLocalMlxOperation({ now });
-    if (!claim.acquired) {
-      const existing = readLocalMlxOperation();
-      if (isLocalMlxOperationActive(existing)) {
-        return { started: false, existing: true, operation: existing };
-      }
-      throw new Error("Another local MLX operation is starting. Try again shortly.");
+    const existing = readLocalMlxOperation();
+    if (isLocalMlxOperationActive(existing)) {
+      return { started: false, existing: true, operation: existing };
     }
+    const startedAt = typeof now === "function" ? now() : now;
+    const seeded = writeLocalMlxOperation({
+      version: 1,
+      status: "preparing",
+      detail: "Starting one-click MLX installation",
+      percent: 0,
+      progressMode: "determinate",
+      startedAt,
+      updatedAt: startedAt,
+      controllerPid: process.pid,
+      controllerIdentity: identity(process.pid),
+      workerPid: null,
+    });
+    let child;
     try {
-      const existing = readLocalMlxOperation();
-      if (isLocalMlxOperationActive(existing)) {
-        return { started: false, existing: true, operation: existing };
-      }
-      const startedAt = typeof now === "function" ? now() : now;
-      const seeded = writeLocalMlxOperation({
-        version: 1,
-        status: "preparing",
-        detail: "Starting one-click MLX installation",
-        percent: 0,
-        progressMode: "determinate",
-        startedAt,
-        updatedAt: startedAt,
-        controllerPid: process.pid,
-        workerPid: null,
+      child = spawnImpl(process.execPath, [fileURLToPath(import.meta.url), "worker"], {
+        detached: true,
+        env: detachedOperationEnvironment(),
+        stdio: "ignore",
+        windowsHide: true,
       });
-      let child;
-      try {
-        child = spawnImpl(process.execPath, [fileURLToPath(import.meta.url), "worker"], {
-          detached: true,
-          env: detachedOperationEnvironment(),
-          stdio: "ignore",
-          windowsHide: true,
-        });
-        child.unref?.();
-      } catch (error) {
-        const failed = writeLocalMlxOperation({
-          ...seeded,
-          status: "error",
-          detail: "Installation failed to start",
-          error: error instanceof Error ? error.message : String(error),
-          controllerPid: null,
-          workerPid: null,
-          updatedAt: Date.now(),
-        });
-        throw new Error(failed.error);
-      }
-      const current = readLocalMlxOperation({ persist: false }) || seeded;
-      const operation = isLocalMlxOperationActive(current)
-        ? writeLocalMlxOperation({
-            ...current,
-            controllerPid: null,
-            workerPid: child.pid,
-            updatedAt: Date.now(),
-          })
-        : current;
-      return { started: true, existing: false, operation };
-    } finally {
-      claim.release();
+      child.unref?.();
+    } catch (error) {
+      const failed = writeLocalMlxOperation({
+        ...seeded,
+        status: "error",
+        detail: "Installation failed to start",
+        error: error instanceof Error ? error.message : String(error),
+        controllerPid: null,
+        workerPid: null,
+        updatedAt: Date.now(),
+      });
+      throw new Error(failed.error);
     }
+    const current = readLocalMlxOperation({ persist: false }) || seeded;
+    const operation = isLocalMlxOperationActive(current)
+      ? writeLocalMlxOperation({
+          ...current,
+          controllerPid: null,
+          workerPid: child.pid,
+          workerIdentity: identity(child.pid),
+          updatedAt: Date.now(),
+        })
+      : current;
+    return { started: true, existing: false, operation };
   } finally {
-    globalClaim.release();
+    await globalClaim.release();
   }
 }
 
@@ -322,11 +264,16 @@ export function cancelLocalMlxOperation({
   platform = process.platform,
   spawnSyncImpl = spawnSync,
   now = Date.now(),
+  identity = (pid) => processStartIdentity(pid, { platform, spawn: spawnSyncImpl }),
 } = {}) {
   const state = readLocalMlxOperation({ now, kill });
   if (!isLocalMlxOperationActive(state)) return { cancelled: false, state };
   const pid = Number(state.workerPid || state.controllerPid);
   if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) {
+    const expected = state.workerPid ? state.workerIdentity : state.controllerIdentity;
+    if (!expected || identity(pid) !== expected) {
+      throw new Error("The local MLX operation process identity is unavailable or changed; refusing to stop an unowned process.");
+    }
     if (platform === "win32") {
       const result = spawnSyncImpl("taskkill", ["/PID", String(pid), "/T", "/F"], {
         stdio: "ignore",
@@ -341,6 +288,9 @@ export function cancelLocalMlxOperation({
         kill(-pid, "SIGTERM");
       } catch (error) {
         if (error?.code !== "ESRCH") throw error;
+        if (identity(pid) !== expected) {
+          throw new Error("The local MLX operation process identity changed before the fallback stop.");
+        }
         try { kill(pid, "SIGTERM"); } catch (fallbackError) {
           if (fallbackError?.code !== "ESRCH") throw fallbackError;
         }
@@ -365,6 +315,7 @@ export function cancelLocalMlxOperation({
 async function runWorker() {
   const started = readLocalMlxOperation({ persist: false });
   if (!isLocalMlxOperationActive(started)) return;
+  const workerIdentity = processStartIdentity(process.pid);
   const abort = new AbortController();
   const abortWorker = () => abort.abort(new Error("Cancelled by user."));
   process.once("SIGTERM", abortWorker);
@@ -380,6 +331,7 @@ async function runWorker() {
       progressMode: status === "downloading" ? "indeterminate" : "determinate",
       controllerPid: null,
       workerPid: process.pid,
+      workerIdentity,
       updatedAt: Date.now(),
       error: undefined,
     });
@@ -387,7 +339,7 @@ async function runWorker() {
   const heartbeat = setInterval(() => {
     const current = readLocalMlxOperation({ persist: false });
     if (!isLocalMlxOperationActive(current)) return;
-    writeLocalMlxOperation({ ...current, workerPid: process.pid, updatedAt: Date.now() });
+    writeLocalMlxOperation({ ...current, workerPid: process.pid, workerIdentity, updatedAt: Date.now() });
   }, HEARTBEAT_MS);
   heartbeat.unref();
   try {

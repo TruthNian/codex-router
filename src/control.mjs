@@ -44,6 +44,7 @@ import {
   operationDeadlineFromEnvironment,
   remainingOperationMs,
   runOperationProcessTree,
+  runProcessTree,
 } from "./process-tree.mjs";
 import { inheritedProxyEnvironment } from "./proxy-environment.mjs";
 import { routerNodeBinary } from "./node-runtime.mjs";
@@ -3050,7 +3051,7 @@ function handleService(action) {
 // explicit confirmation dialog.
 const TRAY_COMMANDS = { enable: "install", disable: "uninstall", status: "status", restart: "restart" };
 
-function handleTray(action) {
+async function handleTray(action) {
   const value = action || "status";
   if (value === "refresh") {
     const plan = spawnSync(
@@ -3111,8 +3112,9 @@ function handleTray(action) {
   // snapshots the exact task XML/SDDL and rollback package before touching
   // either. Calling tray-service.mjs install directly would strand a partial
   // registration when Task Scheduler or the ready handshake fails midway.
-  const result = value === "enable" && process.platform === "win32"
-    ? spawnSync(
+  let result;
+  if (value === "enable" && process.platform === "win32") {
+    result = spawnSync(
         "powershell.exe",
         [
           "-NoLogo",
@@ -3126,12 +3128,22 @@ function handleTray(action) {
           "--preserve-window",
         ],
         { stdio: "inherit", env: process.env, windowsHide: true },
-      )
-    : spawnSync(
-        routerNodeBinary(),
-        [path.join(REPO_ROOT, "src", "tray-service.mjs"), subcommand],
-        { stdio: "inherit", env: process.env, windowsHide: true },
       );
+  } else {
+    const commandArgs = [path.join(REPO_ROOT, "src", "tray-service.mjs"), subcommand];
+    const options = { stdio: "inherit", env: process.env, windowsHide: true };
+    if (value === "status") {
+      result = spawnSync(routerNodeBinary(), commandArgs, options);
+    } else {
+      // GUI disable/restart and POSIX enable share the package transaction's
+      // owner. Native private bodies call tray-service directly while already
+      // owning that transaction, so they never re-enter this gate.
+      const { withTrayUpdateOwner } = await import("./tray-update-owner.mjs");
+      result = await withTrayUpdateOwner(() => runProcessTree(routerNodeBinary(), commandArgs, {
+        ...options, deadline: operationDeadlineFromEnvironment(),
+      }));
+    }
+  }
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`Tray ${value} failed with exit code ${result.status}.`);
@@ -3733,7 +3745,7 @@ if (args.includes("--probe")) {
 } else if (args[0] === "auto-review-fallback") {
   await handleAutoReviewFallback(args[1], args[2]);
 } else if (args[0] === "tray") {
-  handleTray(args[1]);
+  await handleTray(args[1]);
 } else if (args[0] === "harness") {
   await handleHarness(args[1]);
 } else if (args[0] === "client-setup") {

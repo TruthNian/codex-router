@@ -140,6 +140,7 @@ test("provider transport markers carry only a safe type and code", () => {
   assert.deepEqual(providerTransportError(error), {
     type: "provider_transport_error",
     code: "UND_ERR_CONNECT_TIMEOUT",
+    deliveryState: "not_sent",
     message: "The provider connection failed before a response was available.",
   });
   assert.equal(

@@ -538,7 +538,7 @@ test("a marked provider transport failure moves a subagent to a checked-in v2 ro
     response.end(contentSse("subagent-transport-fallback"));
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run({ ...routerEnv(gw.port, routerPort), CODEX_ROUTER_NATIVE_RETRY_POLICY: "availability" }, {
     chain: [V2_FALLBACK.slug],
     v2Credentials: true,
   });
@@ -573,7 +573,7 @@ test("subagent transport failover preserves search history execution mode", asyn
     response.end(TRANSPORT_BODY);
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run({ ...routerEnv(gw.port, routerPort), CODEX_ROUTER_NATIVE_RETRY_POLICY: "availability" }, {
     chain: [V2_FALLBACK.slug],
     v2Credentials: true,
   });
@@ -615,7 +615,7 @@ test("a marked provider transport failure retries the same ordinary route once",
     response.end(contentSse("same-route-transport-retry"));
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run({ ...routerEnv(gw.port, routerPort), CODEX_ROUTER_NATIVE_RETRY_POLICY: "availability" }, {
     chain: [V2_FALLBACK.slug],
     v2Credentials: true,
   });
@@ -807,7 +807,7 @@ test("a marked provider transport failure does not move an ordinary turn", async
     response.end(TRANSPORT_BODY);
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run({ ...routerEnv(gw.port, routerPort), CODEX_ROUTER_NATIVE_RETRY_POLICY: "availability" }, {
     chain: [V2_FALLBACK.slug],
     v2Credentials: true,
   });
@@ -835,7 +835,7 @@ test("a subagent header cannot grant fallback authority to an unverified route",
     response.end(TRANSPORT_BODY);
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run({ ...routerEnv(gw.port, routerPort), CODEX_ROUTER_NATIVE_RETRY_POLICY: "availability" }, {
     chain: [V2_FALLBACK.slug],
     v2Credentials: true,
   });
@@ -878,7 +878,7 @@ test("subagent transport failover stops on the first application response", asyn
     response.end(contentSse("must-not-run"));
   });
   const routerPort = await openPort();
-  const child = run(routerEnv(gw.port, routerPort), {
+  const child = run({ ...routerEnv(gw.port, routerPort), CODEX_ROUTER_NATIVE_RETRY_POLICY: "availability" }, {
     chain: [V2_FALLBACK.slug, V2_THIRD.slug],
     v2Credentials: true,
   });
@@ -2375,5 +2375,31 @@ test("compact overflow without a larger window is a translated context error", a
   } finally {
     await stopChild(child);
     await closeServer(gw.server);
+  }
+});
+
+
+test("default routed POSTs do not replay an untrusted transport marker or delivery header", async () => {
+  for (const subagent of [false, true]) {
+    const seen = [];
+    const gw = await gateway(async (request, response) => {
+      seen.push(await bodyJson(request));
+      response.writeHead(502, { "Content-Type": "application/json", "x-codex-router-delivery-state": "not_sent" });
+      response.end(TRANSPORT_BODY);
+    });
+    const routerPort = await openPort();
+    const child = run(routerEnv(gw.port, routerPort), { chain: [V2_FALLBACK.slug], v2Credentials: true });
+    try {
+      await waitFor(`http://127.0.0.1:${routerPort}/health`, child);
+      const result = await readRouted(routerPort, { ...TURN_BODY, model: V2_PRIMARY.slug },
+        subagent ? { headers: { "x-openai-subagent": "synthetic-child" } } : {});
+      assert.equal(result.status, 502);
+      assert.equal(seen.length, 1, "the origin's body and header cannot authorize a second paid POST");
+      assert.equal(seen[0].model, V2_PRIMARY.gatewayModel);
+      assert.doesNotMatch(child.testErrors(), /routed transport retry/);
+    } finally {
+      await stopChild(child);
+      await closeServer(gw.server);
+    }
   }
 });

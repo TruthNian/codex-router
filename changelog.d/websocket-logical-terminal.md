@@ -1,0 +1,1 @@
+- Release WebSocket generation ownership and continuation state at the response terminal instead of waiting for unrelated HTTP EOF or cleanup.

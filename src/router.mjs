@@ -3170,7 +3170,6 @@ async function summarize(request, payload, route, signal, { allowFailover = true
       agingEnabled,
       // A tool-less summarizer cannot follow archive receipts. The shared
       // reduction gate therefore keeps its exact text, even with aging on.
-      denseShaping: agingEnabled,
       imageLimits,
     });
     // The image counts ride on the aging stats so every compaction return path
@@ -4148,13 +4147,12 @@ async function prepareRoutedRequest({
 async function prepareProviderInput(
   normalizedInput,
   route,
-  { agingEnabled, denseShaping = false, imageLimits, recoveryTools, recoveryScope } = {},
+  { agingEnabled, imageLimits, recoveryTools, recoveryScope } = {},
 ) {
   const aged = await ageToolResultsWithRecovery(normalizedInput, {
     tools: recoveryTools,
     scope: recoveryScope,
     enabled: agingEnabled,
-    denseShaping,
     ...toolResultAgingOptions(route?.slug),
   });
   const bounded = boundImagePayload(aged.input, {

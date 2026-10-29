@@ -1,2 +1,1 @@
-- Preserve the installed at-most-once transport policy: provider error text cannot authorize replay without trusted local delivery evidence; availability remains an explicit opt-in.
-- Treat marker text only as a diagnosis, including under availability policy; only a confined forwarder header can authorize a transport replay.
+- Preserve the installed at-most-once policy using confined local forwarder delivery evidence; provider error text cannot authorize replay under either retry policy.

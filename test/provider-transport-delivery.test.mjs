@@ -120,7 +120,10 @@ test("the actual routed chain recovers a confined not-sent failure without execu
   const origin = http.createServer(async (request, response) => {
     for await (const _chunk of request) {}
     executions += 1;
-    if (originMode === "reset") return request.socket.destroy();
+    if (originMode === "reset" || originMode === "reset-once") {
+      if (originMode === "reset-once") originMode = "complete";
+      return request.socket.destroy();
+    }
     if (originMode === "spoof") {
       response.writeHead(502, { "Content-Type": "application/json", [PROVIDER_DELIVERY_STATE_HEADER]: "not_sent" });
       response.end(JSON.stringify({ error: { type: "provider_transport_error", code: "ECONNREFUSED", deliveryState: "not_sent" } }));
@@ -181,8 +184,8 @@ test("the actual routed chain recovers a confined not-sent failure without execu
     MODEL_ROUTER_API_PORT: String(forwarderPort), META_API_KEY: "synthetic-meta-key",
     [provider.baseUrlEnv]: `http://127.0.0.1:${originPort}/v1`,
   });
-  await start("router.mjs", routerPort, {
-    CODEX_ROUTER_PORT: String(routerPort), MODEL_ROUTER_API_PORT: String(proxyPort),
+  const startRouter = (port, policy) => start("router.mjs", port, {
+    CODEX_ROUTER_PORT: String(port), MODEL_ROUTER_API_PORT: String(proxyPort),
     CODEX_ROUTER_API_BASE_URL: `http://127.0.0.1:${proxyPort}/v1`,
     CODEX_ROUTER_GATEWAY_BASE_URL: `http://127.0.0.1:${proxyPort}/v1`,
     CODEX_ROUTER_GATEWAY_HEALTH_URL: `http://127.0.0.1:${proxyPort}/health`,
@@ -190,8 +193,9 @@ test("the actual routed chain recovers a confined not-sent failure without execu
     CODEX_ROUTER_OAUTH_HEALTH_URL: `http://127.0.0.1:${proxyPort}/health`,
     CODEX_ROUTER_GROK_OAUTH_HEALTH_URL: `http://127.0.0.1:${proxyPort}/health`,
     CODEX_ROUTER_NO_DISCOVERY: "0", CODEX_ROUTER_SHOW_ALL_MODELS: "1",
-    CODEX_ROUTER_NATIVE_RETRY_POLICY: "at-most-once",
+    CODEX_ROUTER_NATIVE_RETRY_POLICY: policy,
   });
+  await startRouter(routerPort, "at-most-once");
   const result = await fetch(`${callerBaseUrl(routerPort, callerKey)}/responses`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: "meta/muse-spark-1.3", stream: false, input: "synthetic input" }),
@@ -213,4 +217,22 @@ test("the actual routed chain recovers a confined not-sent failure without execu
     assert.equal(forwarded.length - before, 1, `${originMode} cannot authorize replay even on the known API hop`);
     assert.equal(executions - executedBefore, 1);
   }
+  const availabilityPort = await openPort();
+  await startRouter(availabilityPort, "availability");
+  for (const mode of ["spoof", "reset-once"]) {
+    originMode = mode;
+    const before = forwarded.length;
+    const executedBefore = executions;
+    const result = await fetch(`${callerBaseUrl(availabilityPort, callerKey)}/responses`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "meta/muse-spark-1.3", stream: false, input: "synthetic input" }),
+    });
+    const text = await result.text();
+    assert.equal(result.status, mode === "spoof" ? 502 : 200, text);
+    const attempts = mode === "spoof" ? 1 : 2;
+    assert.equal(forwarded.length - before, attempts, `${mode}: only genuine transport evidence permits availability replay`);
+    assert.equal(executions - executedBefore, attempts);
+    if (mode === "reset-once") assert.deepEqual(forwarded[before], forwarded[before + 1]);
+  }
+
 });

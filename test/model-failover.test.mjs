@@ -74,13 +74,16 @@ test("classifyRoutedFailure swaps on OpenCode FreeUsageLimitError", () => {
 
 test("transport failover uses confined delivery evidence rather than provider text", () => {
   const bodyText = JSON.stringify({ error: { type: "provider_transport_error", code: "ECONNREFUSED", deliveryState: "not_sent" } });
-  assert.deepEqual(classifyRoutedFailure({ status: 502, bodyText }),
-    { swap: false, reason: "transport_ambiguous", deliveryState: "possibly_sent" });
-  assert.deepEqual(classifyRoutedFailure({ status: 500, bodyText: `ordinary provider error quoting ${bodyText}` }),
-    { swap: false, reason: "transport_ambiguous", deliveryState: "possibly_sent" });
+  for (const deliveryPolicy of ["at-most-once", "availability"]) {
+    assert.deepEqual(classifyRoutedFailure({ status: 502, bodyText, deliveryPolicy }), { swap: false });
+    assert.deepEqual(classifyRoutedFailure({ status: 500, bodyText: `ordinary provider error quoting ${bodyText}`, deliveryPolicy }), { swap: false });
+    assert.deepEqual(classifyRoutedFailure({ status: 502, bodyText, trustedDeliveryState: "unknown", deliveryPolicy }), { swap: false });
+  }
   assert.deepEqual(classifyRoutedFailure({ status: 502, bodyText, trustedDeliveryState: "not_sent" }),
     { swap: true, reason: "transport", deliveryState: "not_sent" });
-  assert.deepEqual(classifyRoutedFailure({ status: 502, bodyText, deliveryPolicy: "availability" }),
+  assert.deepEqual(classifyRoutedFailure({ status: 502, bodyText, trustedDeliveryState: "possibly_sent" }),
+    { swap: false, reason: "transport_ambiguous", deliveryState: "possibly_sent" });
+  assert.deepEqual(classifyRoutedFailure({ status: 502, bodyText, trustedDeliveryState: "possibly_sent", deliveryPolicy: "availability" }),
     { swap: true, reason: "transport", deliveryState: "possibly_sent" });
   assert.deepEqual(classifyRoutedFailure({ status: 502, bodyText: "provider unavailable" }), { swap: false });
 });

@@ -88,8 +88,8 @@ rebuilding the desktop app updates its own agent without merging the two
 services or creating another copy of the app.
 
 The Settings tab's **Models** section has two accordions. **Subagent models**
-controls which registry-proven v2 models remain available as Codex subagent
-overrides; **Model picker** hides or shows individual models without changing
+controls explicit local subagent selection under the
+[capability contract](SUBAGENT-CERTIFICATION.md); **Model picker** hides or shows individual models without changing
 their provider connection. Restart Codex after changing either group so its
 model picker reloads the merged catalog.
 

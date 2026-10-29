@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -305,93 +305,15 @@ test("POST retries require pre-send evidence unless availability was explicitly 
       deliveryPolicy: policy, retries: 1, backoffMs: 0, onAttempt: (e) => attempts.push(e),
       fetchImpl: async () => new Response("synthetic edge failure", { status: 503 }),
     });
-    assert.equal(attempts.length, policy === "availability" ? 2 : 1);
+    assert.equal(attempts.length, 1);
     assert.equal(attempts[0].deliveryState, "response_started");
-    assert.equal(attempts[0].retryScheduled, policy === "availability");
+    assert.equal(attempts[0].retryScheduled, false);
   }
 });
 
-// Availability mode explicitly accepts uncertain origin delivery before any
-// output is relayed. The default generation policy does not replay this 503.
-test("availability mode retries a native 503 before client output", async () => {
-  const attempts = [];
-  const native = await mockServer(async (request, response) => {
-    attempts.push(await readBody(request));
-    if (attempts.length === 1) {
-      response.writeHead(503, { "Content-Type": "text/plain" });
-      response.end(EDGE_503_BODY);
-      return;
-    }
-    const payload = Buffer.from(JSON.stringify({ id: "resp-retried", output: [] }), "utf8");
-    response.writeHead(200, {
-      "Content-Type": "application/json",
-      "Content-Length": String(payload.length),
-    });
-    response.end(payload);
-  });
-  const stateDir = stateDirectory();
-  const routerPort = await openPort();
-  const router = startRouter({ nativePort: native.port, routerPort, stateDir, deliveryPolicy: "availability" });
-
-  try {
-    await waitFor(`${routerBase(routerPort)}/models`, router);
-    const turn = largeNativeTurn();
-    const result = await fetch(`${routerBase(routerPort)}/responses`, {
-      method: "POST",
-      headers: { Authorization: "Bearer caller", "Content-Type": "application/json" },
-      body: JSON.stringify(turn),
-    });
-
-    const relayed = await result.text();
-    assert.equal(result.status, 200, relayed);
-    assert.equal(JSON.parse(relayed).id, "resp-retried");
-    assert.equal(attempts.length, 2, "the 503 was relayed instead of retried");
-
-    // Body fidelity: the replayed request is the same bytes under the same
-    // encoding, and it still decodes.
-    assert.equal(attempts[0].encoding, "zstd");
-    assert.equal(attempts[1].encoding, "zstd");
-    assert.deepEqual(
-      JSON.parse(attempts[1].text).input[0].content[0].text,
-      turn.input[0].content[0].text,
-    );
-    assert.ok(
-      attempts[0].raw.equals(attempts[1].raw),
-      "the retry did not replay the first attempt's bytes",
-    );
-
-    // A silent retry would let a flaky upstream read as a healthy one.
-    await waitUntil(
-      () => /native upstream retry /.test(router.testErrors()),
-      `no retry was logged: ${router.testErrors()}`,
-    );
-    assert.match(
-      router.testErrors(),
-      /\[codex-router\] native upstream retry 1\/2 status=503 model=gpt-5\.6-sol path=\/v1\/responses delayMs=\d+/,
-    );
-    // The logged path is the authenticated route the router already resolved,
-    // never the caller capability in the URL it was dialed with.
-    assert.equal(router.testErrors().includes(CALLER_KEY), false);
-
-    await waitUntil(
-      () => usageEvents(stateDir).length > 0,
-      "no usage event was recorded",
-    );
-    const event = usageEvents(stateDir).at(-1);
-    assert.equal(event.status, 200);
-    assert.equal(event.provider, "openai");
-    // Distinguishable from a first-attempt success, which records no field.
-    assert.equal(event.retries, 1);
-  } finally {
-    await stopChild(router);
-    await closeServer(native.server);
-    rmSync(stateDir, { recursive: true, force: true });
-  }
-});
-
-// The bound has to be a bound. Once it is spent the upstream's own answer
-// reaches the caller untouched, exactly as it does today.
-test("a native 503 that outlives the retry bound is relayed unchanged", async () => {
+// Availability permits ambiguous transport retries, while an HTTP response
+// remains the original result in both policies.
+test("availability mode relays a native HTTP failure with its original readable body", async () => {
   const attempts = [];
   const native = await mockServer(async (request, response) => {
     attempts.push(await readBody(request));
@@ -401,28 +323,19 @@ test("a native 503 that outlives the retry bound is relayed unchanged", async ()
   const stateDir = stateDirectory();
   const routerPort = await openPort();
   const router = startRouter({ nativePort: native.port, routerPort, stateDir, deliveryPolicy: "availability" });
-
   try {
     await waitFor(`${routerBase(routerPort)}/models`, router);
     const result = await fetch(`${routerBase(routerPort)}/responses`, {
-      method: "POST",
-      headers: { Authorization: "Bearer caller", "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "gpt-5.6-sol", input: "native turn" }),
+      method: "POST", headers: { Authorization: "Bearer caller", "Content-Type": "application/json" },
+      body: JSON.stringify(largeNativeTurn()),
     });
-
     assert.equal(result.status, 503);
     assert.equal(await result.text(), EDGE_503_BODY);
     assert.equal(result.headers.get("x-edge"), "envoy");
-    // One first attempt plus the two the bound allows, and no more.
-    assert.equal(attempts.length, 3);
-
-    await waitUntil(
-      () => usageEvents(stateDir).length > 0,
-      "no usage event was recorded",
-    );
-    const event = usageEvents(stateDir).at(-1);
-    assert.equal(event.status, 503);
-    assert.equal(event.retries, 2);
+    assert.equal(attempts.length, 1);
+    assert.doesNotMatch(router.testErrors(), /native upstream retry /);
+    await waitUntil(() => usageEvents(stateDir).length > 0, "no usage event was recorded");
+    assert.equal(usageEvents(stateDir).at(-1).retries, undefined);
   } finally {
     await stopChild(router);
     await closeServer(native.server);
@@ -542,8 +455,7 @@ test("a caller that disconnects mid-backoff stops the retries", async () => {
     for await (const _chunk of request) {
       // Drain.
     }
-    response.writeHead(503, { "Content-Type": "text/plain" });
-    response.end(EDGE_503_BODY);
+    request.socket.destroy();
     sawFirst();
   });
   const stateDir = stateDirectory();
@@ -934,5 +846,69 @@ test("a native client close before a terminal response still meters zero", async
     await stopChild(router);
     await closeServer(native.server);
     rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+
+test("a routed terminal stays successful when the WebSocket edge closes its completed HTTP turn", async (t) => {
+  for (const repair of [false, true]) {
+    await t.test(repair ? "after one empty repair" : "first attempt", async () => {
+      let attempts = 0;
+      const text = { id: "msg-routed-terminal", type: "message", role: "assistant", content: [{ type: "output_text", text: "completed result" }] };
+      const gateway = await mockServer(async (request, response) => {
+        if (request.method === "GET") return response.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true}');
+        await readBody(request);
+        attempts += 1;
+        response.writeHead(200, { "Content-Type": "text/event-stream" });
+        if (repair && attempts === 1) {
+          response.end(`event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: {
+            id: "resp-empty-before-terminal", status: "completed", output: [], usage: { input_tokens: 17, output_tokens: 2 },
+          } })}\n\n`);
+          return;
+        }
+        for (const event of [
+          { type: "response.created", response: { id: "resp-routed-terminal" } },
+          { type: "response.output_item.added", output_index: 0, item: { ...text, content: [] } },
+          { type: "response.content_part.added", output_index: 0, item_id: text.id, content_index: 0, part: { type: "output_text", text: "" } },
+          { type: "response.output_text.delta", output_index: 0, item_id: text.id, content_index: 0, delta: "completed result" },
+          { type: "response.output_text.done", output_index: 0, item_id: text.id, content_index: 0, text: "completed result" },
+          { type: "response.content_part.done", output_index: 0, item_id: text.id, content_index: 0, part: text.content[0] },
+          { type: "response.output_item.done", output_index: 0, item: text },
+          { type: "response.completed", response: { id: "resp-routed-terminal", status: "completed", output: [text], usage: { input_tokens: 40, output_tokens: 4 } } },
+        ]) response.write(`data: ${JSON.stringify(event)}\n\n`);
+      });
+      const stateDir = stateDirectory();
+      writeFileSync(path.join(stateDir, "zai-api-key.secret"), "synthetic-zai-key\n", { mode: 0o600 });
+      const port = await openPort();
+      const base = `http://127.0.0.1:${gateway.port}`;
+      const router = run({
+        CODEX_ROUTER_PORT: String(port), MODEL_ROUTER_STATE_DIR: stateDir, CODEX_ROUTER_STATE_DIR: stateDir,
+        CODEX_HOME: path.join(stateDir, "codex"), CODEX_ROUTER_NO_DISCOVERY: "0",
+        CODEX_ROUTER_GATEWAY_BASE_URL: `${base}/v1`, CODEX_ROUTER_API_BASE_URL: `${base}/v1`,
+        CODEX_ROUTER_OAUTH_HEALTH_URL: `${base}/health`, CODEX_ROUTER_API_HEALTH_URL: `${base}/health`,
+        CODEX_ROUTER_GATEWAY_HEALTH_URL: `${base}/health`, CODEX_ROUTER_GROK_OAUTH_HEALTH_URL: `${base}/health`,
+      });
+      try {
+        await waitFor(`${routerBase(port)}/models`, router);
+        const received = await cancelNativeTurnAfterMarker(port,
+          { model: "zai-api/glm-5.3", input: "synthetic task", stream: true }, '"type":"response.completed"');
+        assert.match(received, /completed result/);
+        await waitUntil(() => usageEvents(stateDir).length > 0, "no routed usage row");
+        const event = usageEvents(stateDir).at(-1);
+        assert.equal(event.status, 200);
+        assert.equal(event.generationOutcome, "completed");
+        assert.equal(event.provider, "zai-api");
+        assert.equal(event.model, "zai-api/glm-5.3");
+        assert.equal(event.inputTokens, repair ? 57 : 40);
+        assert.equal(event.outputTokens, repair ? 6 : 4);
+        assert.equal(attempts, repair ? 2 : 1);
+        assert.equal(usageEvents(stateDir).length, 1, "the completed turn is recorded only once");
+        assert.equal(event.emptyCompletionRetried, repair ? true : undefined);
+      } finally {
+        await stopChild(router);
+        await closeServer(gateway.server);
+        rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
   }
 });

@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import { secretEqual } from "./caller-auth.mjs";
 import { TARGET } from "./paths.mjs";
+import { PROVIDER_DELIVERY_STATE_HEADER } from "./transport-failure.mjs";
 import { responsesStreamFailure } from "./responses-stream-failure.mjs";
 
 export { markResponsesStream } from "./responses-stream-failure.mjs";
@@ -710,7 +711,7 @@ export function httpErrorStatus(error, fallback = 502) {
 
 export function copyResponseHeaders(upstream, response, denylist = HOP_BY_HOP_HEADERS) {
   for (const [name, value] of upstream.headers.entries()) {
-    if (!denylist.has(name.toLowerCase())) response.setHeader(name, value);
+    if (name.toLowerCase() !== PROVIDER_DELIVERY_STATE_HEADER && !denylist.has(name.toLowerCase())) response.setHeader(name, value);
   }
 }
 

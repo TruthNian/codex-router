@@ -1,0 +1,1 @@
+- Preserve the installed at-most-once policy using confined local forwarder delivery evidence; provider error text cannot authorize replay under either retry policy.

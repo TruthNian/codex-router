@@ -3139,8 +3139,8 @@ async function handleTray(action) {
       // owner. Native private bodies call tray-service directly while already
       // owning that transaction, so they never re-enter this gate.
       const { withTrayUpdateOwner } = await import("./tray-update-owner.mjs");
-      result = await withTrayUpdateOwner(() => runProcessTree(routerNodeBinary(), commandArgs, {
-        ...options, deadline: operationDeadlineFromEnvironment(),
+      result = await withTrayUpdateOwner((ownerLifetimeFd) => runProcessTree(routerNodeBinary(), commandArgs, {
+        ...options, deadline: operationDeadlineFromEnvironment(), ownerLifetimeFd,
       }));
     }
   }

@@ -1,11 +1,22 @@
 import os from "node:os";
 import path from "node:path";
-import { realpathSync } from "node:fs";
+import { fstatSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { closeOwnerServer, ownerLeaseEndpoint, startOwnerServer } from "./kernel-owner-lease.mjs";
 import { operationDeadlineFromEnvironment, runOperationProcessTree, runProcessTree } from "./process-tree.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+export function ownerLifetimeDescriptor(server, platform = process.platform) {
+  if (platform === "win32") return undefined;
+  // Node exposes no public listening-fd accessor. Validate this private handle
+  // before any mutation; an unsupported Node runtime must fail closed.
+  const fd = server?._handle?.fd;
+  if (!Number.isSafeInteger(fd) || fd < 3 || !fstatSync(fd).isSocket()) {
+    throw new Error("This Node runtime cannot pass the tray update's kernel owner to its native body.");
+  }
+  return fd;
+}
 
 function canonicalLocation(location) {
   const tail = [];
@@ -25,6 +36,7 @@ function canonicalLocation(location) {
 export async function withTrayUpdateOwner(operation, {
   root = ROOT, home = os.homedir(), platform = process.platform,
   waitMs = 15_000, start = startOwnerServer, close = closeOwnerServer,
+  descriptor = ownerLifetimeDescriptor,
 } = {}) {
   const location = platform === "darwin" ? path.join(home, "Applications")
     : path.join(root, "apps", "control-center", "release");
@@ -42,7 +54,7 @@ export async function withTrayUpdateOwner(operation, {
       await new Promise((resolve) => setTimeout(resolve, Math.min(100, remaining)));
     }
   }
-  try { return await operation(); }
+  try { return await operation(descriptor(server, platform)); }
   finally { await close({ server }); }
 }
 
@@ -64,10 +76,10 @@ export async function runTrayUpdate(args, { run = runProcessTree, runOperation =
     command = "/bin/sh";
     commandArgs = [path.join(ROOT, "src", "macos-tray-supervision-restore.sh"), "settle", ROOT, ...forwarded];
   } else throw new Error("Unknown private tray update entrypoint.");
-  return withOwner(async () => {
+  return withOwner(async (ownerLifetimeFd) => {
     const deadline = operationDeadlineFromEnvironment();
     const execute = deadline === undefined ? run : runOperation;
-    const result = await execute(command, commandArgs, { cwd: ROOT, stdio: "inherit", deadline, childMayOwnProcessTrees: true });
+    const result = await execute(command, commandArgs, { cwd: ROOT, stdio: "inherit", deadline, childMayOwnProcessTrees: true, ownerLifetimeFd });
     return result.status ?? 1;
   });
 }

@@ -401,8 +401,10 @@ test("partial resets and actual caller cancellation cannot advance a Command Cod
     // select the second credential before anything is committed to the caller.
     let submissions = 0;
     const response = fakeResponse();
+    // This control tests refusal policy, not host filesystem latency.
+    const refusalAt = Date.now();
     const result = await runProviderApiKeyAttempts("commandcode", {
-      filePath, resolveCredential: (id) => id, backoffMs: 0,
+      filePath, resolveCredential: (id) => id, backoffMs: 0, now: () => refusalAt,
       isResponseCommitted: () => response.captured.status !== undefined,
       send: ({ apiKey }) => relayCommandCodeGenerate({
         payload: { messages: [] }, model: MODEL, provider: OPENAI_PROVIDER,

@@ -9,6 +9,7 @@ import { waitForServiceReadiness } from "./service-readiness.mjs";
 import { withServiceOperationLock } from "./service-operation-lock.mjs";
 import { environmentProxyOptedIn } from "./proxy-environment.mjs";
 import { serviceAppConnectorEnvironment } from "./app-connector-policy.mjs";
+import { runOperationProcessTree, runProcessTree } from "./process-tree.mjs";
 
 const platform = process.env.CODEX_ROUTER_SERVICE_PLATFORM || process.platform;
 const script = {
@@ -74,26 +75,26 @@ export async function runServiceCommandUnlocked(
   // each replacement branch follows the stop barrier, after old writers drain.
   if (command === "start" || command === "restart") resetStartupAttempts();
   if (command === "install") resetStartupAttempts({ required: false });
-  // Synchronous service renderers can own grandchildren. Do not apply a
-  // direct-child timeout here: it could orphan those descendants and let them
-  // mutate the service after the UI reports failure. The outer desktop runner
-  // owns process-tree termination; this preflight and the readiness wait keep
-  // every cooperative phase on the shared inner deadline.
+  // Keep the lease owner's event loop available while the platform renderer
+  // runs. A synchronous wait can outlast the lease without a single heartbeat.
+  // Reuse the process-tree owner so cancellation retires descendants before
+  // releasing the service lock, rather than timing out only the direct child.
   const platformBudgetMs = remainingOperationMs();
   if (
     platformBudgetMs !== undefined
+    && readinessCommands.has(command)
     && platformBudgetMs < PLATFORM_COMMAND_RESERVE_MS + READINESS_TIMEOUT_MS
   ) {
     throw new Error(
       "The service operation deadline cannot preserve its platform and 300-second readiness allowances.",
     );
   }
-  const result = spawnSync(
+  const runPlatform = operationDeadline === undefined ? runProcessTree : runOperationProcessTree;
+  const result = await runPlatform(
     process.execPath,
     [path.join(SOURCE_ROOT, "src", script), ...args],
-    { stdio: "inherit", env: childEnvironment },
+    { stdio: "inherit", env: childEnvironment, deadline: operationDeadline, childMayOwnProcessTrees: true },
   );
-  if (result.error) throw result.error;
   if (result.status !== 0) return result.status ?? 1;
   // A server that was already running is external and stopManagedOllama() is
   // a no-op. Only the exact detached `ollama serve` process this router

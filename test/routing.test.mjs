@@ -4781,7 +4781,7 @@ test("API forwarder downgrades forced tool choices for DeepSeek thinking models"
   }
 });
 
-test("API forwarder coalesces consecutive assistant messages so tool results follow tool calls", async () => {
+test("API forwarder folds assistant tool history without discarding reasoning or vendor metadata", async () => {
   const upstreamRequests = [];
   const upstream = await mockServer(async (request, response) => {
     upstreamRequests.push({ headers: request.headers, body: await bodyJson(request) });
@@ -4821,21 +4821,40 @@ test("API forwarder coalesces consecutive assistant messages so tool results fol
           model: "deepseek-v4-pro",
           messages: [
             { role: "user", content: "run it" },
-            { role: "assistant", tool_calls: [toolCall] },
-            { role: "assistant", content: "Running the command now." },
+            { role: "assistant", reasoning_content: "first thought", tool_calls: [toolCall] },
+            { role: "assistant", content: "Running the command now.", reasoning_content: "second thought", vendor_state: { signature: "synthetic-signature" } },
             { role: "tool", tool_call_id: "call_A", content: "done" },
           ],
         }),
       },
     );
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 200, await response.text());
     const messages = upstreamRequests[0].body.messages;
     assert.equal(messages.length, 3);
     assert.equal(messages[1].role, "assistant");
     assert.equal(messages[1].content, "Running the command now.");
     assert.deepEqual(messages[1].tool_calls, [toolCall]);
+    assert.equal(messages[1].reasoning_content, "first thought\nsecond thought");
+    assert.deepEqual(messages[1].vendor_state, { signature: "synthetic-signature" });
     assert.equal(messages[2].role, "tool");
     assert.equal(messages[2].tool_call_id, "call_A");
+
+    // Different opaque signatures cannot be represented on one assistant
+    // message. Preserve that history and its real result instead of inventing
+    // a merged signature or a replacement tool result.
+    const conflicting = [
+      { role: "user", content: "run it" },
+      { role: "assistant", tool_calls: [toolCall], reasoning_content: "first thought", vendor_state: { signature: "first" } },
+      { role: "assistant", content: "Running the command now.", vendor_state: { signature: "second" } },
+      { role: "tool", tool_call_id: "call_A", content: "actual result" },
+    ];
+    const ambiguous = await fetch(`http://127.0.0.1:${forwarderPort}/v1/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${INTERNAL_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "deepseek-v4-pro", messages: conflicting }),
+    });
+    assert.equal(ambiguous.status, 200);
+    assert.deepEqual(upstreamRequests.at(-1).body.messages, conflicting);
   } finally {
     await stopChild(forwarder);
     await closeServer(upstream.server);

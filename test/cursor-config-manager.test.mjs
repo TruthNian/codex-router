@@ -18,6 +18,7 @@ process.env.MODEL_ROUTER_CURSOR_LAUNCHER = launcherPath;
 const { installCursorAgentIntegration, nodeRuntimePath, publishCursorIntegration, removeCursorIntegration } =
   await import("../src/cursor-config-manager.mjs");
 const { cursorModelId } = await import("../src/cursor-model-id.mjs");
+const { installedTargets } = await import("../src/client-installation-state.mjs");
 
 const APPLICATION_STATE_KEY =
   "src.vs.platform.reactivestorage.browser.reactiveStorageServiceImpl.persistentStorage.applicationUser";
@@ -46,12 +47,14 @@ test("Cursor Agent setup is local, one-step, and does not require Cursor App sta
     probe: () => ({ available: true, command: "cursor-agent", version: "test-version" }),
   });
   assert.equal(result.launcher, launcherPath);
+  assert.deepEqual(installedTargets(), ["cursor"]);
   assert.match(result.cliBaseUrl, /\[REDACTED\]/);
   const launcher = readFileSync(launcherPath, "utf8");
   assert.equal(launcher.includes("cursor-agent-launcher.mjs"), true);
   assert.equal(launcher.includes(CALLER), false);
   assert.equal(readFileSync(path.join(stateDir, "caller-secret"), "utf8").trim(), CALLER);
   rmSync(launcherPath, { force: true });
+  assert.deepEqual(installedTargets(), []);
 });
 
 test("packaged setup writes a real Node runtime instead of the Electron host", () => {

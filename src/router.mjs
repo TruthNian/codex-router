@@ -3227,32 +3227,29 @@ async function summarize(request, payload, route, signal, { allowFailover = true
     }
     const contentType = String(sent.upstream.headers.get("content-type") || "");
     let parsed;
-    // A streamed attempt that yields nothing usable, or ends failed or
-    // incomplete, is classified exactly like an ordinary upstream rejection:
-    // it must reach the same failover, cooldown, and metering handling rather
-    // than short-circuiting into a synthetic terminal result.
+    // An unsuccessful generation terminal is different from an HTTP refusal.
+    // Its observed bytes cannot authorize another paid attempt.
     let upstreamOk = sent.upstream.ok;
     let upstreamStatus = sent.upstream.status;
-    let failureBodyText;
+    let incompleteStream = false;
     if (contentType.includes("text/event-stream")) {
       const unwrapped = responsesSseToResponse(bytes);
       parsed = unwrapped.response;
       if (!parsed) {
+        incompleteStream = sent.upstream.ok;
         console.error(
           `[codex-router] compaction stream ended without a usable response model=${attemptRoute.slug}` +
             ` events=${unwrapped.summary}${unwrapped.terminalFailed ? " terminal=failed" : ""}`,
         );
         upstreamOk = false;
-        upstreamStatus = 502;
+        if (incompleteStream) upstreamStatus = 502;
         parsed = {
           error: {
             message: unwrapped.terminalFailed
               ? "Compact stream ended with a failed or incomplete response."
               : "Compact stream ended without a completed response.",
-            events: unwrapped.summary,
           },
         };
-        failureBodyText = JSON.stringify(parsed);
       }
     } else {
       parsed = JSON.parse(bytes.toString("utf8"));
@@ -3292,8 +3289,17 @@ async function summarize(request, payload, route, signal, { allowFailover = true
     // metered on its own row exactly as on the turn path -- otherwise a
     // compaction the router rescued would leave no trace of the provider that
     // could not serve it.
-    const bodyText = failureBodyText ?? bytes.toString("utf8");
     failed.push({ route: attemptRoute, status: upstreamStatus, usage });
+    if (incompleteStream) {
+      return {
+        ...(last ?? {
+          ok: false, status: 502, payload: parsed, usage,
+          toolResultAging: aged.stats, route: attemptRoute,
+        }),
+        failed,
+      };
+    }
+    const bodyText = bytes.toString("utf8");
     // A provider that still refuses the image content gets the same model again
     // with half of it. A refused compaction is retried by the client before
     // every following turn, so leaving it refused stalls the session for good.

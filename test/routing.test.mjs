@@ -2863,16 +2863,38 @@ test("router synthesizes routed compaction and safely replays it to native model
 test("routed compaction requires a successful terminal before replacing history", async () => {
   let source;
   let submissions = 0;
+  let quotaRefusal;
   const gateway = await mockServer(async (request, response) => {
-    await bodyJson(request);
+    const body = await bodyJson(request);
     submissions += 1;
+    if (quotaRefusal) {
+      if (body.model === "deepseek-v4-pro") {
+        if (quotaRefusal === "sse") {
+          response.writeHead(429, { "Content-Type": "text/event-stream" });
+          response.end('data: {"type":"error","message":"Usage limit reached"}\n\n');
+        } else {
+          json(response, 429, { error: { message: "Usage limit reached" } });
+        }
+      } else {
+        json(response, 200, { output_text: "A complete fallback summary." });
+      }
+      return;
+    }
     response.writeHead(200, { "Content-Type": "text/event-stream" });
     response.end(source);
   });
+  const stateDir = mkdtempSync(path.join(os.tmpdir(), "compaction-terminal-evidence-"));
+  writeFileSync(path.join(stateDir, "deepseek-api-key.secret"), "TEST_DEEPSEEK_KEY\n");
+  writeFileSync(path.join(stateDir, "xai-api-key.secret"), "TEST_XAI_KEY\n");
+  writeFileSync(path.join(stateDir, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["deepseek", "grok-api"] }));
+  writeFileSync(path.join(stateDir, "failover.json"), JSON.stringify({ version: 1, enabled: true, chain: ["grok-api/grok-4.5"] }));
   const routerPort = await openPort();
   const router = run("router.mjs", {
     CODEX_ROUTER_PORT: String(routerPort),
     CODEX_ROUTER_GATEWAY_BASE_URL: `http://127.0.0.1:${gateway.port}/v1`,
+    MODEL_ROUTER_STATE_DIR: stateDir,
+    DEEPSEEK_API_KEY: "TEST_DEEPSEEK_KEY", XAI_API_KEY: "TEST_XAI_KEY",
+    CODEX_ROUTER_NO_DISCOVERY: "0",
     CODEX_ROUTER_QUIET: "1",
   });
   const terminal = (status) => ({ type: "response.completed", response: {
@@ -2895,9 +2917,12 @@ test("routed compaction requires a successful terminal before replacing history"
       [[delta, terminal("completed")], 200],
       [[terminal(undefined)], 200],
       [[{ ...terminal("completed"), type: "response.done" }], 200],
+      [[delta, { type: "provider_transport_error" }], 502],
+      [[delta, { type: "context_length_exceeded: maximum context length is 1000000 tokens" }], 502],
     ]) {
       source = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
       for (const v1 of [false, true]) {
+        const before = submissions;
         const response = await fetch(`${routerBase(routerPort)}/responses${v1 ? "/compact" : ""}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2908,13 +2933,28 @@ test("routed compaction requires a successful terminal before replacing history"
         });
         const text = await response.text();
         assert.equal(response.status, expected, text);
+        assert.equal(submissions - before, 1, "partial generation diagnostics cannot authorize replay");
         if (expected !== 200) assert.doesNotMatch(text, /kcr2:|BEGIN_CODEX_ROUTER_CHECKPOINT/);
       }
     }
-    assert.equal(submissions, 24);
+    assert.equal(submissions, 28);
+    // Explicit HTTP refusals keep their original status and intentional fallback,
+    // regardless of whether the refusal body is JSON or SSE.
+    for (quotaRefusal of ["sse", "json"]) {
+      const before = submissions;
+      const fallback = await fetch(`${routerBase(routerPort)}/responses/compact`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", input: [
+          { type: "message", role: "user", content: [{ type: "input_text", text: "Preserve the actual task." }] },
+        ] }),
+      });
+      assert.equal(fallback.status, 200, await fallback.text());
+      assert.equal(submissions - before, 2, `HTTP 429 ${quotaRefusal}: alternative is genuinely available`);
+    }
   } finally {
     await stopChild(router);
     await closeServer(gateway.server);
+    rmSync(stateDir, { recursive: true, force: true });
   }
 });
 

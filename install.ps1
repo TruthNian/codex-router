@@ -542,17 +542,13 @@ try {
   if ($LASTEXITCODE -eq 75) {
     # Installed and running, just not healthy yet. Stop without rolling
     # anything back: the service keeps starting and the operator re-checks
-    # rather than reinstalling. Skipping wait-health matters -- it would spend
-    # a second full budget and fail the same way on the same cold start.
+    # rather than reinstalling. The service command owns the readiness budget.
     $ReadinessTimedOut = $true
     Write-Host "The background service is installed and still starting; the router did not answer within the health wait."
     Write-Host "Check './codex-router.ps1 status' in a few minutes. Do not re-run the installer -- nothing was rolled back."
     throw "The router is still starting."
   }
   if ($LASTEXITCODE -ne 0) { throw "Background-service installation failed." }
-  & node src/wait-health.mjs
-  if ($LASTEXITCODE -ne 0) { throw "The router did not become healthy." }
-
   # Keep an existing companion in step with the checkout, but never turn a
   # fresh router install into a tray install the operator did not request.
   # Run the wrapper in a child PowerShell process because its deliberate

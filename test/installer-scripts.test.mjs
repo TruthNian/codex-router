@@ -934,12 +934,10 @@ test("installer rollback preserves shared service definitions and only undoes it
 // the service step itself: the service refuses to boot while the manifest
 // still names another checkout, so a record that runs after the service step
 // -- which contains the health wait -- can never run at all.
-test("both installers record the manifest before waiting on health", () => {
+test("both installers record the manifest before the service-owned readiness wait", () => {
   const posix = readFileSync(path.join(root, "bin", "install"), "utf8");
   const windows = readFileSync(path.join(root, "install.ps1"), "utf8");
 
-  assertBefore(posix, "install-manifest.mjs record", "wait-health.mjs", "POSIX must record the manifest before the health wait");
-  assertBefore(windows, "install-manifest.mjs record", "wait-health.mjs", "Windows must record the manifest before the health wait");
   assertBefore(posix, "install-manifest.mjs record", "node src/service.mjs install", "POSIX must record the manifest before installing the service");
   assertBefore(windows, "install-manifest.mjs record", "& node src/service.mjs install", "Windows must record the manifest before installing the service");
 });
@@ -1148,8 +1146,8 @@ test("a readiness timeout leaves the installed service and config in place", () 
   assertBefore(posix, "readiness_timeout=false", "rollback() {", "POSIX must initialise the flag before defining the rollback that reads it");
   assertBefore(windows, "$ReadinessTimedOut = $false", "if ($ReadinessTimedOut) { throw }", "Windows must initialise the flag before the rollback guard that reads it");
 
-  // A second full health wait on the same cold start can only fail the same
-  // way, so the timeout branch must stop rather than fall through to it.
-  assertBefore(posix, '[ "$service_status" -eq 75 ]', "node src/wait-health.mjs", "POSIX must decide on the timeout before the second health wait");
-  assertBefore(windows, "$LASTEXITCODE -eq 75", "& node src/wait-health.mjs", "Windows must decide on the timeout before the second health wait");
+  // service.mjs already owns the health wait, with no state change before
+  // these old second calls. Keep one readiness authority on success as well.
+  assert.doesNotMatch(posix, /node src\/wait-health\.mjs/);
+  assert.doesNotMatch(windows, /& node src\/wait-health\.mjs/);
 });

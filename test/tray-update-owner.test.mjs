@@ -1,4 +1,3 @@
-import "./helpers/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";

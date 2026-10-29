@@ -1,4 +1,3 @@
-import "./helpers/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

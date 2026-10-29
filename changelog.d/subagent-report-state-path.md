@@ -1,1 +1,1 @@
-- **The subagent readiness report reads the configured router state directory.** Reuse the shared path resolver for state aliases, CODEX_HOME and the Windows user profile.
+- Remove the separate subagent readiness script and its mandatory skill step. Use the existing route explanation command; model publication and spawning are unchanged.

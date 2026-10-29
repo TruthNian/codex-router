@@ -72,7 +72,7 @@ export interface SubagentSettings {
   enabled: string[];
   disabled: string[];
   efforts?: Record<string, string>;
-  /** Machine-local v2 capability evidence, populated by the live probe. */
+  /** Machine-local diagnostics; these never grant subagent capabilities. */
   proofs?: Record<string, {
     status: "checking" | "candidate" | "experimental" | "proven" | "failed" | string;
     reason?: string;

@@ -348,10 +348,7 @@ export async function ageToolResultsWithRecovery(input, { tools, scope = "", ret
   const keyFor = (text, info) => JSON.stringify([info.callId, sha256(text)]);
   const planned = ageToolResults(input, { ...options, retain(text, info) {
     candidates.set(keyFor(text, info), { text, info });
-    // Handles and digests have fixed-width ASCII encodings. The default store
-    // can therefore budget its exact instruction length without creating it.
-    return recoveryInstruction({ handle: "_".repeat(43), sha256: "0".repeat(64),
-      directory: path.resolve(TOOL_RESULT_RETENTION_DIR) });
+    return "Read the exact archived result.";
   } });
   // A probe and cache rebuild can cost more than a small omission saves.
   // For an explicitly configured threshold, fall back to the existing policy
@@ -362,13 +359,10 @@ export async function ageToolResultsWithRecovery(input, { tools, scope = "", ret
     return ageToolResultsWithRecovery(input, { tools, scope, retain,
       ...options, minBytes: undefined, readbackHint: false });
   }
-  if (planned.input === input) return planned;
   const committed = new Map();
   const started = Date.now();
   let bytes = 0;
   for (const [key, { text, info }] of candidates) {
-    // A callback candidate is not a saving: only the completed plan decides.
-    if (planned.input[info.index] === input[info.index]) continue;
     bytes += Buffer.byteLength(text);
     if (Date.now() - started > 1000 || bytes > MAX_RESULT_BYTES) break;
     try {

@@ -1,1 +1,1 @@
-- **Dense tool-result shaping skips archive work when the planned receipt saves too little.** Budget the complete default readback instruction before retaining results, preserve unchanged text without a pending footer, and keep durable readback verification before omission.
+- Remove heuristic tool-result shaping during compaction. Recent and unconsumed output stays exact; opted-in aging of consumed old output retains authenticated archive readback.

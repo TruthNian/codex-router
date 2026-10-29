@@ -497,7 +497,9 @@ test("readback attestations reject forged, expired and cross-context proofs", as
   assert.equal(hasVerifiedToolResultReadback(input, options.scope, options), true);
   assert.equal(hasVerifiedToolResultReadback(input, "another thread", options), false);
   assert.equal(hasVerifiedToolResultReadback(input, options.scope, {...options, now: Date.now() + 31*60000}), false);
-  page.readbackProof = page.readbackProof.slice(0, -2) + "AA";
+  const originalProof = page.readbackProof;
+  page.readbackProof = originalProof.slice(0, -1) + (originalProof.endsWith("A") ? "B" : "A");
+  assert.notEqual(page.readbackProof, originalProof, "the forged fixture must change the signature");
   assert.equal(hasVerifiedToolResultReadback([{type: "function_call_output", output: JSON.stringify(page)}], options.scope, options), false);
   const payload = {instructions: "rules", input: [{role: "developer", content: "workspace-write"}]};
   const a = toolResultRecoveryScope("thread", payload);

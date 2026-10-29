@@ -1,2 +1,1 @@
-- Release WebSocket generation ownership and continuation state at the response terminal instead of waiting for unrelated HTTP EOF or cleanup.
-- Apply the shared outcome rules to done, cancellation and error aliases; preserve completed routed usage when the WebSocket edge releases its HTTP stream.
+- Release WebSocket turns at their shared completion, cancellation or failure terminal instead of HTTP EOF, preserving completed routed usage and continuation state.

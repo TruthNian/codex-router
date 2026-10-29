@@ -80,7 +80,7 @@ test("both entry points expose the command", () => {
   const dispatcher = readFileSync(path.join(root, "bin", "model-router"), "utf8");
   assert.match(dispatcher, /\|panel\|/, "model-router must dispatch panel");
 
-  const windows = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const windows = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   assert.match(windows, /"panel"/, "codex-router.ps1 must list panel");
   assert.match(windows, /src\\panel\.mjs/);
 });

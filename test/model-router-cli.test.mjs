@@ -18,7 +18,7 @@ test("both dispatchers accept the stop command", () => {
   // platform without spawning the service.
   const posix = readFileSync(path.join(root, "bin", "model-router"), "utf8");
   assert.match(posix, /\|start\|stop\|/);
-  const windows = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const windows = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   assert.match(windows, /"stop"/);
   assert.match(windows, /"stop"\s*\{\s*Invoke-RouterNode "src\\service\.mjs" @\("stop"\)/);
 });
@@ -33,7 +33,7 @@ test("both dispatchers expose reviewed external skill management", () => {
   const posix = readFileSync(path.join(root, "bin", "model-router"), "utf8");
   assert.match(posix, /\|chatgpt-session\|skills\|/);
   assert.match(readFileSync(path.join(root, "bin", "skills"), "utf8"), /skills-install\.mjs/);
-  const windows = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const windows = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   assert.match(windows, /"skills"/);
   assert.match(windows, /"skills"\s*\{\s*Invoke-RouterNode "src\\skills-install\.mjs" \$Arguments/);
   assert.match(windows, /"picker-order"/);
@@ -119,7 +119,7 @@ test("both dispatchers expose caller capability rotation", () => {
   assert.match(posix, /\|caller-key\|/);
   assert.match(readFileSync(path.join(root, "bin", "caller-key"), "utf8"), /caller-key\.mjs/);
 
-  const windows = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const windows = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   assert.match(windows, /"caller-key"/);
   assert.match(
     windows,

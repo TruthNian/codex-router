@@ -257,7 +257,7 @@ test("graceful update drain waits for the exact current-user executable", () => 
 
 test("start restart and open require the exact canonical registered action", () => {
   const source = readFileSync(path.join(root, "src", "tray-service-windows.mjs"), "utf8");
-  const wrapper = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const wrapper = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   assert.match(source, /function isCanonicalTrayTaskAction\(/);
   assert.match(source, /path\.win32\.normalize\(action\.execute\.trim\(\)\)/);
   assert.match(source, /actual === expected/);
@@ -289,7 +289,7 @@ test("Task Scheduler start waits for the packaged lifecycle-ready contract", () 
 
 test("direct packaged GUI launches clear inherited Electron Node mode", () => {
   const source = readFileSync(path.join(root, "src", "tray-service-windows.mjs"), "utf8");
-  const wrapper = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const wrapper = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   const guiEnvironment = source.slice(
     source.indexOf("function packagedGuiEnvironment("),
     source.indexOf("function queryControlCenterLifecycle("),
@@ -383,7 +383,7 @@ test("a platform with no supervisor says so instead of reporting success", () =>
 // a build script, and codex-router.ps1 had no tray verb at all, so the only
 // route was knowing two separate incantations.
 test("the Windows CLI exposes tray as a first-class command", () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   assert.match(script, /"refresh-catalog", "media", "tray"/);
   assert.match(script, /"tray" \{/);
   // Build only when the sources moved, then stamp it, then register.
@@ -403,7 +403,7 @@ test("the Windows CLI exposes tray as a first-class command", () => {
 // action 'disable'" (issue #751). Both surfaces are parsed here rather than
 // asserting one spelling, so a later rename of either one is caught.
 test("the Windows tray verbs accept every control tray command", () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   const control = readFileSync(path.join(root, "src", "control.mjs"), "utf8");
   const pairs = (source, pattern, entry) => {
     const body = source.match(pattern)?.[1];
@@ -432,7 +432,7 @@ test("the Windows tray verbs accept every control tray command", () => {
 });
 
 test("tray rebuild registers the artifact it just built", () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   const rebuild = script.slice(
     script.indexOf('if ($Action -eq "rebuild")'),
     script.indexOf('$RefreshOnly = $Action -eq "refresh"'),
@@ -456,7 +456,7 @@ test("tray rebuild registers the artifact it just built", () => {
 });
 
 test("normal Windows tray install restarts the previous app when a rebuild fails", () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   const install = script.slice(
     script.indexOf('$RefreshOnly = $Action -eq "refresh"'),
     script.indexOf('if (-not $ActionHandled)'),
@@ -469,7 +469,7 @@ test("normal Windows tray install restarts the previous app when a rebuild fails
 });
 
 test("Windows replacement commits only after lifecycle-ready start and stamps after commit", () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   const rebuild = script.slice(
     script.indexOf('if ($Action -eq "rebuild")'),
     script.indexOf('$RefreshOnly = $Action -eq "refresh"'),
@@ -500,7 +500,7 @@ test("Windows replacement commits only after lifecycle-ready start and stamps af
 });
 
 test("Windows replacement recovery journals the package and exact prior Scheduled Task", () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   const transaction = script.slice(
     script.indexOf("function Get-ControlCenterUpdateLayout"),
     script.indexOf("function Record-ControlCenterBuild"),
@@ -579,7 +579,7 @@ test("Windows replacement recovery journals the package and exact prior Schedule
 });
 
 test("refresh is plan-gated and preserves the prior window lifecycle", () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   assert.match(script, /"install", "refresh", "status"/);
   assert.match(script, /Get-ControlCenterLifecycle/);
   assert.match(script, /PreviousLifecycle\.running[\s\S]*PreviousLifecycle\.visible/);
@@ -595,7 +595,7 @@ test("refresh is plan-gated and preserves the prior window lifecycle", () => {
 });
 
 test("successful Windows install removes only the standalone legacy executable", () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   const cleanup = script.slice(
     script.indexOf("function Get-ObsoleteTauriExecutableForRemoval"),
     script.indexOf("function Get-ControlCenterLifecycle"),
@@ -629,7 +629,7 @@ test("PowerShell children that emit parsed text pin their output encoding to UTF
 });
 
 test("tray repair validates the task and grants only its current principal control", () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   assert.match(script, /"repair"/);
   assert.match(script, /function Get-ValidatedTrayTask/);
   assert.match(script, /principal is not the current user/);
@@ -669,7 +669,7 @@ test("tray repair validates the task and grants only its current principal contr
 });
 
 test("the POSIX tray launcher points Windows at that command", () => {
-  const launcher = readFileSync(path.join(root, "bin", "model-router-tray"), "utf8");
+  const launcher = readFileSync(path.join(root, "src", "tray-update-posix.sh"), "utf8");
   assert.match(launcher, /codex-router\.ps1 tray/);
   assert.doesNotMatch(launcher, /use scripts\/build-desktop-tray\.ps1 on Windows/);
 });
@@ -697,7 +697,7 @@ test("Windows gets the same rebuild gating as the other tray platforms", async (
 // compare the security identity instead, without accepting any change to who
 // may reach the task.
 test("Windows recovery compares task security rather than the raw SDDL string", () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   assert.match(script, /function Test-SameControlCenterTaskSecurity\(\[string\]\$Left, \[string\]\$Right\)/);
   // The auto-inherited marker is the only thing the comparison drops, and it
   // has to be dropped from the DACL flags the stored descriptor carries.
@@ -715,7 +715,7 @@ const schedulerDescriptorSkip = process.platform === "win32"
   : "Task Scheduler security descriptors are Windows-only";
 
 test("the recovery comparison accepts a canonicalised DACL and refuses a changed one", { skip: schedulerDescriptorSkip }, () => {
-  const script = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const script = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   const helpers = script.slice(
     script.indexOf("function Get-ControlCenterDaclAceIdentities"),
     script.indexOf("function Read-ControlCenterTaskIdentityFromXml"),

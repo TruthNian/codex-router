@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,7 +38,13 @@ function readDiscoveryModeFile() {
   } catch (error) {
     // No marker is the legacy default. A present policy that cannot be read
     // does not grant permission to discover existing credentials.
-    if (error?.code === "ENOENT") return false;
+    if (error?.code === "ENOENT") {
+      try {
+        lstatSync(DISCOVERY_MODE_PATH);
+      } catch (entryError) {
+        if (entryError?.code === "ENOENT") return false;
+      }
+    }
   }
   console.error(
     `[codex-router] Invalid or unreadable discovery policy ${DISCOVERY_MODE_PATH}; ` +

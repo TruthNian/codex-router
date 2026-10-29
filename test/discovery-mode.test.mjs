@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 
 const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-discovery-"));
 process.env.CODEX_HOME = path.join(testRoot, "codex");
@@ -96,6 +97,56 @@ test("an unreadable marker does not resume reads of a pre-existing CLI session",
     rmSync(DISCOVERY_MODE_PATH, { recursive: true, force: true });
     writeDiscoveryMode(false);
     rmSync(process.env.GROK_AUTH_PATH, { force: true });
+  }
+});
+
+test("a dangling discovery marker stays disabled while a readable symlink keeps working", async (t) => {
+  try {
+    writeDiscoveryMode(false);
+    rmSync(DISCOVERY_MODE_PATH);
+    const target = path.join(testRoot, "missing-discovery-policy.json");
+    try {
+      symlinkSync(target, DISCOVERY_MODE_PATH, "file");
+    } catch (error) {
+      if (process.platform === "win32" && error?.code === "EPERM") {
+        t.skip("Windows fixture cannot create file symlinks without the required privilege");
+        return;
+      }
+      throw error;
+    }
+    assert.equal(lstatSync(DISCOVERY_MODE_PATH).isSymbolicLink(), true);
+    assert.equal(discoveryDisabled(), true);
+    writeFileSync(target, JSON.stringify({ version: 1, discovery: "enabled" }));
+    const { discoveryDisabled: readFresh } = await import("../src/discovery-mode.mjs?readable-symlink");
+    assert.equal(readFresh(), false);
+  } finally {
+    rmSync(DISCOVERY_MODE_PATH, { force: true });
+    writeDiscoveryMode(false);
+  }
+});
+
+test("discovery read ENOENT requires directory-entry absence before using the legacy default", () => {
+  const source = readFileSync(new URL("../src/discovery-mode.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("function readDiscoveryModeFile()");
+  const end = source.indexOf("\nexport function writeDiscoveryMode", start);
+  assert.ok(start >= 0 && end > start);
+  for (const state of ["present", "unreadable", "absent"]) {
+    let inspections = 0;
+    const warnings = [];
+    const read = vm.runInNewContext(`(${source.slice(start, end)})`, {
+      DISCOVERY_MODE_PATH: "synthetic-policy", console: { error: (message) => warnings.push(message) },
+      readFileSync: () => { throw Object.assign(new Error("missing target"), { code: "ENOENT" }); },
+      lstatSync: () => {
+        inspections += 1;
+        if (state !== "present") throw Object.assign(new Error("entry check"), {
+          code: state === "absent" ? "ENOENT" : "EACCES",
+        });
+        return { isSymbolicLink: () => true };
+      },
+    });
+    assert.equal(read(), state !== "absent", state);
+    assert.equal(inspections, 1, state);
+    assert.equal(warnings.length, state === "absent" ? 0 : 1);
   }
 });
 

@@ -413,3 +413,16 @@ test("missing or failed retention never drops original output", () => {
   assert.equal(applyAging(input, {frontier: 0}).input, input);
   assert.equal(applyAging(input, {frontier: 0, retain() { throw new Error("disk full"); }}).input, input);
 });
+
+test("dense shaping rejects negligible savings before retention", () => {
+  const value = Array.from({ length: 800 }, (_, index) => `distinct evidence ${index}`).join("\n") + "\n\n";
+  assert.equal(Buffer.byteLength(value) - Buffer.byteLength(shapeToolResult(value)), 1);
+  const input = [call("latest"), output("latest", value)];
+  let retained = 0;
+  const result = ageToolResults(input, { denseShaping: true,
+    retain() { retained += 1; return "Read the exact archived result."; } });
+  assert.equal(retained, 0);
+  assert.equal(result.input, input);
+  assert.equal(result.stats.toolResultsShaped, 0);
+  assert.equal(result.stats.toolResultBytesSaved, 0);
+});

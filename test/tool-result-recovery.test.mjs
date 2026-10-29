@@ -504,3 +504,79 @@ test("readback attestations reject forged, expired and cross-context proofs", as
   assert.notEqual(a, toolResultRecoveryScope("thread", {...payload, input: [{role: "developer", content: "danger-full-access"}]}));
   assert.equal(a, toolResultRecoveryScope("thread", {...payload, input: [...payload.input, {role: "user", content: "next turn"}]}));
 });
+
+test("dense shaping does not retain or append readback for a plan with no net savings", async () => {
+  const distinct = Array.from({ length: 800 }, (_, index) => `distinct evidence ${index}`).join("\n");
+  for (const suffix of ["\n\n", "\n" + "repeat me\n".repeat(160)]) {
+    const input = history(distinct + suffix);
+    let retained = 0;
+    const result = await ageToolResultsWithRecovery(input, {
+      tools, denseShaping: true, readbackHint: true,
+      retain() { retained += 1; throw new Error("an unprofitable plan must not persist"); },
+    });
+    assert.equal(retained, 0);
+    assert.equal(result.input, input, "no pending footer or developer notice is added");
+    assert.equal(result.stats.toolResultsShaped, 0);
+    assert.equal(result.stats.toolResultBytesSaved, 0);
+  }
+});
+
+test("mixed dense plans retain only profitable results and still require verified readback", async t => {
+  const options = await fixture(t);
+  const marginal = Array.from({ length: 800 }, (_, index) => `distinct evidence ${index}`).join("\n")
+    + "\n" + "repeat me\n".repeat(160);
+  const useful = "a repeated diagnostic line\n".repeat(1000);
+  const input = [
+    ...history(marginal),
+    { type: "function_call", name: "exec_command", call_id: "useful", arguments: "{}" },
+    { type: "function_call_output", call_id: "useful", output: useful },
+  ];
+  const retained = [];
+  const config = { tools, scope: options.scope, denseShaping: true, retain: (text, info) => {
+    retained.push(info.callId);
+    return retainToolResult(text, { ...options, ...info });
+  } };
+  const pending = await ageToolResultsWithRecovery(input, config);
+  assert.deepEqual(retained, ["useful"]);
+  assert.equal(pending.input[1], input[1], "the unprofitable result stays exactly intact");
+  assert.ok(pending.input[4].output.startsWith(useful), "unproven readback retains the full profitable result");
+  assert.match(pending.input[4].output, /readback pending/u);
+  assert.equal(pending.stats.toolResultsShaped, 0);
+  const results = readdirSync(options.directory).filter(name => name.endsWith(".result"));
+  assert.equal(results.length, 1);
+  const proof = readRetainedToolResult(results[0].slice(0, -7), { ...options, limit: 1 });
+  input.push({ type: "function_call_output", call_id: "reader", output: JSON.stringify(proof) });
+  const verified = await ageToolResultsWithRecovery(input, config);
+  assert.deepEqual(retained, ["useful", "useful"]);
+  assert.equal(verified.input[1], input[1]);
+  assert.equal(verified.stats.toolResultsShaped, 1);
+  assert.ok(verified.stats.toolResultShapeBytesSaved >= 1024);
+  assert.match(verified.input[4].output, /Exact archived result/u);
+  assert.equal(readRetainedToolResult(results[0].slice(0, -7), { ...options, limit: 16000 }).text, useful.slice(0, 16000));
+  assert.equal(input[4].output, useful, "the caller's history is not mutated");
+});
+
+test("the default store is not created for marginal dense savings", async t => {
+  const { directory } = await fixture(t);
+  const store = path.join(directory, "default-store");
+  const env = { HOME: directory, USERPROFILE: directory, CODEX_HOME: directory,
+    MODEL_ROUTER_STATE_DIR: directory, CODEX_ROUTER_STATE_DIR: directory,
+    KIMI_CODEX_STATE_DIR: directory, MODEL_ROUTER_TOOL_RESULT_RETENTION_DIR: store,
+    MODEL_ROUTER_TARGET: "codex" };
+  for (const name of ["SystemRoot", "WINDIR"]) if (process.env[name]) env[name] = process.env[name];
+  const script = `
+    import assert from "node:assert/strict";
+    import { existsSync } from "node:fs";
+    import { ageToolResultsWithRecovery } from ${JSON.stringify(new URL("../src/tool-result-recovery.mjs", import.meta.url).href)};
+    const value = Array.from({length:800}, (_, index) => "distinct evidence " + index).join("\\n")
+      + "\\n" + "repeat me\\n".repeat(160);
+    const input = [{type:"function_call",name:"exec_command",call_id:"x",arguments:"{}"},
+      {type:"function_call_output",call_id:"x",output:value}];
+    const result = await ageToolResultsWithRecovery(input, { tools: ${JSON.stringify(tools)}, denseShaping:true });
+    assert.equal(result.input, input);
+    assert.equal(existsSync(process.env.MODEL_ROUTER_TOOL_RESULT_RETENTION_DIR), false);
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script],
+    { env, encoding: "utf8", timeout: 20_000, windowsHide: true });
+  assert.equal(result.status, 0, result.stderr);
+});

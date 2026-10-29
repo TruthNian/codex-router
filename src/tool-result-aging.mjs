@@ -158,14 +158,13 @@ export function shapeToolResult(value) {
   return shaped.length < value.length ? shaped : value;
 }
 
-function shapedResult(value, recovery) {
+function shapedResult(value, recovery, shaped) {
   if (
     value.startsWith(DENSE_SHAPING_RECEIPT_PREFIX) ||
     value.startsWith(LEGACY_TOKEN_MAXXING_RECEIPT_PREFIX)
   ) {
     return undefined;
   }
-  const shaped = shapeToolResult(value);
   if (shaped === value) return undefined;
   const before = Buffer.byteLength(value, "utf8");
   const shapedBytes = Buffer.byteLength(shaped, "utf8");
@@ -434,10 +433,11 @@ export function ageToolResults(
     const canAge = !protectedResult && size > minBytes && actedAfter[index];
     // A digest and a rerun suggestion are not recovery. Without an actually
     // committed snapshot and a usable readback path, leave the result intact.
-    const eligibleShape = denseShaping && size > DENSE_SHAPING_MIN_BYTES &&
-      !value.startsWith(DENSE_SHAPING_RECEIPT_PREFIX) &&
-      !value.startsWith(LEGACY_TOKEN_MAXXING_RECEIPT_PREFIX) &&
-      shapeToolResult(value) !== value;
+    const shape = !canAge && denseShaping && size > DENSE_SHAPING_MIN_BYTES
+      ? shapeToolResult(value) : undefined;
+    // Even an empty recovery instruction cannot make this copy worthwhile.
+    // Reject it before retain can allocate an archive or renew its lease.
+    const eligibleShape = shape !== undefined && shapedResult(value, "", shape) !== undefined;
     if ((!canAge && !eligibleShape) || typeof retain !== "function") continue;
     let recovery;
     try {
@@ -451,7 +451,7 @@ export function ageToolResults(
     if (canAge) {
       receipt = resultReceipt(value, recovery);
     } else if (denseShaping && size > DENSE_SHAPING_MIN_BYTES) {
-      receipt = shapedResult(value, recovery);
+      receipt = shapedResult(value, recovery, shape);
       shaped = receipt !== undefined;
     }
     if (!receipt) continue;

@@ -93,10 +93,10 @@ test("UI snapshot has stable metadata, prerequisite sources, and no executable p
   assert.doesNotMatch(JSON.stringify(snapshot), /secret\/home/);
 });
 
-test("start is detached, private, and idempotent while the worker is active", () => {
+test("start is detached, private, and idempotent while the worker is active", async () => {
   writeLocalMlxOperation({ version: 1, status: "idle", updatedAt: Date.now() });
   let unrefed = false;
-  const first = startLocalMlxOperation({
+  const first = await startLocalMlxOperation({
     yes: true,
     platform: "darwin",
     arch: "arm64",
@@ -120,7 +120,7 @@ test("start is detached, private, and idempotent while the worker is active", ()
     assert.equal(mode & 0o777, 0o600);
   }
 
-  const second = startLocalMlxOperation({
+  const second = await startLocalMlxOperation({
     yes: true,
     platform: "darwin",
     arch: "arm64",
@@ -154,7 +154,7 @@ test("host support is limited to Apple silicon macOS and blocks before spawning"
 
   writeLocalMlxOperation({ version: 1, status: "idle", detail: "unchanged", updatedAt: 7 });
   let spawned = false;
-  assert.throws(
+  await assert.rejects(
     () => startLocalMlxOperation({
       yes: true,
       platform: "linux",
@@ -167,7 +167,7 @@ test("host support is limited to Apple silicon macOS and blocks before spawning"
   assert.equal(readLocalMlxOperation({ persist: false }).detail, "unchanged");
 });
 
-test("MLX install refuses while an Ollama model operation is active", () => {
+test("MLX install refuses while an Ollama model operation is active", async () => {
   writeLocalDownload({
     version: 1,
     kind: "download",
@@ -180,7 +180,7 @@ test("MLX install refuses while an Ollama model operation is active", () => {
     workerPid: process.pid,
   });
   let spawned = false;
-  assert.throws(
+  await assert.rejects(
     () => startLocalMlxOperation({
       yes: true,
       platform: "darwin",
@@ -199,12 +199,12 @@ test("MLX install refuses while an Ollama model operation is active", () => {
   });
 });
 
-test("MLX re-checks Ollama state only after acquiring the shared start gate", () => {
+test("MLX re-checks Ollama state only after acquiring the shared start gate", async () => {
   writeLocalMlxOperation({ version: 1, status: "idle", updatedAt: Date.now() });
   let gateHeld = false;
   let released = false;
   let spawned = false;
-  assert.throws(
+  await assert.rejects(
     () => startLocalMlxOperation({
       yes: true,
       platform: "darwin",

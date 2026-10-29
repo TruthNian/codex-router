@@ -425,24 +425,10 @@ unprotected, or left over for a model that is no longer eligible, the installed
 picker is republished to restore the coupled catalog/agent state. An unreadable
 or foreign Codex transport is never repaired speculatively.
 
-Only registry-proven models are advertised as native v2 spawn-agent overrides,
-and an explicit spawn model is kept: a child runs on the model the operator
-picked from Codex's own list instead of being pinned back to the routed parent.
-Codex checks that value against its list before the call is dispatched, so an
-override cannot name a route the operator was never offered.
-The Settings tab (desktop panel and macOS tray) exposes two local accordions:
-**Subagent models** can withhold or re-enable proven models, while **Model
-picker** controls visibility. Local settings never promote an unverified model
-to `multi_agent_version: "v2"`; that capability requires the checked-in native
-collaboration proof. A model hidden from the picker is not exposed as a
-subagent. Each accordion also has select-all and unselect-all bulk actions.
+Subagent eligibility follows the registry and explicit local selection;
+visibility and an explicit off still constrain what is published. Codex checks
+model overrides against its own offered list before dispatch. See the
+[subagent capability contract](SUBAGENT-CERTIFICATION.md) for the current rules.
 
-On Codex 0.147, a child's FINAL_ANSWER is recorded as `subAgentActivity`
-`interacted` and stays visually working for the whole live parent turn.
-`close_agent` is not in that v2 toolset. The managed `multi_agent_v2` block
-therefore also sets `usage_hint_enabled` and tells the root agent to call
-`interrupt_agent` on a finished child. Because long multi-agent parents
-still skip that call, the router additionally injects any missing
-`interrupt_agent` tool calls into the parent response when the request input
-already contains those children's FINAL_ANSWER messages. That is the only
-path that settles the badge without the user clicking into each child.
+The parent model owns child lifecycle actions. The router restores authored
+tool names and arguments; it does not infer cancellation from historical prose.

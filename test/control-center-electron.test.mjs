@@ -57,6 +57,25 @@ import {
 
 import { LANGUAGE_OPTIONS, messageCatalogs } from "../apps/control-center/src/i18n.ts";
 
+test("desktop executable lookup preserves dispatcher names and the core Codex choice", async () => {
+  const source = await readFile(new URL("../apps/control-center/electron/ipc.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("function executablePath(name)");
+  const end = source.indexOf("\nfunction codexDesktopPath", start);
+  assert.ok(start >= 0 && end > start);
+  const resolve = vm.runInNewContext(`${source.slice(start, end)}\nexecutablePath`, {
+    path: path.posix, process: { platform: "linux", env: { PATH: "/fixture/bin" } },
+    os: { homedir: () => "/fixture/home" }, fsConstants: { X_OK: 1 },
+    accessSync() {}, statSync: () => ({ isFile: () => true }),
+    realpathSync: () => "/fixture/volta-shim",
+    findCodexBinary: () => "/fixture/desktop-bundle/codex",
+  });
+  assert.equal(resolve("node"), "/fixture/bin/node");
+  assert.equal(resolve("codex"), "/fixture/desktop-bundle/codex");
+  const packaged = "file:///app/Resources/app.asar/electron/ipc.mjs";
+  assert.equal(new URL("../../router-src/codex-binary.mjs", packaged).pathname,
+    "/app/Resources/router-src/codex-binary.mjs");
+});
+
 test("harness detection does not launch version commands for installed clients", async () => {
   const source = await readFile(new URL("../apps/control-center/electron/ipc.mjs", import.meta.url), "utf8");
   const start = source.indexOf("export function getHarnessSnapshot()");

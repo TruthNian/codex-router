@@ -255,7 +255,7 @@ import {
   omitUnexecutedEmptyArgumentCalls,
   isInvalidFunctionCallArgumentsError,
 } from "./invalid-function-call.mjs";
-import { describeTransportFailure } from "./transport-failure.mjs";
+import { describeTransportFailure, PROVIDER_DELIVERY_STATE_HEADER } from "./transport-failure.mjs";
 import {
   endpointCapabilityError,
   supportsOpenAIModelEndpoint,
@@ -346,6 +346,15 @@ const API_BASE = (
   process.env.CODEX_ROUTER_API_BASE_URL ||
   loopback(PORTS.api, "/v1")
 ).replace(/\/+$/, "");
+// Only our authenticated loopback hop can attest to transport delivery. An
+// externally configured Responses endpoint cannot grant itself replay rights.
+const trustedApiTransport = (() => {
+  try {
+    const url = new URL(API_BASE);
+    return url.protocol === "http:" && Number(url.port || 80) === PORTS.api &&
+      ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+  } catch { return false; }
+})();
 const GROK_OAUTH_HEALTH =
   process.env.CODEX_ROUTER_GROK_OAUTH_HEALTH_URL ||
   loopback(PORTS.grokOauth, "/health");
@@ -1136,6 +1145,11 @@ function routedResponsesTarget(route) {
     return `${API_BASE}/responses`;
   }
   return `${GATEWAY_BASE}/responses`;
+}
+
+function trustedProviderDeliveryState(route, upstream) {
+  return trustedApiTransport && route && routeExecution(route, { providerForModel }).transport === "direct-responses"
+    ? upstream.headers.get(PROVIDER_DELIVERY_STATE_HEADER) : undefined;
 }
 
 // LiteLLM translates Codex Responses requests into Chat Completions only after
@@ -3335,6 +3349,7 @@ async function summarize(request, payload, route, signal, { allowFailover = true
       status: upstreamStatus,
       bodyText,
       retryAfterSeconds: retryAfterSeconds(sent.upstream.headers),
+      trustedDeliveryState: trustedProviderDeliveryState(attemptRoute, sent.upstream),
     });
     const overflow = contextLengthFailure(bodyText);
     if (overflow && allowFailover && readFailoverSettings().enabled) {
@@ -4382,6 +4397,7 @@ async function attemptModelFailover({
       status: upstream.status,
       bodyText: hopBodyText,
       retryAfterSeconds: retryAfterSeconds(upstream.headers),
+      trustedDeliveryState: trustedProviderDeliveryState(model, upstream),
     });
     // A transport retry stops as soon as another provider gives any real HTTP
     // answer. Walking onward would turn an application failure into a silent
@@ -5066,14 +5082,11 @@ async function handleResponses(request, response, requestUrl) {
         status: upstream.status,
         bodyText: failedBodyText,
         retryAfterSeconds: retryAfterSeconds(upstream.headers),
+        trustedDeliveryState: trustedProviderDeliveryState(route, upstream),
       });
-      // The provider forwarder emits the reserved transport marker only when
-      // it failed before any provider response was available. Cross-model
-      // failover already treats that marker as replay-safe, but an ordinary
-      // turn (or a single-provider install) has no fallback candidate. Retry
-      // the exact same materialized request once before changing models or
-      // surfacing the 502. Generic provider 5xx bodies never enter this branch,
-      // and nothing can be replayed after caller bytes have been sent.
+      // Retry the same materialized route only when confined delivery evidence
+      // permits replay or the operator explicitly opted into availability.
+      // A provider body cannot prove that the POST was never executed.
       if (
         verdict.reason === "transport" &&
         nothingRelayed(response) &&
@@ -5104,6 +5117,7 @@ async function handleResponses(request, response, requestUrl) {
               status: upstream.status,
               bodyText: failedBodyText,
               retryAfterSeconds: retryAfterSeconds(upstream.headers),
+              trustedDeliveryState: trustedProviderDeliveryState(route, upstream),
             });
       }
       // The image budget is a measurement, not the provider's contract. A
@@ -5152,6 +5166,7 @@ async function handleResponses(request, response, requestUrl) {
               status: upstream.status,
               bodyText: failedBodyText,
               retryAfterSeconds: retryAfterSeconds(upstream.headers),
+              trustedDeliveryState: trustedProviderDeliveryState(route, upstream),
             });
       }
       if (!upstream.ok && verdict.swap && !exactRouteProbe) {

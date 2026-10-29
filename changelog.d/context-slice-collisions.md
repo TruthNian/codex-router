@@ -1,0 +1,1 @@
+- Refuse context-slice inputs with colliding output names before writing, so multi-file diagnostics cannot silently overwrite an earlier input's slices.

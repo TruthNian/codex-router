@@ -1,0 +1,1 @@
+- Remove the retired Homebrew formula template, URL-only updater, and copied tap CI example. The maintained Formula, lock-aware generator, checks, and release publishing path remain unchanged.

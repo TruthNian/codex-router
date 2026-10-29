@@ -1,0 +1,1 @@
+- Remove the unconsumed one-off relay evidence capture script, which inherited host discovery state and cleaned up its mock processes only on success. The maintained routing and stream fixtures remain the relay verification path.

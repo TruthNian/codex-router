@@ -1,0 +1,1 @@
+- Wait asynchronously for platform service commands and caller-key client commands under the existing process-tree owner, keeping lock heartbeats live during long operations and retaining descendant cleanup and readiness budgets.

@@ -50,7 +50,7 @@ jobs:
         run: xcodebuild -project RouterUsageWidget.xcodeproj -scheme RouterUsageWidget -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO
       - name: Check shell syntax
         if: runner.os != 'Windows'
-        run: for file in install.sh bin/* scripts/build-electron-companion.sh scripts/build-macos-tray-app.sh scripts/build-macos-widget.sh packaging/homebrew/check-core-readiness.sh; do [ "$(head -n 1 "$file")" != '#!/bin/sh' ] || sh -n "$file"; done
+        run: for file in install.sh bin/* src/tray-update-posix.sh src/macos-tray-supervision-restore.sh scripts/build-electron-companion.sh scripts/build-macos-tray-app.sh scripts/build-macos-widget.sh packaging/homebrew/check-core-readiness.sh; do [ "$(head -n 1 "$file")" != '#!/bin/sh' ] || sh -n "$file"; done
       - name: Check installer help
         if: runner.os != 'Windows'
         run: ./install.sh --help
@@ -58,7 +58,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @("install.ps1", "codex-router.ps1", "model-router.ps1", "deploy-codex-router.ps1", "restart-codex-router.ps1", "src/windows-process-tree.ps1", "scripts/build-electron-companion.ps1")) {
+          foreach ($file in @("install.ps1", "codex-router.ps1", "src/router-commands-windows.ps1", "model-router.ps1", "deploy-codex-router.ps1", "restart-codex-router.ps1", "src/windows-process-tree.ps1", "scripts/build-electron-companion.ps1")) {
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile(
               (Resolve-Path $file),

@@ -14,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { posixShell } from "./helpers/posix-shell.mjs";
 
 import {
   controlCenterBinary,
@@ -195,8 +196,8 @@ test("the Windows packager can retain an exact rollback package for its caller",
 });
 
 test("platform launchers never choose Tauri by toolchain availability", () => {
-  const windows = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
-  const linux = readFileSync(path.join(root, "bin", "model-router-tray"), "utf8");
+  const windows = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
+  const linux = readFileSync(path.join(root, "src", "tray-update-posix.sh"), "utf8");
   assert.match(windows, /build-electron-companion\.ps1/);
   assert.match(linux, /build-electron-companion\.sh/);
   assert.doesNotMatch(windows.slice(windows.indexOf('"tray" {')), /Get-Command cargo/);
@@ -204,10 +205,12 @@ test("platform launchers never choose Tauri by toolchain availability", () => {
 });
 
 test("Linux rebuilds use exact process identity and recover from package failure", () => {
-  const scriptPath = path.join(root, "bin", "model-router-tray");
-  const linux = readFileSync(path.join(root, "bin", "model-router-tray"), "utf8");
-  const syntax = spawnSync("sh", ["-n", scriptPath], { encoding: "utf8" });
-  assert.equal(syntax.status, 0, syntax.stderr);
+  const scriptPath = path.join(root, "src", "tray-update-posix.sh");
+  const linux = readFileSync(path.join(root, "src", "tray-update-posix.sh"), "utf8");
+  if (posixShell()) {
+    const syntax = spawnSync(posixShell(), ["-n", scriptPath], { encoding: "utf8" });
+    assert.equal(syntax.status, 0, syntax.stderr);
+  }
   assert.match(linux, /pid_has_base_identity\(\)[\s\S]*\/proc\/\$candidate_pid\/exe/);
   assert.match(linux, /pid_start_identity\(\)[\s\S]*\/proc\/\$candidate_pid\/stat[\s\S]*print \$20/);
   assert.match(linux, /pid_has_exact_argv\(\)[\s\S]*argument_count[\s\S]*actual_argument/);
@@ -222,7 +225,7 @@ test("Linux rebuilds use exact process identity and recover from package failure
   assert.match(linux, /transaction_dir=.*\.linux-control-center-transaction/);
   assert.match(linux, /write_phase\(\)[\s\S]*phase\.next/);
   assert.match(linux, /replacement-ready\|committed/);
-  assert.match(linux, /nohup env -u ELECTRON_RUN_AS_NODE "\$start_binary"/);
+  assert.match(linux, /control_center_pid=\$\(node "\$repo_dir\/src\/tray-detached-launch\.mjs" "\$start_binary"/);
   assert.match(linux, /queried_pid" -eq "\$new_pid/);
   assert.match(linux, /launch_mode" = interactive.*prior_visible" -eq 1/);
   assert.match(linux, /restart_recorded_processes\(\)[\s\S]*start_control_center "\$binary_path"/);
@@ -258,7 +261,7 @@ test("Linux rebuilds use exact process identity and recover from package failure
 });
 
 test("Linux lifecycle owners cannot be stale PIDs or Electron Node helpers", () => {
-  const linux = readFileSync(path.join(root, "bin", "model-router-tray"), "utf8");
+  const linux = readFileSync(path.join(root, "src", "tray-update-posix.sh"), "utf8");
   const identity = linux.match(/pid_has_base_identity\(\) \{[\s\S]*?\n    \}/)?.[0] || "";
   assert.match(identity, /\/proc\/\$candidate_pid\/status/);
   assert.match(identity, /candidate_uid[\s\S]*current_uid/);
@@ -287,7 +290,7 @@ function makeLinuxRecoveryFixture({ phase, hadPrevious, target, backup }) {
   mkdirSync(path.join(fixture, "scripts"), { recursive: true });
   mkdirSync(path.join(fixture, "tools"), { recursive: true });
   const launcher = path.join(fixture, "bin", "model-router-tray");
-  writeFileSync(launcher, readFileSync(path.join(root, "bin", "model-router-tray"), "utf8"));
+  writeFileSync(launcher, readFileSync(path.join(root, "src", "tray-update-posix.sh"), "utf8"));
   chmodSync(launcher, 0o700);
   const builder = path.join(fixture, "scripts", "build-electron-companion.sh");
   writeFileSync(builder, "#!/bin/sh\nexit 42\n");
@@ -368,7 +371,7 @@ test("Linux refuses a linked release root before build or recovery mutation", {
     mkdirSync(path.join(fixture, "tools"), { recursive: true });
     mkdirSync(path.join(fixture, "apps", "control-center"), { recursive: true });
     const launcher = path.join(fixture, "bin", "model-router-tray");
-    writeFileSync(launcher, readFileSync(path.join(root, "bin", "model-router-tray"), "utf8"));
+    writeFileSync(launcher, readFileSync(path.join(root, "src", "tray-update-posix.sh"), "utf8"));
     chmodSync(launcher, 0o700);
     const builderMarker = path.join(external, "builder-ran");
     const builder = path.join(fixture, "scripts", "build-electron-companion.sh");
@@ -451,7 +454,7 @@ test("Linux refuses an exact canonical GUI when its lifecycle cannot be verified
     mkdirSync(path.join(fixture, "scripts"), { recursive: true });
     mkdirSync(path.join(fixture, "tools"), { recursive: true });
     const launcher = path.join(fixture, "bin", "model-router-tray");
-    writeFileSync(launcher, readFileSync(path.join(root, "bin", "model-router-tray"), "utf8"));
+    writeFileSync(launcher, readFileSync(path.join(root, "src", "tray-update-posix.sh"), "utf8"));
     chmodSync(launcher, 0o700);
     const builder = path.join(fixture, "scripts", "build-electron-companion.sh");
     writeFileSync(builder, [

@@ -1,0 +1,1 @@
+- Retire the live aging A/B experiment and its usage harvester's fixed-price dollar estimates and unverified cache-stability classifications. Keep offline rollout measurement and actual usage telemetry; the measurement guide now describes their limits instead of promising a reproducible live benchmark.

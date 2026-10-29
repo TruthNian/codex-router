@@ -848,7 +848,7 @@ test("macOS swap journals reject symlinks, unsafe modes, unknown entries, and im
 });
 
 test("tray updates journal every macOS swap before replacing the live app", () => {
-  const script = readFileSync(path.join(root, "bin", "model-router-tray"), "utf8");
+  const script = readFileSync(path.join(root, "src", "tray-update-posix.sh"), "utf8");
   const mac = script.slice(script.indexOf("  Darwin)"), script.indexOf("  Linux)"));
   const recover = mac.indexOf("recover_macos_transaction");
   const createJournal = mac.indexOf('mkdir -m 700 "$transaction_dir"');
@@ -894,9 +894,13 @@ test("tray updates journal every macOS swap before replacing the live app", () =
     "restoration must remain retryable after the previous bundle becomes live",
   );
   assert.match(mac, /cleanup_macos\(\)[\s\S]*recover_macos_transaction/);
-  assert.match(mac, /schedule_macos_supervision_restore\(\)[\s\S]*macos-tray-transaction\.mjs[\s\S]*"\$1" = keep-live[\s\S]*tray-service\.mjs" restart/);
+  assert.match(mac, /schedule_macos_supervision_restore\(\)[\s\S]*tray-detached-launch\.mjs[\s\S]*macos-tray-supervision-restore\.sh/);
+  const delayedRecovery = readFileSync(path.join(root, "src", "macos-tray-supervision-restore.sh"), "utf8");
+  assert.match(delayedRecovery, /tray-update-owner\.mjs" macos-restore/);
+  assert.match(delayedRecovery, /settle\)[\s\S]*companions_stopped \|\| exit 0[\s\S]*macos-tray-transaction\.mjs[\s\S]*"\$1" = keep-live[\s\S]*tray-service\.mjs" restart/);
   assert.match(mac, /run_embedded_control_center "\$staged_embedded_binary" --quit-for-update/);
-  assert.match(mac, /run_embedded_control_center "\$embedded_binary" --tray-only/);
+  assert.match(mac, /start_embedded_control_center "\$embedded_binary" --tray-only/);
+  assert.match(mac, /start_embedded_control_center\(\)[\s\S]*CODEX_ROUTER_EMBEDDED_CONTROL_CENTER=1[\s\S]*tray-detached-launch\.mjs/);
   assert.match(mac, /query_embedded_lifecycle[\s\S]*control_center_identity_matches/);
   assert.match(
     mac,
@@ -936,7 +940,7 @@ test("tray updates journal every macOS swap before replacing the live app", () =
 });
 
 test("a broken embedded renderer remains journaled and rolls back the exact live child", () => {
-  const script = readFileSync(path.join(root, "bin", "model-router-tray"), "utf8");
+  const script = readFileSync(path.join(root, "src", "tray-update-posix.sh"), "utf8");
   const mac = script.slice(script.indexOf("  Darwin)"), script.indexOf("  Linux)"));
   const probe = mac.indexOf("embedded_renderer_ready=0");
   const failure = mac.indexOf('[ "$embedded_renderer_ready" -ne 1 ]', probe);

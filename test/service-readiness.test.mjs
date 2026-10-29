@@ -333,7 +333,7 @@ test("the service delegates its full readiness budget to the guarded wait", () =
   assert.match(source, /CODEX_ROUTER_OPERATION_DEADLINE_MS/);
   assert.match(
     source,
-    /\[path\.join\(SOURCE_ROOT, "src", script\), \.\.\.args\],[\s\S]{0,100}\{ stdio: "inherit", env: childEnvironment \}/,
+    /\[path\.join\(SOURCE_ROOT, "src", script\), \.\.\.args\],[\s\S]{0,100}\{ stdio: "inherit", env: childEnvironment, deadline: operationDeadline \}/,
   );
   assert.doesNotMatch(source, /waitForRouterHealth/);
 });
@@ -413,9 +413,8 @@ test("a health wait that runs out is marked retryable", async () => {
 });
 
 test("a crash loop and a dead launcher are not marked retryable", async () => {
-  // Both of these are genuinely broken, so the installer's rollback must still
-  // tear the service out. Tagging them would keep a task that relaunches a
-  // failing router at every logon.
+  // These are hard failures requiring status/repair, rather than a retryable
+  // cold start. The outer installer preserves the service definition.
   let restarts = 0;
   await assert.rejects(
     waitForServiceReadiness({

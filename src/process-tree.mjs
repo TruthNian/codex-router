@@ -792,8 +792,13 @@ export function runProcessTree(
     windowsVerbatimArguments = false,
     platform = process.platform,
     childMayOwnProcessTrees = false,
+    ownerLifetimeFd,
   } = {},
 ) {
+  if (ownerLifetimeFd !== undefined && (platform === "win32"
+      || !Number.isSafeInteger(ownerLifetimeFd) || ownerLifetimeFd < 3)) {
+    throw new TypeError("An inherited owner descriptor requires a POSIX descriptor above stderr.");
+  }
   if (ownerSignalInProgress && ownerSignalContext.getStore()?.cleanupAllowed !== true) {
     throw ownerSignalError(ownerSignalInProgress);
   }
@@ -815,6 +820,13 @@ export function runProcessTree(
     && (platform !== "win32" || process.stdout.isTTY || process.stderr.isTTY || process.stdin.isTTY);
   const effectiveWindowsHide = inheritsTerminal ? false : windowsHide;
   const relayInherited = platform === "win32" && stdio === "inherit" && effectiveWindowsHide;
+  let childStdio = relayInherited ? ["pipe", "pipe", "pipe"]
+    : stdio === "inherit" ? "inherit" : ["ignore", "pipe", "pipe"];
+  if (ownerLifetimeFd !== undefined) {
+    // Duplicate the same kernel lease as fd 3. The native mutation keeps it
+    // alive if this Node owner dies without running its signal cleanup.
+    childStdio = [...(stdio === "inherit" ? ["inherit", "inherit", "inherit"] : childStdio), ownerLifetimeFd];
+  }
   return new Promise((resolve, reject) => {
     const invocation = platform === "win32"
       ? windowsJobProcessInvocation(command, args, {
@@ -834,8 +846,7 @@ export function runProcessTree(
         shell: false,
         windowsHide: effectiveWindowsHide,
         windowsVerbatimArguments: false,
-        stdio: relayInherited ? ["pipe", "pipe", "pipe"]
-          : stdio === "inherit" ? "inherit" : ["ignore", "pipe", "pipe"],
+        stdio: childStdio,
       });
     } catch (error) {
       coordinator.release();

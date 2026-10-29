@@ -9,6 +9,7 @@ import { waitForServiceReadiness } from "./service-readiness.mjs";
 import { withServiceOperationLock } from "./service-operation-lock.mjs";
 import { environmentProxyOptedIn } from "./proxy-environment.mjs";
 import { serviceAppConnectorEnvironment } from "./app-connector-policy.mjs";
+import { runProcessTree } from "./process-tree.mjs";
 
 const platform = process.env.CODEX_ROUTER_SERVICE_PLATFORM || process.platform;
 const script = {
@@ -31,8 +32,8 @@ const shutdownCommands = new Set(["stop", "uninstall"]);
 // come up healthy seconds later.
 const READINESS_TIMEOUT_MS = 300_000;
 // The service is installed and running; only the health wait ran out. Both
-// installers read this to skip the service teardown in their rollback, so a
-// slow cold start no longer uninstalls a working install (#760). 75 is
+// installers read this to preserve the published client configuration, so a
+// slow cold start leaves it usable when startup finishes (#760). 75 is
 // EX_TEMPFAIL -- "try again", which is exactly the contract here.
 export const READINESS_TIMEOUT_EXIT_CODE = 75;
 // router-restart.mjs reserves this phase before the readiness wait. Check it
@@ -74,26 +75,28 @@ export async function runServiceCommandUnlocked(
   // each replacement branch follows the stop barrier, after old writers drain.
   if (command === "start" || command === "restart") resetStartupAttempts();
   if (command === "install") resetStartupAttempts({ required: false });
-  // Synchronous service renderers can own grandchildren. Do not apply a
-  // direct-child timeout here: it could orphan those descendants and let them
-  // mutate the service after the UI reports failure. The outer desktop runner
-  // owns process-tree termination; this preflight and the readiness wait keep
-  // every cooperative phase on the shared inner deadline.
+  // Keep the lease owner's event loop available while the platform renderer
+  // runs. A synchronous wait can outlast the lease without a single heartbeat.
+  // Reuse the process-tree owner so cancellation retires descendants before
+  // releasing the service lock, rather than timing out only the direct child.
   const platformBudgetMs = remainingOperationMs();
   if (
     platformBudgetMs !== undefined
+    && readinessCommands.has(command)
     && platformBudgetMs < PLATFORM_COMMAND_RESERVE_MS + READINESS_TIMEOUT_MS
   ) {
     throw new Error(
       "The service operation deadline cannot preserve its platform and 300-second readiness allowances.",
     );
   }
-  const result = spawnSync(
+  // Platform controllers spawn ordinary OS commands, not nested controlled
+  // process groups. One tree owner is sufficient; do not consume a second
+  // cleanup reservation from short read-only status budgets.
+  const result = await runProcessTree(
     process.execPath,
     [path.join(SOURCE_ROOT, "src", script), ...args],
-    { stdio: "inherit", env: childEnvironment },
+    { stdio: "inherit", env: childEnvironment, deadline: operationDeadline },
   );
-  if (result.error) throw result.error;
   if (result.status !== 0) return result.status ?? 1;
   // A server that was already running is external and stopManagedOllama() is
   // a no-op. Only the exact detached `ollama serve` process this router
@@ -145,9 +148,8 @@ export async function runServiceCommandUnlocked(
         }
       : {}),
   }).catch((error) => {
-    // A crash loop or a dead launcher is broken and keeps rejecting, so the
-    // caller's rollback still runs for it. A readiness timeout or confirmed
-    // automatic cooldown preserves the installed service with status 75.
+    // A crash loop or a dead launcher remains a hard failure. A readiness
+    // timeout or confirmed automatic cooldown returns the retryable status 75.
     if (error?.startupDeferred === true) return { ok: false, startupDeferred: true, error: error.message };
     if (error?.readinessTimeout !== true) throw error;
     return { ok: false, readinessTimeout: true, error: error.message };

@@ -8863,6 +8863,41 @@ test("an exhausted native reviewer moves later approvals to the configured revie
   }
 });
 
+test("an oversized native-review error survives a bounded classifier peek", async () => {
+  const diagnostic = JSON.stringify({ error: { message: "synthetic diagnostic ".repeat(64) } });
+  let submissions = 0;
+  const native = await mockServer(async (request, response) => {
+    await bodyJson(request);
+    submissions += 1;
+    response.writeHead(400, { "Content-Type": "application/json", "X-Original-Error": "preserved" });
+    response.end(diagnostic);
+  });
+  const routerPort = await openPort();
+  const router = run("router.mjs", {
+    CODEX_ROUTER_PORT: String(routerPort),
+    CODEX_NATIVE_BASE_URL: `http://127.0.0.1:${native.port}/backend-api/codex`,
+    CODEX_ROUTER_MAX_BUFFERED_RESPONSE_BYTES: "16",
+    CODEX_ROUTER_QUIET: "1",
+  });
+  try {
+    await waitFor(`${routerBase(routerPort)}/models`, router);
+    const response = await fetch(`${routerBase(routerPort)}/responses`, {
+      method: "POST",
+      headers: { Authorization: "Bearer CODEX_CALLER_SECRET", "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "codex-auto-review", input: "review synthetic command" }),
+      signal: AbortSignal.timeout(3_000),
+    });
+    const actual = await response.text();
+    assert.equal(response.status, 400, actual);
+    assert.equal(response.headers.get("x-original-error"), "preserved");
+    assert.equal(actual, diagnostic);
+    assert.equal(submissions, 1);
+  } finally {
+    await stopChild(router);
+    await closeServer(native.server);
+  }
+});
+
 test("a native reviewer that answers keeps every approval native, deny included (#787)", async () => {
   const nativeRequests = [];
   // A `deny` is a successful review. Reading it as the provider failing would

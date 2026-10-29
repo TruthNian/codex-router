@@ -708,13 +708,14 @@ function serveRenderer() {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
-      resolve({
-        url: `http://127.0.0.1:${address.port}/`,
-        close: () => new Promise((done) => {
-          server.close(done);
-          server.closeAllConnections?.();
-        }),
+      const close = () => new Promise((done) => {
+        server.close(done);
+        server.closeAllConnections?.();
       });
+      // Launch may reject before a test reaches its browser try/finally.
+      // Register cleanup at the one point that owns the listening server.
+      test.after(close);
+      resolve({ url: `http://127.0.0.1:${address.port}/`, close });
     });
   });
 }
@@ -1947,6 +1948,7 @@ test("Status keeps differently scoped cache facts without inventing a percentage
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
   try {
     const page = await newEnglishTestPage(browser);
+    page.setDefaultTimeout(8_000);
     await page.goto(url + "?mismatchedCache=1");
     await page.getByRole("button", { name: "Status", exact: true }).click();
     const facts = page.locator(".st-context-stats");
@@ -1963,6 +1965,7 @@ test("null speed stays unmeasured while numeric zero remains a speed sample", { 
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
   try {
     const page = await newEnglishTestPage(browser);
+    page.setDefaultTimeout(8_000);
     await page.goto(url + "?speedTelemetry=1");
     const dashboard = page.locator(".db-breakdown-row");
     await dashboard.filter({ hasText: "Unmeasured speed model" }).waitFor();

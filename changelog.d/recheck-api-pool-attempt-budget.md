@@ -1,1 +1,1 @@
-Check the API-key attempt budget after backoff and locked selection, immediately before another provider request can be sent.
+- Check the API-key attempt budget after backoff and locked selection, immediately before another provider request can be sent.

@@ -21,6 +21,7 @@ const providerCredentialsModule = new URL("../src/provider-credentials.mjs", imp
 const root = mkdtempSync(path.join(os.tmpdir(), "codex-router-credential-store-"));
 process.env.CODEX_HOME = path.join(root, "codex");
 process.env.CODEX_ROUTER_STATE_DIR = path.join(root, "state");
+process.env.MODEL_ROUTER_STATE_DIR = process.env.CODEX_ROUTER_STATE_DIR;
 process.env.MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE = path.join(root, "state", "provider-credentials.json");
 for (const name of ["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]) delete process.env[name];
 

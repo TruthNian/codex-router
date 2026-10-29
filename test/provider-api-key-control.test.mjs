@@ -25,6 +25,7 @@ const foregroundRouterPort = await freePort();
 const ACL_HEAVY_MUTATION_TEST_TIMEOUT_MS = process.platform === "win32" ? 120_000 : 30_000;
 process.env.CODEX_HOME = path.join(root, "codex");
 process.env.CODEX_ROUTER_STATE_DIR = stateDir;
+process.env.MODEL_ROUTER_STATE_DIR = process.env.CODEX_ROUTER_STATE_DIR;
 process.env.MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE = credentialStorePath;
 process.env.MODEL_ROUTER_API_KEY_POOL_PATH = poolStatePath;
 

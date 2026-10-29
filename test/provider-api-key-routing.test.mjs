@@ -7,6 +7,7 @@ import test from "node:test";
 const root = mkdtempSync(path.join(os.tmpdir(), "codex-router-api-key-routing-"));
 process.env.CODEX_HOME = path.join(root, "codex");
 process.env.CODEX_ROUTER_STATE_DIR = path.join(root, "state");
+process.env.MODEL_ROUTER_STATE_DIR = process.env.CODEX_ROUTER_STATE_DIR;
 process.env.MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE = path.join(root, "state", "provider-credentials.json");
 delete process.env.OPENROUTER_API_KEY;
 

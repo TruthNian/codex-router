@@ -177,13 +177,3 @@ export function providerTransportError(error) {
 export function hasProviderTransportError(bodyText) {
   return typeof bodyText === "string" && bodyText.includes(PROVIDER_TRANSPORT_ERROR_TYPE);
 }
-
-// A missing header (including one lost through an intermediary) carries no
-// evidence of delivery. Body fields are diagnostic only: an origin can echo
-// this reserved error shape, but it cannot mint the forwarder's private header.
-// Callers supply trustedDeliveryState only for a known local forwarder reply,
-// never for a native backend, local model, or arbitrary upstream response.
-export function providerTransportDeliveryState(bodyText, { trustedDeliveryState } = {}) {
-  if (!hasProviderTransportError(bodyText)) return undefined;
-  return trustedDeliveryState === "not_sent" ? "not_sent" : "possibly_sent";
-}

@@ -1453,7 +1453,11 @@ async function boundedResponseText(
 // the operator the error itself.
 async function peekFailedBodyText(upstream, signal) {
   try {
-    return await boundedResponseText(upstream.clone(), MAX_BUFFERED_RESPONSE_BYTES, signal);
+    // Cancel only this peek branch. Awaiting its tee cancellation would wait
+    // for the original, whose relay cannot start until this peek returns.
+    return (await readResponseBody(upstream.clone(), {
+      maxBytes: MAX_BUFFERED_RESPONSE_BYTES, signal, awaitCancellation: false,
+    })).toString("utf8");
   } catch (error) {
     if (signal?.aborted) throw error;
     return "";

@@ -1,0 +1,1 @@
+- Remove the opt-in Grok agent-loop quality experiment that executed model-generated Node modules with host permissions, together with its experiment-only resume helper. Offline native-patch protocol checks remain available; this live quality benchmark is no longer provided.

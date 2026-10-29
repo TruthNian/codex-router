@@ -2524,7 +2524,7 @@ async function handleLocalModels(action, value, ...rest) {
   }
   if (action === "mlx-install") {
     const { startLocalMlxOperation } = await import("./local-mlx-operation.mjs");
-    const result = startLocalMlxOperation({ yes: value === "--yes" || flags.has("--yes") });
+    const result = await startLocalMlxOperation({ yes: value === "--yes" || flags.has("--yes") });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return;
   }
@@ -2566,7 +2566,7 @@ async function handleLocalModels(action, value, ...rest) {
       workerPid: null,
       ...extra,
     });
-    const claim = claimLocalOperation(tag, "download");
+    const claim = await claimLocalOperation(tag, "download");
     if (!claim.acquired) {
       const active = readLocalDownload();
       if (isLocalOperationActive(active) && active.tag !== tag) {
@@ -2621,7 +2621,7 @@ async function handleLocalModels(action, value, ...rest) {
       }
       writePhase("Checking model and machine fit");
     } finally {
-      claim.release();
+      await claim.release();
     }
     const cancelled = () => readLocalDownload()?.status === "cancelled";
     try {
@@ -2758,7 +2758,7 @@ async function handleLocalModels(action, value, ...rest) {
       readLocalDownload,
       writeLocalDownload,
     } = await import("./local-download.mjs");
-    const claim = claimLocalOperation(tag, "uninstall");
+    const claim = await claimLocalOperation(tag, "uninstall");
     if (!claim.acquired) {
       const active = readLocalDownload();
       if (isLocalOperationActive(active) && active.tag === tag) {
@@ -2871,7 +2871,7 @@ async function handleLocalModels(action, value, ...rest) {
       error: undefined,
     });
     } finally {
-      claim.release();
+      await claim.release();
     }
   } else if (action === "set") {
     if (!["on", "off"].includes(positional)) {

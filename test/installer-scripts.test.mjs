@@ -622,7 +622,7 @@ test("the Windows wrapper hands every command its own arguments", () => {
   // way, leaving a Windows user with tracked edits no documented route to the
   // force path at all.
   const branches = windowsSwitchBranches(
-    readFileSync(path.join(root, "codex-router.ps1"), "utf8"),
+    readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8"),
   );
   assert.ok(branches.size >= 16, `only found ${branches.size} branches`);
 
@@ -665,13 +665,13 @@ test("rollback --force reaches the updater on Windows", () => {
   // the caller's flags are appended to it. Replacing the whole list with
   // @("rollback") is what silently dropped --force.
   const branches = windowsSwitchBranches(
-    readFileSync(path.join(root, "codex-router.ps1"), "utf8"),
+    readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8"),
   );
   assert.match(branches.get("rollback"), /@\("rollback"\)\s*\+\s*\$Arguments/);
 });
 
 test("Windows exposes signed-routing and the shared refresh transaction", () => {
-  const windows = readScript("codex-router.ps1");
+  const windows = readScript("src", "router-commands-windows.ps1");
   const branches = windowsSwitchBranches(windows);
   assert.match(windows, /"signed-routing"/);
   assert.match(windows, /"refresh-catalog"/);
@@ -686,7 +686,7 @@ test("Windows exposes signed-routing and the shared refresh transaction", () => 
 });
 
 test("Windows exposes picker-order with the same verbs as POSIX", () => {
-  const windows = readScript("codex-router.ps1");
+  const windows = readScript("src", "router-commands-windows.ps1");
   const branches = windowsSwitchBranches(windows);
   assert.match(windows, /"picker-order"/);
   assert.ok(branches.has("picker-order"), "codex-router.ps1 must dispatch picker-order");

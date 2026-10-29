@@ -1,0 +1,1 @@
+- Serialize tray recovery, staging, package swap, readiness, and rollback under one kernel-owned update lease on every platform. Public entrypoints use private native bodies; delayed macOS recovery re-enters the same owner, and intentional GUI handoff retains its existing exact-pid readiness and journal recovery checks.

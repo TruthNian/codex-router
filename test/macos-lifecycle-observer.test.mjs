@@ -64,7 +64,7 @@ test("release and macOS rebuild observations use the same non-GUI entry point", 
   const release = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   assert.match(release, /state=\$\(node scripts\/query-control-center-lifecycle\.mjs/);
   assert.doesNotMatch(release, /--query-lifecycle/);
-  const tray = readFileSync(new URL("../bin/model-router-tray", import.meta.url), "utf8");
+  const tray = readFileSync(new URL("../src/tray-update-posix.sh", import.meta.url), "utf8");
   const rebuildObserver = tray.match(/query_embedded_lifecycle\(\) \{([\s\S]*?)\n {4}\}/)?.[1];
   assert.ok(rebuildObserver);
   assert.match(rebuildObserver, /node "\$repo_dir\/scripts\/query-control-center-lifecycle\.mjs"/);

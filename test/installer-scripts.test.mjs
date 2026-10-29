@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { assertBefore } from "./script-order.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   mkdirSync,
@@ -926,27 +927,19 @@ test("uninstall removes the managed skills", () => {
 // start -- retryable, not broken. The rollback used to disable the client
 // config and uninstall the LaunchAgent unconditionally, so that timeout took a
 // working, routed machine and left it unrouted with no service at all.
-test("installer rollback undoes only what the run created", () => {
+test("installer rollback preserves shared service definitions and only undoes its client changes", () => {
   const posix = readFileSync(path.join(root, "bin", "install"), "utf8");
   const windows = readFileSync(path.join(root, "install.ps1"), "utf8");
 
-  // Both installers must read the pre-existing state before they mutate it.
+  // Client restoration keeps its exact prior-state gate. A service snapshot
+  // cannot authorize deleting a registration potentially written by another run.
   assert.match(posix, /config_was_enabled=/);
-  assert.match(posix, /service_was_installed=/);
-  assert.ok(
-    posix.indexOf("service_was_installed=false") < posix.indexOf("rollback() {"),
-    "POSIX must capture prior state before defining the rollback that reads it",
-  );
   assert.match(windows, /\$ConfigWasEnabled\s*=/);
-  assert.match(windows, /\$ServiceWasInstalled\s*=/);
-
-  // ...and both teardowns must be gated on it.
-  assert.match(
-    posix,
-    /\[ "\$service_installed" = true \] && \[ "\$service_was_installed" != true \]/,
-  );
+  assert.doesNotMatch(posix, /node src\/service\.mjs uninstall/);
+  assert.doesNotMatch(windows, /& node src\/service\.mjs uninstall/);
+  assert.doesNotMatch(posix, /service_was_installed|service_installed=/);
+  assert.doesNotMatch(windows, /\$ServiceWasInstalled|\$ServiceInstalled/);
   assert.match(posix, /\[ "\$config_was_enabled" != true \]/);
-  assert.match(windows, /\$ServiceInstalled -and -not \$ServiceWasInstalled/);
   assert.match(windows, /-not \$ConfigWasEnabled/);
 });
 
@@ -1176,16 +1169,8 @@ test("a readiness timeout leaves the installed service and config in place", () 
   // still pointing at it.
   assert.match(posix, /if \[ "\$readiness_timeout" = true \]; then\s*\n\s*return/);
   assert.match(windows, /if \(\$ReadinessTimedOut\) \{ throw \}/);
-  assert.ok(
-    posix.indexOf('if [ "$readiness_timeout" = true ]') <
-      posix.indexOf("node src/service.mjs uninstall"),
-    "the POSIX timeout guard must precede the service teardown it skips",
-  );
-  assert.ok(
-    windows.indexOf("if ($ReadinessTimedOut) { throw }") <
-      windows.indexOf("& node src/service.mjs uninstall"),
-    "the Windows timeout guard must precede the service teardown it skips",
-  );
+  assertBefore(posix, 'if [ "$readiness_timeout" = true ]', 'if [ "$config_enabled" = true ]', "the POSIX timeout guard must precede client rollback");
+  assertBefore(windows, "if ($ReadinessTimedOut) { throw }", "if ($ConfigEnabled)", "the Windows timeout guard must precede client rollback");
 
   // The flag has to be set before the rollback can read it. Under `set -u` an
   // unset variable would abort the trap itself.

@@ -57,6 +57,40 @@ import {
 
 import { LANGUAGE_OPTIONS, messageCatalogs } from "../apps/control-center/src/i18n.ts";
 
+test("harness detection does not launch version commands for installed clients", async () => {
+  const source = await readFile(new URL("../apps/control-center/electron/ipc.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("export function getHarnessSnapshot()");
+  const end = source.indexOf("\nfunction shellQuote(", start);
+  assert.ok(start >= 0 && end > start);
+  let versionCommands = 0;
+  const snapshot = vm.runInNewContext(
+    `${source.slice(start, end).replace(/^export /, "")}\ngetHarnessSnapshot();`,
+    {
+      path: path.posix,
+      os: { homedir: () => "/fixture" },
+      process: { env: {}, platform: "darwin" },
+      executablePath: (name) => `/fixture/bin/${name}`,
+      executableVersion: () => { versionCommands += 1; return "1.0"; },
+      openclawDesktopPath: () => undefined,
+      cursorDesktopPath: () => undefined,
+      codexDesktopPath: () => undefined,
+      routerStateDirectory: () => "/fixture/state",
+      readBounded: () => "",
+      readJsonObject: () => undefined,
+      existsSync: () => false,
+      terminalAvailable: () => true,
+      OPENCLAW_DOCS: "", CODEX_DOCS: "", DSH_DOCS: "",
+      CLAUDE_CODE_DOCS: "", GEMINI_CLI_DOCS: "", CURSOR_DOCS: "",
+      ROUTED_HARNESS_ROWS: Array.from({ length: 5 }, (_, index) => ({
+        id: `client-${index}`, executables: [`client-${index}`], marker: "marker",
+      })),
+    },
+  );
+  assert.equal(snapshot.harnesses.length, 11);
+  assert.ok(snapshot.harnesses.every((harness) => harness.cliInstalled));
+  assert.equal(versionCommands, 0);
+});
+
 test("ChatGPT browser login reports a terminal retry after child close without auth", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "router-browser-login-"));
   const windows = process.platform === "win32";

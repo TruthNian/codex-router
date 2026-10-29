@@ -274,23 +274,6 @@ function executablePath(name) {
   return undefined;
 }
 
-function executableVersion(executable) {
-  if (!executable) return undefined;
-  // Modern Node deliberately refuses to execute batch shims with shell:false.
-  // Version text is optional, so do not weaken the no-shell boundary just to
-  // decorate a card on Windows.
-  if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(executable)) return undefined;
-  const result = spawnSync(executable, ["--version"], {
-    encoding: "utf8",
-    env: process.env,
-    timeout: 2_000,
-    windowsHide: true,
-    shell: false,
-  });
-  if (result.error || result.status !== 0) return undefined;
-  return cleanText(String(result.stdout || result.stderr).split("\n", 1)[0], "", 80) || undefined;
-}
-
 function codexDesktopPath() {
   return [
     "/Applications/Codex.app",
@@ -398,12 +381,6 @@ export function getHarnessSnapshot() {
   const claudeLauncher = executablePath("claude-router");
   const gemini = executablePath("gemini");
   const openclaw = executablePath("openclaw");
-  const codexVersion = executableVersion(codex);
-  const dshVersion = executableVersion(dsh);
-  const cursorVersion = executableVersion(cursorAgent);
-  const claudeVersion = executableVersion(claude);
-  const geminiVersion = executableVersion(gemini);
-  const openclawVersion = executableVersion(openclaw);
   const openclawApp = openclawDesktopPath();
   const stateDirectory = routerStateDirectory();
   const codexConfig = readBounded(path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "config.toml"), 2 * 1024 * 1024);
@@ -430,7 +407,6 @@ export function getHarnessSnapshot() {
         ownership: "openclaw",
         description: "OpenClaw's current agent runtime using every model selected in this router.",
         cliInstalled: Boolean(openclaw),
-        ...(openclawVersion ? { cliVersion: openclawVersion } : {}),
         appInstalled: Boolean(openclawApp),
         configured: Boolean(openclawState?.models?.length),
         canInstall: true,
@@ -445,7 +421,6 @@ export function getHarnessSnapshot() {
         ownership: "openai",
         description: "OpenAI's desktop and terminal coding harness.",
         cliInstalled: Boolean(codex),
-        ...(codexVersion ? { cliVersion: codexVersion } : {}),
         appInstalled: Boolean(codexDesktopPath()),
         configured: /# BEGIN (?:kimi-)?codex-(?:router|proxy)-/m.test(codexConfig || ""),
         canInstall: Boolean(codex || codexDesktopPath()),
@@ -460,7 +435,6 @@ export function getHarnessSnapshot() {
         ownership: "deepseek",
         description: "DeepSeek's coding harness, sharing this router's model catalog and credentials.",
         cliInstalled: Boolean(dsh),
-        ...(dshVersion ? { cliVersion: dshVersion } : {}),
         appInstalled: Boolean(dsh),
         configured: existsSync(path.join(stateDirectory, "dsh-models.json")),
         canInstall: true,
@@ -473,7 +447,6 @@ export function getHarnessSnapshot() {
         ownership: "anthropic",
         description: "Anthropic's coding agent using every model selected in this router.",
         cliInstalled: Boolean(claude),
-        ...(claudeVersion ? { cliVersion: claudeVersion } : {}),
         appInstalled: false,
         configured: Boolean(claudeLauncher && claudeState?.models?.length),
         canInstall: Boolean(claude),
@@ -488,7 +461,6 @@ export function getHarnessSnapshot() {
         ownership: "google",
         description: "Google's terminal coding agent using the shared routed model catalog.",
         cliInstalled: Boolean(gemini),
-        ...(geminiVersion ? { cliVersion: geminiVersion } : {}),
         appInstalled: false,
         configured: Boolean(geminiState?.models?.length),
         canInstall: Boolean(gemini),
@@ -503,7 +475,6 @@ export function getHarnessSnapshot() {
         ownership: "cursor",
         description: "Cursor Agent and Cursor App using the router's separate authenticated adapters.",
         cliInstalled: Boolean(cursorAgent),
-        ...(cursorVersion ? { cliVersion: cursorVersion } : {}),
         appInstalled: Boolean(cursorApp),
         configured: Boolean(cursorLauncher && (!cursorApp || cursorState?.publicOrigin)),
         agentConfigured: Boolean(cursorLauncher),
@@ -537,14 +508,12 @@ export function getHarnessSnapshot() {
       // command, which costs a process and is asked when a row is acted on.
       ...ROUTED_HARNESS_ROWS.map((row) => {
         const binary = row.executables.map((name) => executablePath(name)).find(Boolean);
-        const version = executableVersion(binary);
         return {
           id: row.id,
           displayName: row.displayName,
           ownership: row.ownership,
           description: row.description,
           cliInstalled: Boolean(binary),
-          ...(version ? { cliVersion: version } : {}),
           appInstalled: false,
           configured: existsSync(path.join(stateDirectory, row.marker)),
           canInstall: row.installable || Boolean(binary),

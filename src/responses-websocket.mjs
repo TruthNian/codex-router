@@ -1186,7 +1186,8 @@ class ResponsesWebSocketPeer {
               !(Number.isInteger(event.status) && event.status >= 400 && event.status <= 599)) {
             event = { ...event, status: 502 };
           }
-          if (["response.completed", "response.failed", "response.incomplete", "error"].includes(event.type)) {
+          const terminalOutcome = responseOutcomeFromPayload(event);
+          if (terminalOutcome !== undefined) {
             active.terminalSent = true;
             if (active.id) this.lastResponseId = active.id;
           }
@@ -1208,14 +1209,10 @@ class ResponsesWebSocketPeer {
             }
           }
           if (!(await this.sendJsonWithBackpressure(event))) return false;
-          if (event.type === "response.completed") {
-            if (event.response && typeof event.response === "object" && !Array.isArray(event.response) &&
-                responseOutcomeFromPayload(event) === "completed") completed = event.response;
+          if (terminalOutcome !== undefined) {
+            if (terminalOutcome === "completed" && event.response &&
+                typeof event.response === "object" && !Array.isArray(event.response)) completed = event.response;
             else terminalFailure = true;
-            return false;
-          }
-          if (["error", "response.failed", "response.incomplete"].includes(event.type)) {
-            terminalFailure = true;
             return false;
           }
           return true;

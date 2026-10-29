@@ -1895,8 +1895,15 @@ test("a completed SSE turn releases its WebSocket queue before HTTP EOF", async 
 
 
 test("post-terminal cleanup cannot own the queue or certify an unsuccessful continuation", async (t) => {
-  for (const status of ["completed", "incomplete"]) {
-    await t.test(status, async (subtest) => {
+  for (const terminal of [
+    { type: "response.completed", status: "completed", succeeds: true },
+    { type: "response.completed", status: "incomplete", succeeds: false },
+    { type: "response.done", status: "completed", succeeds: true },
+    { type: "response.cancelled", status: "cancelled", succeeds: false },
+    { type: "response.canceled", status: "canceled", succeeds: false },
+    { type: "response.error", status: "failed", succeeds: false },
+  ]) {
+    await t.test(`${terminal.type}/${terminal.status}`, async (subtest) => {
       let calls = 0;
       let cancellations = 0;
       const { server, port } = await startServer(() => assert.fail("the synthetic fetch owns this response"), {
@@ -1905,7 +1912,7 @@ test("post-terminal cleanup cannot own the queue or certify an unsuccessful cont
           const id = calls === 1 ? "resp-held-cleanup" : "resp-after-cleanup";
           const frame = Buffer.from([
             { type: "response.created", response: { id } },
-            { type: "response.completed", response: { id, status: calls === 1 ? status : "completed", output: [] } },
+            { type: calls === 1 ? terminal.type : "response.completed", response: { id, status: calls === 1 ? terminal.status : "completed", output: [] } },
           ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
           return new Response(new ReadableStream({
             start(controller) { controller.enqueue(frame); if (calls > 1) controller.close(); },
@@ -1917,9 +1924,9 @@ test("post-terminal cleanup cannot own the queue or certify an unsuccessful cont
       subtest.after(() => { socket.destroy(); server.close(); });
       peer.sendJson(createRequest());
       assert.equal((await peer.nextJson()).type, "response.created");
-      assert.equal((await peer.nextJson()).response.status, status);
+      assert.equal((await peer.nextJson()).response.status, terminal.status);
       peer.sendJson(createRequest({ previous_response_id: "resp-held-cleanup", input: [] }));
-      if (status === "incomplete") {
+      if (!terminal.succeeds) {
         assert.equal((await peer.nextJson()).error.code, "previous_response_not_found");
         assert.equal(calls, 1);
         peer.sendJson(createRequest());

@@ -1,7 +1,7 @@
 import { AGENT_PAYLOAD_RELAY_TOOL, agentRelayHeaders, agentRelayError, parseAgentRelayResponse } from "./agent-payload-relay.mjs";
 import { compatibilityLayerError } from "./compatibility-layer-state.mjs";
 import { rejectGenerationRedirect } from "./generation-redirect.mjs";
-import { resolveGenerationOutcome } from "./response-outcome.mjs";
+import { resolveGenerationOutcome, ResponseOutcomeObserver } from "./response-outcome.mjs";
 import { createGrokRequestTiming, setGrokTimingRequestId } from "./grok-request-timing.mjs";
 import { grokBridgeRequest } from "./grok-request-compat.mjs";
 import { readFileSync } from "node:fs";
@@ -2796,12 +2796,10 @@ function extractUserMessages(input) {
 //
 // The parser follows SSE framing rather than trusting one-line JSON: a data
 // payload is every `data:` line since the last blank line joined with "\n",
-// CRLF is tolerated, and comment/id/retry lines are ignored. Gateways in the
-// wild end their stream without a terminal event, so
-// `response.output_text.delta` text accumulates as a fallback answer — never
-// after a failed or incomplete terminal, whose partial output must not
-// masquerade as a summary. The observed event mix rides back to the caller
-// for its failure log either way.
+// CRLF is tolerated, and comment/id/retry lines are ignored. Partial text is
+// not proof that the summarizer completed: only a successful terminal permits
+// replacing the caller's history. The observed event mix rides back to the
+// caller for its failure log either way.
 function responsesSseToResponse(bytes) {
   const payloads = [];
   let dataLines = [];
@@ -2819,9 +2817,7 @@ function responsesSseToResponse(bytes) {
   flush();
 
   let completed;
-  let terminalFailed = false;
-  const deltas = [];
-  let usage;
+  const outcome = new ResponseOutcomeObserver();
   const events = new Map();
   for (const payload of payloads) {
     let event;
@@ -2832,30 +2828,22 @@ function responsesSseToResponse(bytes) {
     }
     const type = typeof event?.type === "string" ? event.type : "unknown";
     events.set(type, (events.get(type) || 0) + 1);
-    if (type === "response.completed" && event.response && typeof event.response === "object") {
+    outcome.observe(event);
+    if (
+      (type === "response.completed" || type === "response.done")
+      && event.response && typeof event.response === "object"
+      && !Array.isArray(event.response)
+    ) {
       completed = event.response;
-      if (event.response.usage && typeof event.response.usage === "object") usage = event.response.usage;
-    } else if (type === "response.failed" || type === "response.incomplete") {
-      // A failed or incomplete terminal means the summarizer never finished;
-      // the caller must classify this as a failed attempt, never accept it.
-      terminalFailed = true;
     }
-    if (type === "response.output_text.delta" && typeof event.delta === "string") deltas.push(event.delta);
-    if (event?.usage && typeof event.usage === "object") usage = event.usage;
   }
   const summary = [...events].map(([type, count]) => `${type}x${count}`).join(",") || "no-events";
-  // A failed or incomplete terminal poisons the whole attempt: even a later
-  // completed event cannot be trusted as a finished summary, so the caller
-  // classifies the attempt as failed instead of checkpointing it.
-  if (completed && !terminalFailed) return { response: completed, summary, terminalFailed };
-  if (deltas.length && !terminalFailed) {
-    return {
-      response: { output_text: deltas.join(""), ...(usage ? { usage } : {}) },
-      summary: `${summary} (rebuilt from deltas)`,
-      terminalFailed,
-    };
-  }
-  return { response: undefined, summary, terminalFailed };
+  const terminalFailed = ["failed", "incomplete", "canceled"].includes(outcome.outcome());
+  return {
+    response: outcome.outcome() === "completed" ? completed : undefined,
+    summary,
+    terminalFailed,
+  };
 }
 
 // The v1 compact response shape follows Codex's replacement-history contract.

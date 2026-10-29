@@ -1,0 +1,1 @@
+- Require a successful generation terminal before accepting a streamed compaction summary, preventing clean truncation or an unsuccessful embedded status from replacing the conversation history.

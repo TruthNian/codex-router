@@ -2860,6 +2860,64 @@ test("router synthesizes routed compaction and safely replays it to native model
   }
 });
 
+test("routed compaction requires a successful terminal before replacing history", async () => {
+  let source;
+  let submissions = 0;
+  const gateway = await mockServer(async (request, response) => {
+    await bodyJson(request);
+    submissions += 1;
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.end(source);
+  });
+  const routerPort = await openPort();
+  const router = run("router.mjs", {
+    CODEX_ROUTER_PORT: String(routerPort),
+    CODEX_ROUTER_GATEWAY_BASE_URL: `http://127.0.0.1:${gateway.port}/v1`,
+    CODEX_ROUTER_QUIET: "1",
+  });
+  const terminal = (status) => ({ type: "response.completed", response: {
+    id: "resp_summary", status,
+    output: [{ type: "message", content: [{ type: "output_text", text: "A complete summary." }] }],
+  } });
+  const delta = { type: "response.output_text.delta", delta: "A partial summary" };
+  try {
+    await waitFor(`${routerBase(routerPort)}/models`, router);
+    for (const [events, expected] of [
+      [[delta], 502],
+      [[delta, terminal("incomplete")], 502],
+      [[delta, terminal("failed")], 502],
+      [[delta, terminal("in_progress")], 502],
+      [[delta, terminal("unknown")], 502],
+      [[delta, { type: "response.completed", response: [] }], 502],
+      [[delta, { type: "response.cancelled" }], 502],
+      [[delta, { type: "error", error: { message: "synthetic failure" } }], 502],
+      [[delta, { type: "response.failed" }, terminal("completed")], 502],
+      [[delta, terminal("completed")], 200],
+      [[terminal(undefined)], 200],
+      [[{ ...terminal("completed"), type: "response.done" }], 200],
+    ]) {
+      source = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+      for (const v1 of [false, true]) {
+        const response = await fetch(`${routerBase(routerPort)}/responses${v1 ? "/compact" : ""}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", stream: false, input: [
+            { type: "message", role: "user", content: [{ type: "input_text", text: "Preserve the actual task." }] },
+            ...(!v1 ? [{ type: "compaction_trigger" }] : []),
+          ] }),
+        });
+        const text = await response.text();
+        assert.equal(response.status, expected, text);
+        if (expected !== 200) assert.doesNotMatch(text, /kcr2:|BEGIN_CODEX_ROUTER_CHECKPOINT/);
+      }
+    }
+    assert.equal(submissions, 24);
+  } finally {
+    await stopChild(router);
+    await closeServer(gateway.server);
+  }
+});
+
 test("compaction never treats reasoning as final text and falls back to chat content", async () => {
   let requestCount = 0;
   const contract = (objective) => JSON.stringify({

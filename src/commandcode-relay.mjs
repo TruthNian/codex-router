@@ -117,11 +117,24 @@ export async function relayCommandCodeGenerate({
     model: model.gatewayModel,
     created: Math.floor(at / 1000),
   });
+  signal?.throwIfAborted();
+  async function* generationEvents() {
+    try {
+      yield* readGenerateEvents(upstream.body);
+    } catch {
+      // HTTP success already dispatched the generation. A body read failure
+      // belongs to this attempt, not another key; actual cancellation remains
+      // the caller's responsibility rather than becoming a synthetic reply.
+      signal?.throwIfAborted();
+      yield { type: "error", message: "Command Code response stream stopped before completion." };
+    }
+    signal?.throwIfAborted();
+  }
 
   if (!streaming) {
     // The route only streams. A caller that asked for a whole response gets
     // one assembled here rather than a stream it never agreed to parse.
-    for await (const event of readGenerateEvents(upstream.body)) translator.push(event);
+    for await (const event of generationEvents()) translator.push(event);
     const answer = translator.body();
     if (translator.error) {
       // HTTP 200 already started a generation. Committing its failure prevents
@@ -138,7 +151,7 @@ export async function relayCommandCodeGenerate({
   }
 
   writeEventStreamHead(response);
-  for await (const event of readGenerateEvents(upstream.body)) {
+  for await (const event of generationEvents()) {
     const chunk = translator.push(event);
     if (chunk) response.write(chunk);
   }

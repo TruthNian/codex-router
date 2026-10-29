@@ -1,0 +1,1 @@
+- Isolate test homes and credential paths before runtime imports, and replace host Keychain probes with synthetic misses and hits in credential tests.

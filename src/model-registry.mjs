@@ -972,13 +972,13 @@ function mergeUserModels(base, staticAliases) {
   const models = [...base.models];
   const slugs = new Set(models.map((model) => model.slug));
   const gatewayModels = new Set(models.map((model) => model.gatewayModel));
-  // Curation used to publish opaque provider ids before a checked-in entry
-  // gave the same route a stable public slug. Treat provider + upstream id as
-  // routing identity too, not only the public slug: otherwise both names reach
-  // the exact same endpoint and the picker shows a duplicate model. Keep the
-  // replacement so persisted visibility can follow the canonical slug.
+  // Provider-level routes share one endpoint, so an old curation slug for a
+  // checked-in model can follow its canonical slug. Per-model endpoints are
+  // explicit destinations: the same upstream id does not make them aliases.
   const checkedInRoutes = new Map(
-    models.map((model) => [`${model.provider}\0${model.upstreamModel}`, model]),
+    models
+      .filter((model) => !base.providers.get(model.provider)?.perModelEndpoint)
+      .map((model) => [`${model.provider}\0${model.upstreamModel}`, model]),
   );
   const aliases = new Map();
   const userModels = new Set();

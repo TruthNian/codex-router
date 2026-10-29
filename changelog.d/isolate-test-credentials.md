@@ -1,1 +1,1 @@
-- Isolate test homes and credential paths before runtime imports, and replace host Keychain probes with synthetic misses and hits in credential tests.
+- Isolate test homes and credential paths before runtime imports in ordinary npm, Windows CI, and Control Center test entrypoints, and replace host Keychain probes with synthetic misses and hits in credential tests.

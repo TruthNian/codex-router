@@ -1,11 +1,21 @@
 import "./helpers/isolated-runtime-environment.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 const fixture = new URL("./helpers/isolated-runtime-environment.mjs", import.meta.url).href;
 const pathsModule = new URL("../src/paths.mjs", import.meta.url).href;
+
+test("all ordinary Node test entrypoints preload the same credential boundary", () => {
+  const rootPackage = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const appPackage = JSON.parse(readFileSync(new URL("../apps/control-center/package.json", import.meta.url), "utf8"));
+  const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  assert.match(rootPackage.scripts.test, /node --import \.\/test\/helpers\/isolated-runtime-environment\.mjs --test/);
+  assert.match(appPackage.scripts.test, /node --import \.\.\/\.\.\/test\/helpers\/isolated-runtime-environment\.mjs --test/);
+  assert.match(ci, /run: node --import \.\/test\/helpers\/isolated-runtime-environment\.mjs --test --test-timeout=600000 --test-concurrency=2/);
+});
 
 test("preloading isolation rejects inherited credential paths and never invokes host security", () => {
   const script = `

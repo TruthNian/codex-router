@@ -38,7 +38,7 @@ jobs:
         # Private-file tests launch real PowerShell ACL helpers. Avoid starving
         # their existing deadlines on shared runners; retain every test and
         # all within-file request/race concurrency assertions.
-        run: node --test --test-timeout=600000 --test-concurrency=2 test/*.test.mjs
+        run: node --import ./test/helpers/isolated-runtime-environment.mjs --test --test-timeout=600000 --test-concurrency=2 test/*.test.mjs
       - run: npm audit --omit=dev --audit-level=high
       - name: Test the macOS tray
         if: runner.os == 'macOS'

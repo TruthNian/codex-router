@@ -1,7 +1,7 @@
 import { AGENT_PAYLOAD_RELAY_TOOL, agentRelayHeaders, agentRelayError, parseAgentRelayResponse } from "./agent-payload-relay.mjs";
 import { compatibilityLayerError } from "./compatibility-layer-state.mjs";
 import { rejectGenerationRedirect } from "./generation-redirect.mjs";
-import { resolveGenerationOutcome, ResponseOutcomeObserver } from "./response-outcome.mjs";
+import { resolveGenerationOutcome, responseOutcomeFromPayload, ResponseOutcomeObserver } from "./response-outcome.mjs";
 import { createGrokRequestTiming, setGrokTimingRequestId } from "./grok-request-timing.mjs";
 import { grokBridgeRequest } from "./grok-request-compat.mjs";
 import { readFileSync } from "node:fs";
@@ -3231,18 +3231,18 @@ async function summarize(request, payload, route, signal, { allowFailover = true
     // Its observed bytes cannot authorize another paid attempt.
     let upstreamOk = sent.upstream.ok;
     let upstreamStatus = sent.upstream.status;
-    let incompleteStream = false;
+    let incompleteGeneration = false;
     if (contentType.includes("text/event-stream")) {
       const unwrapped = responsesSseToResponse(bytes);
       parsed = unwrapped.response;
       if (!parsed) {
-        incompleteStream = sent.upstream.ok;
+        incompleteGeneration = sent.upstream.ok;
         console.error(
           `[codex-router] compaction stream ended without a usable response model=${attemptRoute.slug}` +
             ` events=${unwrapped.summary}${unwrapped.terminalFailed ? " terminal=failed" : ""}`,
         );
         upstreamOk = false;
-        if (incompleteStream) upstreamStatus = 502;
+        if (incompleteGeneration) upstreamStatus = 502;
         parsed = {
           error: {
             message: unwrapped.terminalFailed
@@ -3262,6 +3262,14 @@ async function summarize(request, payload, route, signal, { allowFailover = true
       grokServiceTier: offersGrokServiceTier(attemptRoute),
       grokContextUsage: attemptRoute.provider === GROK_OAUTH_PROVIDER,
     });
+    if (upstreamOk && parsed?.status !== undefined && responseOutcomeFromPayload({
+      type: "response.completed", response: parsed,
+    }) !== "completed") {
+      incompleteGeneration = true;
+      upstreamOk = false;
+      upstreamStatus = 502;
+      parsed = { error: { message: "Compact response did not complete successfully." } };
+    }
     if (upstreamOk) {
       clearProviderCooldown(attemptRoute.provider);
       const answer = extractResponseText(parsed);
@@ -3290,7 +3298,7 @@ async function summarize(request, payload, route, signal, { allowFailover = true
     // compaction the router rescued would leave no trace of the provider that
     // could not serve it.
     failed.push({ route: attemptRoute, status: upstreamStatus, usage });
-    if (incompleteStream) {
+    if (incompleteGeneration) {
       return {
         ...(last ?? {
           ok: false, status: 502, payload: parsed, usage,

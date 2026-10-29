@@ -2864,6 +2864,8 @@ test("routed compaction requires a successful terminal before replacing history"
   let source;
   let submissions = 0;
   let quotaRefusal;
+  let jsonReply = false;
+  let jsonStatus;
   const gateway = await mockServer(async (request, response) => {
     const body = await bodyJson(request);
     submissions += 1;
@@ -2878,6 +2880,14 @@ test("routed compaction requires a successful terminal before replacing history"
       } else {
         json(response, 200, { output_text: "A complete fallback summary." });
       }
+      return;
+    }
+    if (jsonReply) {
+      json(response, 200, {
+        output_text: "PARTIAL_COMPACTION_JSON",
+        usage: { input_tokens: 37, output_tokens: 3 },
+        ...(jsonStatus === undefined ? {} : { status: jsonStatus }),
+      });
       return;
     }
     response.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -2938,6 +2948,31 @@ test("routed compaction requires a successful terminal before replacing history"
       }
     }
     assert.equal(submissions, 28);
+    jsonReply = true;
+    for (jsonStatus of ["incomplete", "failed", "in_progress", "cancelled", "unknown", "completed", undefined]) {
+      for (const v1 of [false, true]) {
+        const before = submissions;
+        const response = await fetch(`${routerBase(routerPort)}/responses${v1 ? "/compact" : ""}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "deepseek/deepseek-v4-pro", input: [
+            { type: "message", role: "user", content: [{ type: "input_text", text: "Preserve the actual task." }] },
+            ...(!v1 ? [{ type: "compaction_trigger" }] : []),
+          ] }),
+        });
+        const text = await response.text();
+        const valid = jsonStatus === undefined || jsonStatus === "completed";
+        assert.equal(response.status, valid ? 200 : 502, `JSON ${jsonStatus}: ${text}`);
+        assert.equal(submissions - before, 1, "an explicit incomplete status cannot authorize replay");
+        if (!valid) {
+          assert.doesNotMatch(text, /kcr2:|BEGIN_CODEX_ROUTER_CHECKPOINT|PARTIAL_COMPACTION_JSON/);
+          const events = await waitForUsageEvents(stateDir, submissions, router);
+          assert.equal(events.at(-1).inputTokens, 37);
+          assert.equal(events.at(-1).outputTokens, 3);
+          assert.equal(events.at(-1).generationOutcome, "failed");
+        }
+      }
+    }
+    jsonReply = false;
     // Explicit HTTP refusals keep their original status and intentional fallback,
     // regardless of whether the refusal body is JSON or SSE.
     for (quotaRefusal of ["sse", "json"]) {

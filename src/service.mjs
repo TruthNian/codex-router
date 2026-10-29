@@ -9,7 +9,7 @@ import { waitForServiceReadiness } from "./service-readiness.mjs";
 import { withServiceOperationLock } from "./service-operation-lock.mjs";
 import { environmentProxyOptedIn } from "./proxy-environment.mjs";
 import { serviceAppConnectorEnvironment } from "./app-connector-policy.mjs";
-import { runOperationProcessTree, runProcessTree } from "./process-tree.mjs";
+import { runProcessTree } from "./process-tree.mjs";
 
 const platform = process.env.CODEX_ROUTER_SERVICE_PLATFORM || process.platform;
 const script = {
@@ -89,11 +89,13 @@ export async function runServiceCommandUnlocked(
       "The service operation deadline cannot preserve its platform and 300-second readiness allowances.",
     );
   }
-  const runPlatform = operationDeadline === undefined ? runProcessTree : runOperationProcessTree;
-  const result = await runPlatform(
+  // Platform controllers spawn ordinary OS commands, not nested controlled
+  // process groups. One tree owner is sufficient; do not consume a second
+  // cleanup reservation from short read-only status budgets.
+  const result = await runProcessTree(
     process.execPath,
     [path.join(SOURCE_ROOT, "src", script), ...args],
-    { stdio: "inherit", env: childEnvironment, deadline: operationDeadline, childMayOwnProcessTrees: true },
+    { stdio: "inherit", env: childEnvironment, deadline: operationDeadline },
   );
   if (result.status !== 0) return result.status ?? 1;
   // A server that was already running is external and stopManagedOllama() is

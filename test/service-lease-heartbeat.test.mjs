@@ -37,7 +37,7 @@ test("platform command waiting keeps the service lease alive past its stale peri
     await assert.rejects(withServiceOperationLock(async () => "overlap", { stateDir: root, staleMs: 2_000, waitMs: 1 }), /still running/);
     assert.equal(calls.length, 1);
     assert.equal(calls[0][2].stdio, "inherit");
-    assert.equal(calls[0][2].childMayOwnProcessTrees, true);
+    assert.equal(calls[0][2].childMayOwnProcessTrees, undefined);
   } finally {
     releaseCommand();
     assert.equal(await first, 0);

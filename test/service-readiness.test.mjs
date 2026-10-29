@@ -333,7 +333,7 @@ test("the service delegates its full readiness budget to the guarded wait", () =
   assert.match(source, /CODEX_ROUTER_OPERATION_DEADLINE_MS/);
   assert.match(
     source,
-    /\[path\.join\(SOURCE_ROOT, "src", script\), \.\.\.args\],[\s\S]{0,100}\{ stdio: "inherit", env: childEnvironment, deadline: operationDeadline, childMayOwnProcessTrees: true \}/,
+    /\[path\.join\(SOURCE_ROOT, "src", script\), \.\.\.args\],[\s\S]{0,100}\{ stdio: "inherit", env: childEnvironment, deadline: operationDeadline \}/,
   );
   assert.doesNotMatch(source, /waitForRouterHealth/);
 });

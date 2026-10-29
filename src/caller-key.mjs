@@ -26,6 +26,7 @@ import { CALLER_SECRET_PATH, PORTS } from "./paths.mjs";
 import { assertStateOwnership } from "./state-owner.mjs";
 import { ROUTED_HARNESS_IDS, routedHarnesses } from "./routed-harness-catalog.mjs";
 import { operationDeadlineFromEnvironment, runOperationProcessTree, runProcessTree } from "./process-tree.mjs";
+import { assertKnownServiceStatus } from "./service-status.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const refreshCommand = Object.freeze({
@@ -164,13 +165,15 @@ export async function readRouterServiceStatus({ runNode = runNodeCommand } = {})
 }
 
 export function managedServiceIsRunning(service) {
-  if (service?.installed !== true) return false;
+  service = assertKnownServiceStatus(service);
   // All platform status renderers expose `loaded` as the service manager's
   // process-ownership signal. Linux names that state `active`, while launchd
   // can keep a job loaded through waiting, spawning, or shutdown transitions.
-  // Retain the named running states for older callers and deterministic
-  // fixtures that predate the shared `loaded` field.
-  return service.loaded === true || service.state === "running" || service.state === "active";
+  // The shared snapshot validator rejects unknown or contradictory facts
+  // before the caller can rotate a secret or recover a generation.
+  // A manager may retain a loaded job after its definition was removed.
+  // Registration presence must not override that positive ownership evidence.
+  return service.loaded;
 }
 
 async function validModelList(response) {

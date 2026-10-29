@@ -151,15 +151,14 @@ see [Desktop readback proofs](tool-result-readback-proof.md),
 
 ```sh
 node scripts/measure-tool-result-aging.mjs /path/to/rollout.jsonl
-node scripts/aging-benchmark.mjs
 ```
 
-The first estimates context savings from a rollout without provider calls.
-The second reports recorded savings. Byte reductions are not a promised
+This estimates context savings from a rollout without provider calls.
+Byte reductions are not a promised
 reduction in billed tokens: readback requests and changed prompt-cache prefixes
 can offset them. Use provider-reported usage and task correctness to judge the
-effect. See the [benchmark guide](tool-result-aging-benchmark.md) for a live A/B
-procedure that consumes quota.
+effect. See the [measurement guide](tool-result-aging-benchmark.md) for the
+limits of the estimate and the provider-reported usage fields.
 
 ## Managed configuration and caller keys
 

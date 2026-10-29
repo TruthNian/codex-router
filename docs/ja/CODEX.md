@@ -130,7 +130,6 @@ Windows Desktop と WSL を併用する場合は、`CODEX_HOME` と `CODEX_ROUTE
 ./bin/model-router codex skills approve-external codex-router
 ./bin/model-router codex skills revoke-external codex-router
 node scripts/measure-tool-result-aging.mjs /path/to/rollout.jsonl
-node scripts/aging-benchmark.mjs
 ```
 
 インストール済み skill の API 記述が現在のランタイムに対応します。保存による効果は実際の請求トークンとタスク結果で評価します。読取要求、キャッシュ変更、追加モデル呼び出しも総消費に影響します。

@@ -1,12 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("usage events persist only bounded request metadata in a private file", async () => {
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "model-router-usage-"));
@@ -409,50 +406,6 @@ test("RTK compaction shaping contributes savings without being reported as aged"
     else process.env.MODEL_ROUTER_STATE_DIR = previousStateDir;
     rmSync(stateDir, { recursive: true, force: true });
     if (usage) rmSync(usage.USAGE_EVENTS_PATH, { force: true });
-  }
-});
-
-test("the aging benchmark classifies shaped-only turns as compacted", () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "model-router-aging-benchmark-"));
-  const eventsPath = path.join(directory, "usage-events.jsonl");
-  const reportPath = path.join(directory, "report.json");
-  const event = {
-    meteringVersion: 1,
-    at: "2026-08-24T00:00:00.000Z",
-    model: "deepseek/deepseek-v4-pro",
-    provider: "deepseek",
-    status: 200,
-    durationMs: 10,
-    inputTokens: 700_000,
-    cachedInputTokens: 350_000,
-    toolResultsShaped: 2,
-    toolResultBytesSaved: 100_000,
-    toolResultShapeBytesSaved: 100_000,
-  };
-  writeFileSync(
-    eventsPath,
-    `${JSON.stringify(event)}\n${JSON.stringify({ ...event, at: "2026-08-24T00:01:00.000Z" })}\n`,
-    "utf8",
-  );
-  try {
-    const result = spawnSync(
-      process.execPath,
-      [path.join(root, "scripts", "aging-benchmark.mjs"), "--json", reportPath],
-      {
-        cwd: root,
-        env: { ...process.env, MODEL_ROUTER_USAGE_EVENTS: eventsPath },
-        encoding: "utf8",
-      },
-    );
-    assert.equal(result.status, 0, result.stderr);
-    const report = JSON.parse(readFileSync(reportPath, "utf8"));
-    assert.equal(report.saved[0].resultsAged, 0);
-    assert.equal(report.saved[0].resultsShaped, 2);
-    assert.deepEqual(report.cache.map((turn) => turn.kind), ["fresh", "stable"]);
-    assert.equal(report.summary.cacheRate.unaged, null);
-    assert.equal(report.summary.cacheRate.agedTurnsMeasured, 2);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
   }
 });
 

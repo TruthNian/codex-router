@@ -2817,6 +2817,7 @@ function responsesSseToResponse(bytes) {
   flush();
 
   let completed;
+  let reportedUsage;
   const outcome = new ResponseOutcomeObserver();
   const events = new Map();
   for (const payload of payloads) {
@@ -2829,6 +2830,10 @@ function responsesSseToResponse(bytes) {
     const type = typeof event?.type === "string" ? event.type : "unknown";
     events.set(type, (events.get(type) || 0) + 1);
     outcome.observe(event);
+    const eventUsage = event?.response?.usage ?? event?.usage;
+    if (eventUsage && typeof eventUsage === "object" && !Array.isArray(eventUsage)) {
+      reportedUsage = eventUsage;
+    }
     if (
       (type === "response.completed" || type === "response.done")
       && event.response && typeof event.response === "object"
@@ -2841,6 +2846,7 @@ function responsesSseToResponse(bytes) {
   const terminalFailed = ["failed", "incomplete", "canceled"].includes(outcome.outcome());
   return {
     response: outcome.outcome() === "completed" ? completed : undefined,
+    reportedUsage,
     summary,
     terminalFailed,
   };
@@ -3227,6 +3233,7 @@ async function summarize(request, payload, route, signal, { allowFailover = true
     }
     const contentType = String(sent.upstream.headers.get("content-type") || "");
     let parsed;
+    let usagePayload;
     // An unsuccessful generation terminal is different from an HTTP refusal.
     // Its observed bytes cannot authorize another paid attempt.
     let upstreamOk = sent.upstream.ok;
@@ -3235,6 +3242,8 @@ async function summarize(request, payload, route, signal, { allowFailover = true
     if (contentType.includes("text/event-stream")) {
       const unwrapped = responsesSseToResponse(bytes);
       parsed = unwrapped.response;
+      // Billing evidence survives even when partial output cannot be used.
+      usagePayload = parsed ?? { usage: unwrapped.reportedUsage };
       if (!parsed) {
         incompleteGeneration = sent.upstream.ok;
         console.error(
@@ -3258,7 +3267,7 @@ async function summarize(request, payload, route, signal, { allowFailover = true
     // provider sends one) is already in hand. `tokenUsageFromPayload` returns
     // undefined when it is absent, and `recordUsageEvent` then omits the token
     // fields entirely rather than metering an invented zero.
-    const usage = tokenUsageFromPayload(parsed, {
+    const usage = tokenUsageFromPayload(usagePayload ?? parsed, {
       grokServiceTier: offersGrokServiceTier(attemptRoute),
       grokContextUsage: attemptRoute.provider === GROK_OAUTH_PROVIDER,
     });

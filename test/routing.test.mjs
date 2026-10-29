@@ -2909,6 +2909,7 @@ test("routed compaction requires a successful terminal before replacing history"
   });
   const terminal = (status) => ({ type: "response.completed", response: {
     id: "resp_summary", status,
+    usage: { input_tokens: 37, output_tokens: 3 },
     output: [{ type: "message", content: [{ type: "output_text", text: "A complete summary." }] }],
   } });
   const delta = { type: "response.output_text.delta", delta: "A partial summary" };
@@ -2922,6 +2923,8 @@ test("routed compaction requires a successful terminal before replacing history"
       [[delta, terminal("unknown")], 502],
       [[delta, { type: "response.completed", response: [] }], 502],
       [[delta, { type: "response.cancelled" }], 502],
+      [[delta, { type: "response.incomplete", response: { status: "incomplete", usage: { input_tokens: 37, output_tokens: 3 } } }], 502],
+      [[delta, { type: "response.usage", usage: { input_tokens: 37, output_tokens: 3 } }], 502],
       [[delta, { type: "error", error: { message: "synthetic failure" } }], 502],
       [[delta, { type: "response.failed" }, terminal("completed")], 502],
       [[delta, terminal("completed")], 200],
@@ -2944,10 +2947,17 @@ test("routed compaction requires a successful terminal before replacing history"
         const text = await response.text();
         assert.equal(response.status, expected, text);
         assert.equal(submissions - before, 1, "partial generation diagnostics cannot authorize replay");
-        if (expected !== 200) assert.doesNotMatch(text, /kcr2:|BEGIN_CODEX_ROUTER_CHECKPOINT/);
+        if (expected !== 200) {
+          assert.doesNotMatch(text, /kcr2:|BEGIN_CODEX_ROUTER_CHECKPOINT/);
+          if (events.some((event) => event.response?.usage || event.usage)) {
+            const metered = await waitForUsageEvents(stateDir, submissions, router);
+            assert.equal(metered.at(-1).inputTokens, 37);
+            assert.equal(metered.at(-1).outputTokens, 3);
+            assert.equal(metered.at(-1).generationOutcome, "failed");
+          }
+        }
       }
     }
-    assert.equal(submissions, 28);
     jsonReply = true;
     for (jsonStatus of ["incomplete", "failed", "in_progress", "cancelled", "unknown", "completed", undefined]) {
       for (const v1 of [false, true]) {

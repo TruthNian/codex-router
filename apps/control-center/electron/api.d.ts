@@ -36,7 +36,6 @@ export interface HarnessDescriptor {
     | "nousresearch";
   description: string;
   cliInstalled: boolean;
-  cliVersion?: string;
   appInstalled: boolean;
   configured: boolean;
   canInstall: boolean;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -133,5 +133,5 @@ test("Windows public wrapper preserves the private script's source root and exit
   writeFileSync(path.join(root, "src/router-commands-windows.ps1"), "[Console]::Out.Write((Split-Path -Parent $PSScriptRoot)); exit 75\n");
   const result = spawnSync(path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe"), ["-NoLogo", "-NoProfile", "-File", publicPath, "tray", "status"], { encoding: "utf8", timeout: 10_000, windowsHide: true });
   assert.equal(result.status, 75, result.stderr);
-  assert.equal(result.stdout, root);
+  assert.equal(realpathSync.native(result.stdout), realpathSync.native(root));
 });

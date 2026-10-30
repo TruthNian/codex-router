@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { posixShell } from "./helpers/posix-shell.mjs";
 
 // Exercise the builder's actual UI subshell without invoking Swift, npm ci,
 // browser downloads, or packaging. Its parent owns `set -eu` and these paths.
@@ -12,6 +13,7 @@ const start = source.indexOf('(\n  cd "$control_center_dir"\n');
 const end = source.indexOf("\nelectron_output=", start);
 assert.ok(start >= 0 && end > start, "locate the native builder's UI subshell");
 const uiBuild = source.slice(start, end);
+const shell = posixShell();
 
 function fixture(t, { explicitCache = false, installStatus = 0 } = {}) {
   const directory = mkdtempSync(path.join(os.tmpdir(), "native-ui-browser-"));
@@ -44,7 +46,7 @@ function fixture(t, { explicitCache = false, installStatus = 0 } = {}) {
     ${uiBuild}
     printf '%s' "\${PLAYWRIGHT_BROWSERS_PATH-unset}"
   `;
-  const result = spawnSync("sh", ["-c", script], { env: environment, encoding: "utf8", timeout: 10_000 });
+  const result = spawnSync(shell, ["-c", script], { env: environment, encoding: "utf8", timeout: 10_000 });
   assert.equal(result.error, undefined, result.error?.message);
   const fields = readFileSync(log, "utf8").split("\0");
   assert.equal(fields.pop(), "");
@@ -57,7 +59,7 @@ function fixture(t, { explicitCache = false, installStatus = 0 } = {}) {
 }
 
 for (const explicitCache of [false, true]) {
-  test(`native UI setup installs the locked shell before testing (${explicitCache ? "explicit" : "generated"} cache)`, (t) => {
+  test(`native UI setup installs the locked shell before testing (${explicitCache ? "explicit" : "generated"} cache)`, { skip: !shell && "A POSIX shell is unavailable." }, (t) => {
     const { result, calls, project, chosenCache, expectedCache } = fixture(t, { explicitCache });
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(calls.map(({ command }) => command), [
@@ -74,7 +76,7 @@ for (const explicitCache of [false, true]) {
   });
 }
 
-test("native UI setup stops before tests and packaging when shell installation fails", (t) => {
+test("native UI setup stops before tests and packaging when shell installation fails", { skip: !shell && "A POSIX shell is unavailable." }, (t) => {
   const { result, calls } = fixture(t, { installStatus: 23 });
   assert.equal(result.status, 23, result.stderr);
   assert.deepEqual(calls.map(({ command }) => command), [

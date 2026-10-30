@@ -841,12 +841,11 @@ test("the documented rollback behaviour matches the exit-2 contract", () => {
     path.join(root, "docs-site", "src", "content", "docs", "reference", "install.md"),
     "utf8",
   );
-  for (const source of [docs, site]) {
-    assert.match(source, /exits 2/);
-    assert.match(source, /the update is kept/);
-    assert.match(source, /leaving HEAD\s+detached at that commit/);
-    assert.match(source, /switches\s+back to `main` before fetching/);
-  }
+  assert.match(docs, /exits 2/);
+  assert.match(docs, /the update is kept/);
+  assert.match(docs, /leaving HEAD\s+detached at that commit/);
+  assert.match(docs, /switches\s+back to `main` before fetching/);
+  assert.match(site, /\[installation reference\]\(https:\/\/github\.com\/duolahypercho\/codex-router\/blob\/main\/docs\/INSTALL\.md\)/);
 });
 
 // The skill-pack install is best-effort and must never roll the router back.

@@ -1,0 +1,1 @@
+- Replace oversized, contradictory global instructions and copied site guides with concise boundaries and canonical documentation; remove obsolete unreferenced feature-gap plans.

@@ -44,6 +44,7 @@ trap 'exit 143' TERM
 brew tap-new --no-git "$tap_name" >/dev/null
 tap_root=$(brew --repository "$tap_name")
 cp "$formula_path" "$tap_root/Formula/codex-router.rb"
+brew trust --formula "$tap_name/codex-router"
 
 # Homebrew applies additional formula rules only when the path belongs to an
 # official tap. The temporary third-party tap below is still needed for install

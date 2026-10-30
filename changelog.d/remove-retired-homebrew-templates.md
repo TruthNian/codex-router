@@ -1,1 +1,1 @@
-- Remove the retired Homebrew formula template, URL-only updater, and copied tap CI example. The maintained Formula, lock-aware generator, checks, and release publishing path remain unchanged.
+- Remove the retired Homebrew formula template, URL-only updater, and copied tap CI example. Keep the maintained Formula, lock-aware generator, and release publishing path; readiness checks trust only their freshly copied temporary formula before auditing or installing it.

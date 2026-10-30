@@ -68,7 +68,7 @@ for (const explicitCache of [false, true]) {
     ]);
     for (const call of calls) {
       // Resolve logical links such as macOS /var before comparing directories.
-      assert.equal(realpathSync(call.cwd), realpathSync(project));
+      assert.equal(realpathSync.native(call.cwd), realpathSync.native(project));
     }
     assert.equal(calls[0].cache, explicitCache ? chosenCache : null);
     for (const call of calls.slice(1)) assert.equal(path.resolve(call.cache), expectedCache);

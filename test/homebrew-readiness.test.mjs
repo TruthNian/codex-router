@@ -83,7 +83,7 @@ brew() {
     if (existsSync(path.join(root, "config-scopes"))) {
       const scopes = readFileSync(path.join(root, "config-scopes"), "utf8").trim().split("\n").map(line => line.split("|")[1]);
       assert.equal(new Set(scopes).size, 1, "trust and subsequent brew commands must share one configuration");
-      assert.equal(realpathSync(path.dirname(scopes[0])), realpathSync(path.join(root, "tmp")));
+      assert.equal(realpathSync.native(path.dirname(scopes[0])), realpathSync.native(path.join(root, "tmp")));
       assert.ok(path.basename(scopes[0]).startsWith("codex-router-homebrew-core."));
     }
     if (existsSync(path.join(root, "trust-path"))) {

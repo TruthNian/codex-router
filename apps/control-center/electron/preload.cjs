@@ -17,6 +17,7 @@ const routerControl = Object.freeze({
     call("discoverProviderModels", { providerId, refresh: Boolean(options?.refresh) }),
   getAccountUsage: () => call("getAccountUsage"),
   getProviderUsage: () => call("getProviderUsage"),
+  getFreePool: () => call("getFreePool"),
   getLocalModels: () => call("getLocalModels"),
   getVisionBridge: () => call("getVisionBridge"),
   getToolResultAging: () => call("getToolResultAging"),

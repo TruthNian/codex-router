@@ -792,6 +792,52 @@ export interface ContextSessionsSnapshot {
   };
 }
 
+export interface FreePoolMember {
+  position: number;
+  slug: string;
+  upstreamModel: string;
+  lane: "kilo" | "opencode";
+  self: boolean;
+  enabled: boolean;
+  contextWindow?: number;
+  drained: boolean;
+  drainedUntil?: string;
+  drainReason?: string;
+  drainStatus?: number;
+  remainingMs?: number;
+}
+
+export interface FreePoolUsageRow {
+  at: string;
+  model: string;
+  status?: number;
+  failoverFrom?: string;
+  reason?: string;
+  inputTokens: number;
+  outputTokens: number;
+  requestId?: string;
+}
+
+export interface FreePoolStatus {
+  pool: string;
+  available: boolean;
+  enabled?: boolean;
+  catalog: { source: "live" | "static"; fetchedAt?: string; kilo: number; opencode: number };
+  members: FreePoolMember[];
+  usage: {
+    requests: number;
+    attempts: number;
+    served: number;
+    errors: number;
+    fallbacks: number;
+    exhausted: number;
+    inputTokens: number;
+    outputTokens: number;
+    byMember: Array<{ model: string; requests: number; served: number; failed: number; inputTokens: number; outputTokens: number }>;
+    recent: FreePoolUsageRow[];
+  };
+}
+
 export interface RouterControlApi {
   setInterfaceLanguage?(language: import("./i18n").LanguageId): void;
   readonly platform: string;
@@ -806,6 +852,7 @@ export interface RouterControlApi {
   discoverProviderModels(provider: string, options?: { refresh?: boolean }): Promise<ProviderCatalog>;
   getAccountUsage(): Promise<AccountUsage>;
   getProviderUsage(): Promise<ProviderUsageSnapshot>;
+  getFreePool?(): Promise<FreePoolStatus>;
   getLocalModels(): Promise<LocalModelsSnapshot>;
   getVisionBridge(): Promise<VisionBridgeSnapshot>;
   getToolResultAging(): Promise<ToolResultAgingSnapshot>;

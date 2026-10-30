@@ -832,6 +832,42 @@ async function printProviderUsage() {
   process.stdout.write(`${JSON.stringify(await providerUsageSnapshot(), null, 2)}\n`);
 }
 
+// free/auto's local status: members, drains, the cached catalog, and the
+// pool's usage rows. Everything is read from this machine's state directory.
+async function handleFreePool(action = "status") {
+  const freePool = await import("./free-pool.mjs");
+  if (action === "status") {
+    const { recentUsageEvents } = await import("./usage-events.mjs");
+    const { readProviderSelection } = await import("./provider-selection.mjs");
+    const enabled = new Set(readProviderSelection());
+    const status = freePool.freePoolStatus({
+      events: recentUsageEvents({ sinceMs: 7 * 24 * 60 * 60 * 1000, limit: Number.POSITIVE_INFINITY }),
+      providerEnabled: (id) => enabled.has(id),
+    });
+    process.stdout.write(`${JSON.stringify({ ...status, enabled: enabled.has("free") }, null, 2)}\n`);
+    return;
+  }
+  if (action === "refresh") {
+    const result = await freePool.refreshFreePoolCatalog();
+    process.stdout.write(`${JSON.stringify({
+      written: result.written,
+      fetchedAt: result.fetchedAt,
+      kilo: result.kilo.map((entry) => entry.id),
+      opencode: result.opencode.map((entry) => entry.id),
+      errors: result.errors,
+      note: "Restart the router (./bin/model-router restart) for a changed member list to take effect.",
+    }, null, 2)}\n`);
+    if (!result.written) process.exitCode = 1;
+    return;
+  }
+  if (action === "reset") {
+    freePool.clearAllFreePoolDrains();
+    process.stdout.write(`${JSON.stringify({ drains: 0 })}\n`);
+    return;
+  }
+  throw new Error("Usage: control free-pool status|refresh|reset");
+}
+
 async function printProviderOnboarding() {
   const { providerOnboardingSnapshot } = await import("./provider-onboarding.mjs");
   process.stdout.write(`${JSON.stringify(providerOnboardingSnapshot(), null, 2)}\n`);
@@ -3660,6 +3696,8 @@ if (args.includes("--probe")) {
   await printAccountUsage();
 } else if (args[0] === "provider-usage") {
   await printProviderUsage();
+} else if (args[0] === "free-pool") {
+  await handleFreePool(args[1] || "status");
 } else if (args[0] === "providers") {
   await printProviderOnboarding();
 } else if (args[0] === "generic-providers") {

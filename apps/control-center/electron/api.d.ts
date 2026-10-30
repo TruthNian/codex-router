@@ -172,6 +172,7 @@ export interface RouterControl {
   discoverProviderModels(provider: string, options?: { refresh?: boolean }): Promise<unknown>;
   getAccountUsage(): Promise<unknown>;
   getProviderUsage(): Promise<unknown>;
+  getFreePool(): Promise<unknown>;
   getLocalModels(): Promise<unknown>;
   getVisionBridge(): Promise<unknown>;
   getToolResultAging(): Promise<unknown>;

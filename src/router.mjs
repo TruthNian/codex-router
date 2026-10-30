@@ -318,6 +318,18 @@ import { grokStreamStallMs, grokTransportIdleTimeoutMs } from "./grok-stream-tim
 import { zaiCodingStreamStallMs } from "./zai-stream-timeouts.mjs";
 import { localTransportIdleTimeoutMs } from "./local-timeouts.mjs";
 import { handleResponsesWebSocketUpgrade } from "./responses-websocket.mjs";
+import {
+  FREE_POOL_BUDGET_MS,
+  FREE_POOL_SLUG,
+  availableFreePoolRoutes,
+  classifyFreePoolFailure,
+  clearFreePoolDrain,
+  drainFreePoolMember,
+  freePoolExhaustedError,
+  freePoolRefreshDue,
+  isFreePoolModel,
+  refreshFreePoolCatalog,
+} from "./free-pool.mjs";
 
 installStableFetchTransport();
 
@@ -4396,6 +4408,115 @@ async function attemptModelFailover({
   return undefined;
 }
 
+// Walks the rest of the free/auto pool after its current member failed.
+//
+// The same contract as `attemptModelFailover` -- it runs before
+// `pipeResponse` and re-checks `nothingRelayed` before every hop, so a member
+// that has started streaming text is never swapped -- but with the pool's own
+// rules: every member is a candidate, each failed one is drained in the pool's
+// local store (never `provider-cooldowns.json`), and the walk only ends when a
+// member answers, a member rejects the request itself, the budget runs out, or
+// the pool is empty. `onFailed(model, status, reason)` meters each failed hop.
+async function attemptFreePoolFailover({
+  request,
+  response,
+  payload,
+  route,
+  pool,
+  status,
+  reason,
+  signal,
+  normalizedInput,
+  agingEnabled,
+  searchContract,
+  progress,
+  onFailed,
+}) {
+  const startedAt = Date.now();
+  let from = route;
+  for (const model of pool.remaining()) {
+    if (signal.aborted || !nothingRelayed(response)) return undefined;
+    if (Date.now() - startedAt >= FREE_POOL_BUDGET_MS) {
+      logFailover(from, model, reason, status, "free-pool-budget");
+      break;
+    }
+    pool.tried.add(model.slug);
+    let built;
+    let upstream;
+    try {
+      built = await prepareRoutedRequest({
+        request,
+        payload,
+        route: model,
+        normalizedInput,
+        agingEnabled,
+      });
+      if (!routedRequestFits(model, built.body)) {
+        logFailover(from, model, reason, status, "context-too-small");
+        continue;
+      }
+      if (
+        !searchModePreservesSearchContract(built.searchMode, searchContract) ||
+        !routedModelPreservesSearchContract(model, searchContract)
+      ) {
+        logFailover(from, model, reason, status, "search-capability-changed");
+        continue;
+      }
+      progress?.setRoute({ provider: canonicalProviderId(model.provider), model: model.slug });
+      progress?.attempt();
+      upstream = await fetchForRoute(model, built.target, {
+        method: "POST",
+        headers: built.headers,
+        body: built.body,
+        signal,
+      });
+      progress?.headers();
+    } catch (error) {
+      if (signal.aborted) throw error;
+      const compatibilityCode = candidateBuildCompatibilityCode(error);
+      logFailover(
+        from,
+        model,
+        reason,
+        status,
+        compatibilityCode ? `compatibility/${compatibilityCode}` : `transport/${error?.name || "Error"}`,
+      );
+      if (!compatibilityCode) {
+        drainFreePoolMember(model.slug, { ms: 2 * 60_000, reason: "timeout_or_transport", status: 0 });
+        onFailed?.(model, 0, "timeout_or_transport");
+      }
+      continue;
+    }
+    if (upstream.ok) {
+      logFailover(from, model, reason, status, `free-pool/${upstream.status}`);
+      return { route: model, built, upstream };
+    }
+    const hopBodyText = await boundedResponseText(upstream, MAX_BUFFERED_RESPONSE_BYTES, signal);
+    const hopVerdict = classifyFreePoolFailure({
+      status: upstream.status,
+      bodyText: hopBodyText,
+      headers: upstream.headers,
+    });
+    if (!hopVerdict.swap) {
+      // The member read the request and refused it. Another member would most
+      // likely refuse the same body, so this is the answer the caller gets.
+      logFailover(from, model, reason, status, `free-pool-rejected/${upstream.status}`);
+      return { route: model, built, upstream, failedBodyText: hopBodyText };
+    }
+    drainFreePoolMember(model.slug, {
+      ms: hopVerdict.drainMs,
+      reason: hopVerdict.reason,
+      status: upstream.status,
+    });
+    onFailed?.(model, upstream.status, hopVerdict.reason);
+    logFailover(from, model, reason, status, `free-pool-drained/${upstream.status}`);
+    from = model;
+    status = upstream.status;
+    reason = hopVerdict.reason;
+  }
+  return undefined;
+}
+
 // The local answer an idle install gives instead of native forwarding. With
 // discovery disabled the native path is impossible by construction -- the
 // session fallback never reads auth.json -- so traffic that would leave for
@@ -4487,6 +4608,7 @@ async function handleResponses(request, response, requestUrl) {
   let usageRecorded = false;
   let generationOutcome;
   let turnHttpStatus;
+  let freePool;
   const recordTurnUsage = (fields, metadata) => {
     const observer = retryUsageTransform ?? usageTransform;
     generationOutcome = resolveGenerationOutcome({
@@ -4593,6 +4715,33 @@ async function handleResponses(request, response, requestUrl) {
     route = registeredRoute && routeProviderEnabled(registeredRoute.provider)
       ? registeredRoute
       : undefined;
+    // free/auto is one picker entry over many free models. Resolve it here to
+    // the first member that is neither drained nor hidden; the rest are tried
+    // in order below if that one fails before answering.
+    if (route && isFreePoolModel(route)) {
+      diagnostics.freePool = FREE_POOL_SLUG;
+      const members = availableFreePoolRoutes({ providerEnabled: routeProviderEnabled });
+      if (!members.length) {
+        writeJson(response, 429, freePoolExhaustedError());
+        console.error(`[codex-router] free pool exhausted model=${FREE_POOL_SLUG} status=429`);
+        recordTurnUsage({
+          model: FREE_POOL_SLUG,
+          provider: canonicalProviderId(route.provider),
+          status: 429,
+          durationMs: Date.now() - startedAt,
+        }, { ...diagnostics, freePoolReason: "exhausted" });
+        usageRecorded = true;
+        finalStatus = 429;
+        activityStatus = 429;
+        return;
+      }
+      const tried = new Set([members[0].slug]);
+      freePool = {
+        tried,
+        remaining: () => members.filter((model) => !tried.has(model.slug)),
+      };
+      route = members[0];
+    }
     let functionTools;
     if (route) {
       // History already poisoned by #1066 carries a call with empty arguments
@@ -4861,7 +5010,7 @@ async function handleResponses(request, response, requestUrl) {
       // less than the request it avoids. The cooldown expires by itself, so
       // the operator's chosen model comes back without anyone doing anything.
       const settings = readFailoverSettings();
-      const cooled = !exactRouteProbe && settings.enabled
+      const cooled = !exactRouteProbe && !freePool && settings.enabled
         ? providerCooldown(route.provider)
         : undefined;
       if (cooled) {
@@ -5154,7 +5303,72 @@ async function handleResponses(request, response, requestUrl) {
               retryAfterSeconds: retryAfterSeconds(upstream.headers),
             });
       }
-      if (!upstream.ok && verdict.swap && !exactRouteProbe) {
+      const poolVerdict = freePool && !upstream.ok
+        ? classifyFreePoolFailure({
+            status: upstream.status,
+            bodyText: failedBodyText,
+            headers: upstream.headers,
+          })
+        : undefined;
+      if (poolVerdict?.swap) {
+        const firstFailed = route;
+        const firstStatus = upstream.status;
+        drainFreePoolMember(firstFailed.slug, {
+          ms: poolVerdict.drainMs,
+          reason: poolVerdict.reason,
+          status: firstStatus,
+        });
+        // Every failed member is a turn that happened, so each is metered on
+        // its own row; the serving row carries `failoverFrom`.
+        recordTurnUsage({
+          model: firstFailed.slug,
+          provider: canonicalProviderId(firstFailed.provider),
+          status: firstStatus,
+          durationMs: Date.now() - startedAt,
+          responseStartMs: upstreamLatencyMs,
+        }, { ...diagnostics, freePoolReason: poolVerdict.reason });
+        const moved = await attemptFreePoolFailover({
+          progress: activity.progress,
+          request,
+          response,
+          payload,
+          route,
+          pool: freePool,
+          status: firstStatus,
+          reason: poolVerdict.reason,
+          signal: controller.signal,
+          normalizedInput,
+          agingEnabled,
+          searchContract,
+          onFailed: (model, status, reason) => recordTurnUsage({
+            model: model.slug,
+            provider: canonicalProviderId(model.provider),
+            status,
+            durationMs: Date.now() - startedAt,
+          }, { ...diagnostics, freePoolReason: reason }),
+        });
+        if (moved) {
+          adoptRoute(moved.route, moved.built);
+          upstream = moved.upstream;
+          upstreamStatus = upstream.status;
+          failedBodyText = moved.failedBodyText;
+        } else if (nothingRelayed(response) && !controller.signal.aborted) {
+          // The whole pool is drained. Say so plainly, instead of relaying the
+          // last member's error as if it were the only thing that was tried.
+          writeJson(response, 429, freePoolExhaustedError());
+          console.error(`[codex-router] free pool exhausted model=${FREE_POOL_SLUG} status=429 tried=${freePool.tried.size}`);
+          recordTurnUsage({
+            model: FREE_POOL_SLUG,
+            provider: canonicalProviderId(firstFailed.provider),
+            status: 429,
+            durationMs: Date.now() - startedAt,
+          }, { ...diagnostics, freePoolReason: "exhausted" });
+          usageRecorded = true;
+          finalStatus = 429;
+          activityStatus = 429;
+          return;
+        }
+      } else if (!freePool && !upstream.ok && verdict.swap && !exactRouteProbe) {
         // Believe the provider about when it will be back before trying anyone
         // else, so the next turn skips it instead of paying for the same
         // rejection again.
@@ -5206,6 +5420,7 @@ async function handleResponses(request, response, requestUrl) {
     // raised, or a reset time the provider got wrong all end the same way, and
     // a real answer is better evidence than anything on disk.
     if (route && upstream.ok) clearProviderCooldown(route.provider);
+    if (freePool && route && upstream.ok) clearFreePoolDrain(route.slug);
     // The same rule for the native reviewer. Any answer at all clears the
     // window -- including a `deny`, which is a successful HTTP 200 carrying a
     // decision and must never be read as the provider failing (#787).
@@ -6956,6 +7171,17 @@ server.requestTimeout = 0;
 applyKeepAliveTimeouts(server);
 server.listen(LISTEN_PORT, LISTEN_HOST, () => {
   console.error("[codex-router] listening");
+  // Background only: a turn never waits on the free catalog. The members it
+  // finds are routable after the next restart (`./bin/control free-pool
+  // refresh` says so), because every routing process loads them at startup.
+  if (freePoolRefreshDue()) {
+    refreshFreePoolCatalog()
+      .then((result) => console.error(
+        `[codex-router] free pool catalog refreshed kilo=${result.kilo.length} opencode=${result.opencode.length}` +
+          (result.errors.length ? ` errors=${result.errors.length}` : ""),
+      ))
+      .catch((error) => console.error(`[codex-router] free pool catalog refresh failed: ${error?.message || error}`));
+  }
 });
 
 installGracefulShutdown(server, { label: "codex-router" });

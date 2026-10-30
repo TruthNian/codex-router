@@ -1589,6 +1589,8 @@ export function registerIpcHandlers({
     ["provider-usage"],
     { timeoutMs: PROVIDER_USAGE_TIMEOUT_MS },
   ));
+  // free/auto's members, drains and local usage rows; read-only and local.
+  handle("getFreePool", async () => runJson(["free-pool", "status"], { timeoutMs: 20_000 }));
   handle("getLocalModels", async () => runJson(["local-models", "list", "--json"], { timeoutMs: 20_000 }));
   handle("getVisionBridge", async () => runJson(["vision-bridge", "status"], { timeoutMs: 20_000 }));
   handle("getToolResultAging", async () => runJson(["tool-result-aging", "status"], { timeoutMs: 20_000 }));
@@ -2226,9 +2228,9 @@ export function registerIpcHandlers({
         pending: true,
       };
     } catch (error) {
-      if (loginFinalization) {
-        try { await loginFinalization; } catch {}
-      } else {
+      // An attached writer already owns finalization, queued after this
+      // mutation. Leave its attempt intact and release the queue so it can run.
+      if (!loginFinalization) {
         releaseSubscriptionLogin(id);
         try {
           // Synchronous validation can fail after reservation but before a
@@ -2245,8 +2247,8 @@ export function registerIpcHandlers({
             homesDir: path.dirname(profileHome),
           });
         } catch {}
+        subscriptionLoginAttempts.delete(id);
       }
-      subscriptionLoginAttempts.delete(id);
       throw error;
     }
   });

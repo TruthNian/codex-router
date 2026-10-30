@@ -311,6 +311,15 @@ const OPENCODE_FREE_WITHDRAWN = Object.freeze([
   "nemotron-3-ultra-free",
 ]);
 
+// Whether Zen refuses this free id to every client but its own, or has
+// withdrawn it. free/auto's OpenCode lane leaves these out: a member that
+// cannot answer its first request would only cost each turn a wasted hop, and
+// getting past the client gate is not something this repository does.
+export function openCodeFreeIdRefused(upstreamModel) {
+  return OPENCODE_FREE_CLIENT_GATED.includes(upstreamModel) ||
+    OPENCODE_FREE_WITHDRAWN.includes(upstreamModel);
+}
+
 function clientGatedReason(upstreamModel) {
   return (
     `OpenCode serves ${upstreamModel} only to its own client: the same request from this `

@@ -414,6 +414,35 @@ const bridgeSource = String.raw`
         summary: { lifetimeTokens: 24000, peakDailyTokens: 24000, currentStreakDays: 1 },
       };
     },
+    getFreePool: async () => ({
+      pool: "free/auto",
+      available: true,
+      enabled: true,
+      catalog: { source: "static", kilo: 2, opencode: 1 },
+      members: [
+        { position: 1, slug: "free/auto", upstreamModel: "kilo-auto/free", lane: "kilo", self: true, enabled: true, drained: true, drainedUntil: new Date(Date.now() + 9 * 60_000).toISOString(), drainReason: "rate_limited", drainStatus: 429, remainingMs: 9 * 60_000 },
+        { position: 2, slug: "free/fixture-lightning", upstreamModel: "fixture/lightning:free", lane: "kilo", self: false, enabled: true, drained: false },
+        { position: 3, slug: "free-opencode/fixture-pickle", upstreamModel: "fixture-pickle", lane: "opencode", self: false, enabled: true, drained: false },
+      ],
+      usage: {
+        requests: 1,
+        attempts: 2,
+        served: 1,
+        errors: 1,
+        fallbacks: 1,
+        exhausted: 0,
+        inputTokens: 1200,
+        outputTokens: 34,
+        byMember: [
+          { model: "free/auto", requests: 1, served: 0, failed: 1, inputTokens: 0, outputTokens: 0 },
+          { model: "free/fixture-lightning", requests: 1, served: 1, failed: 0, inputTokens: 1200, outputTokens: 34 },
+        ],
+        recent: [
+          { at: new Date(Date.now() - 60_000).toISOString(), model: "free/fixture-lightning", status: 200, failoverFrom: "free/auto", inputTokens: 1200, outputTokens: 34 },
+          { at: new Date(Date.now() - 61_000).toISOString(), model: "free/auto", status: 429, reason: "rate_limited", inputTokens: 0, outputTokens: 0 },
+        ],
+      },
+    }),
     getProviderUsage: async () => {
       providerUsageReads += 1;
       const read = providerUsageReads;
@@ -1200,6 +1229,49 @@ test("the production renderer exposes model discovery and picker actions", { tim
     );
     assert.deepEqual(corruptPoolErrors, []);
     await corruptPoolPage.close();
+    assert.deepEqual(pageErrors, [], `renderer errors: ${pageErrors.join("; ")}`);
+  } finally {
+    await browser.close();
+    await close();
+  }
+});
+
+test("the Usage page shows the free/auto pool: members, drains, and the backend that served", { timeout: 120_000 }, async () => {
+  assert.equal(existsSync(path.join(dist, "index.html")), true, "npm test must build the renderer first");
+
+  const { url, close } = await serveRenderer();
+  const browser = await chromium.launch({
+    executablePath: chromiumPath,
+    headless: true,
+    args: process.platform === "linux" ? ["--no-sandbox"] : [],
+  });
+  const pageErrors = [];
+  try {
+    const page = await newEnglishTestPage(browser, { viewport: { width: 1280, height: 840 } });
+    page.setDefaultTimeout(10_000);
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") pageErrors.push(message.text());
+    });
+
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForFunction(() => window.routerControlTest.navigationReady());
+    assert.equal(
+      await page.evaluate(() => window.routerControlTest.navigate({ destination: "usage", sourceId: "openai" })),
+      true,
+    );
+    const panel = page.locator('section[aria-label="Free Auto pool"]');
+    await panel.waitFor();
+    await panel.getByText(/^1 of 3 drained$/i).waitFor();
+    const members = panel.locator('[aria-label="Backend models, in try order"] [role="listitem"]');
+    assert.equal(await members.count(), 3);
+    assert.match(await members.nth(0).innerText(), /kilo-auto\/free[\s\S]*Drained 9m \(rate_limited, 429\)/i);
+    assert.match(await members.nth(1).innerText(), /fixture\/lightning:free[\s\S]*1 served[\s\S]*Ready/i);
+    assert.match(await members.nth(2).innerText(), /OpenCode Zen/);
+    const recent = panel.locator('[aria-label="Recent attempts"] [role="listitem"]');
+    assert.equal(await recent.count(), 2);
+    assert.match(await recent.nth(0).innerText(), /free\/fixture-lightning[\s\S]*200[\s\S]*Fallback from free\/auto[\s\S]*1\.2k in \/ 34 out/);
+    assert.match(await recent.nth(1).innerText(), /429[\s\S]*Drained: rate_limited/);
     assert.deepEqual(pageErrors, [], `renderer errors: ${pageErrors.join("; ")}`);
   } finally {
     await browser.close();

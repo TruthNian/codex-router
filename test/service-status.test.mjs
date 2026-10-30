@@ -106,7 +106,7 @@ test("conclusive stopped and loaded observations remain distinct", async () => {
 test("Windows Ready status needs a complete launcher observation and retains known stopped and running controls", async () => {
   const source = readFileSync(new URL("../src/service-windows.mjs", import.meta.url), "utf8");
   const start = source.indexOf("async function taskRunning(");
-  const end = source.indexOf("\nif (\n", start);
+  const end = source.indexOf("\nif (", start);
   assert.ok(start >= 0 && end > start);
   for (const [name, output, state] of [
     ["incomplete", "1|267009", "unknown"],

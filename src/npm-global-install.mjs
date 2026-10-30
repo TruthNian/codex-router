@@ -18,7 +18,7 @@ import { inheritedProxyEnvironment } from "./proxy-environment.mjs";
 // nor a terminal's.
 export function spawnEnvironment(
   environment = process.env,
-  { recorded, manifestPath, execArgv = process.execArgv } = {},
+  { recorded, manifestPath, execArgv = process.execArgv, platform = process.platform } = {},
 ) {
   // Provider CLIs are launched by tray/control processes, not only by the
   // background service. A desktop launch can inherit neither the proxy address
@@ -33,12 +33,19 @@ export function spawnEnvironment(
   });
   const effectiveEnvironment = { ...environment, ...restoredProxy };
   const nodeDir = path.dirname(process.execPath);
-  const existing = effectiveEnvironment.PATH || "";
-  if (existing.split(path.delimiter).includes(nodeDir)) return effectiveEnvironment;
-  return {
-    ...effectiveEnvironment,
-    PATH: existing ? `${nodeDir}${path.delimiter}${existing}` : nodeDir,
-  };
+  // Node selects only the first case-insensitive PATH key on Windows. Keep
+  // that same value and spelling, instead of adding PATH beside an inherited
+  // Path and silently losing the original search path in the child.
+  const pathKeys = Object.keys(effectiveEnvironment)
+    .filter((name) => platform === "win32" ? name.toUpperCase() === "PATH" : name === "PATH")
+    .sort();
+  const pathKey = pathKeys[0] || "PATH";
+  const existing = effectiveEnvironment[pathKey] || "";
+  for (const duplicate of pathKeys.slice(1)) delete effectiveEnvironment[duplicate];
+  const delimiter = platform === "win32" ? ";" : ":";
+  effectiveEnvironment[pathKey] = existing.split(delimiter).includes(nodeDir)
+    ? existing : existing ? `${nodeDir}${delimiter}${existing}` : nodeDir;
+  return effectiveEnvironment;
 }
 
 export function npmPath() {

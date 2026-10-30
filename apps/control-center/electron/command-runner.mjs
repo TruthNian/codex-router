@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -939,6 +940,8 @@ function runEntrypoint(entry, args = [], {
     }
     let stdout = "";
     let stderr = "";
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
     let bytes = 0;
     let settled = false;
     let aborting = false;
@@ -1017,14 +1020,12 @@ function runEntrypoint(entry, args = [], {
         }
         return;
       }
-      stdout += chunk.toString("utf8");
+      stdout += stdoutDecoder.write(chunk);
     });
     child.stderr.on("data", (chunk) => {
       if (settled || discardOutput) return;
       // Keep stderr in memory only; never write it to a log or console.
-      if (stderr.length < 16_384) {
-        stderr += chunk.toString("utf8").slice(0, 16_384 - stderr.length);
-      }
+      stderr += stderrDecoder.write(chunk).slice(0, 16_384 - stderr.length);
     });
     child.stdin.on("error", () => { /* termination can close the pipe mid-write */ });
     child.on("error", (error) => {
@@ -1061,6 +1062,10 @@ function runEntrypoint(entry, args = [], {
       if (process.platform !== "win32") settleLeaderExit(code, signal);
     });
     child.on("close", (code, signal) => {
+      if (!discardOutput) {
+        stdout += stdoutDecoder.end();
+        stderr += stderrDecoder.end().slice(0, 16_384 - stderr.length);
+      }
       childClosed = true;
       childCloseResolve();
       if (process.platform === "win32") settleLeaderExit(code, signal);

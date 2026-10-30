@@ -120,16 +120,13 @@ node scripts/measure-tool-result-aging.mjs /path/to/rollout.jsonl
 
 The report compares each observed compaction boundary and the latest history
 before and after aging; this is an estimate and spends no provider quota.
-`node scripts/aging-benchmark.mjs` reports the savings already recorded in
-`usage-events.jsonl` — measured turns rather than an estimate. For a
-live check, leave the setting on and inspect `usage-events.jsonl` after a routed
+For recorded behavior, inspect `usage-events.jsonl` after a routed
 turn; events that compacted history include `toolResultsAged` and
-`toolResultBytesSaved`. Pressure-shaped turns additionally include
-`toolResultsShaped` and `toolResultShapeBytesSaved`. Those counters measure
+`toolResultBytesSaved`. Those counters measure
 serialized context bytes, while provider-billed token counts remain the
 authoritative cost measurement.
 
-For a reproducible provider-reported A/B, see
+For the limits of the offline estimate and recorded usage, see
 [`docs/tool-result-aging-benchmark.md`](https://github.com/duolahypercho/codex-router/blob/main/docs/tool-result-aging-benchmark.md).
 
 The integration preserves the built-in OpenAI provider, native GPT models,

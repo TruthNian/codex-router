@@ -44,7 +44,6 @@ trap 'exit 143' TERM
 brew tap-new --no-git "$tap_name" >/dev/null
 tap_root=$(brew --repository "$tap_name")
 cp "$formula_path" "$tap_root/Formula/codex-router.rb"
-brew trust --formula "$tap_name/codex-router"
 
 # Homebrew applies additional formula rules only when the path belongs to an
 # official tap. The temporary third-party tap below is still needed for install
@@ -52,6 +51,9 @@ brew trust --formula "$tap_name/codex-router"
 # formula into an isolated official-looking path so local checks exercise the
 # same style policy as homebrew/core CI.
 official_probe_root=$(mktemp -d "${TMPDIR:-/tmp}/codex-router-homebrew-core.XXXXXX")
+# Keep the check's formula authorization in its own cleaned-up configuration.
+export XDG_CONFIG_HOME="$official_probe_root"
+brew trust --formula "$tap_name/codex-router"
 official_formula_dir="$official_probe_root/Taps/homebrew/homebrew-core/Formula/c"
 mkdir -p "$official_formula_dir"
 cp "$formula_path" "$official_formula_dir/codex-router.rb"

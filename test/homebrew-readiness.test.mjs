@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,21 +10,33 @@ const shell = posixShell();
 const source = readFileSync(new URL("../packaging/homebrew/check-core-readiness.sh", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const formula = "local/codex-router-readiness/codex-router";
 const trust = 'brew trust --formula "$tap_name/codex-router"\n';
+const isolation = 'export XDG_CONFIG_HOME="$official_probe_root"\n';
 
-function runFixture({ install = false, withoutTrust = false, failure = "", existingTap = false, existingFormula = false } = {}) {
+function runFixture({ install = false, withoutTrust = false, withoutIsolation = false, failure = "", existingTap = false, existingFormula = false } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), "homebrew-readiness-"));
   const script = path.join(root, "packaging/homebrew/check-core-readiness.sh");
   mkdirSync(path.dirname(script), { recursive: true });
   mkdirSync(path.join(root, "Formula"));
   mkdirSync(path.join(root, "tmp"));
+  const hostConfig = path.join(root, "host-config");
+  const hostTrustPath = path.join(hostConfig, "homebrew/trust.json");
+  const hostTrust = `${JSON.stringify({ trustedformulae: [formula, "user/existing/formula"] })}\n`;
+  mkdirSync(path.dirname(hostTrustPath), { recursive: true });
+  writeFileSync(hostTrustPath, hostTrust);
   writeFileSync(path.join(root, "Formula/codex-router.rb"), "fixture formula bytes\n");
   assert.equal(source.split(trust).length, 2, "the exact temporary formula must have one trust boundary");
-  writeFileSync(script, withoutTrust ? source.replace(trust, "") : source);
+  assert.equal(source.split(isolation).length, 2);
+  writeFileSync(script, (withoutTrust ? source.replace(trust, "") : source).replace(isolation, withoutIsolation ? "" : isolation));
   // A shell function shadows brew for the complete shipped script. No host
   // package manager is executed, including during the script's EXIT trap.
   const fixture = `
 brew() {
   printf '%s\\n' "$*" >> "$FIXTURE_ROOT/calls"
+  case "$1" in
+    trust|style|audit|list|install|test|uninstall|untap)
+      config_home=$(cd "$XDG_CONFIG_HOME" && ${process.platform === "win32" ? "pwd -W" : "pwd -P"}) || return 101
+      printf '%s|%s\\n' "$1" "$config_home" >> "$FIXTURE_ROOT/config-scopes" ;;
+  esac
   case "$1" in
     tap) [ "$EXISTING_TAP" != true ] || printf '%s\\n' local/codex-router-readiness ;;
     tap-new)
@@ -35,11 +47,13 @@ brew() {
       [ "$*" = 'trust --formula ${formula}' ] || return 92
       cmp "$FIXTURE_ROOT/Formula/codex-router.rb" "$FIXTURE_ROOT/tap/Formula/codex-router.rb" || return 93
       [ "$FAILURE" != trust ] || return 17
-      touch "$FIXTURE_ROOT/trusted" ;;
+      mkdir -p "$XDG_CONFIG_HOME/homebrew"
+      printf '%s\\n' '{"trustedformulae":["${formula}"]}' > "$XDG_CONFIG_HOME/homebrew/trust.json"
+      printf '%s\\n' "$config_home/homebrew/trust.json" > "$FIXTURE_ROOT/trust-path" ;;
     style)
       [ -f "$2" ] || return 94 ;;
     audit|install)
-      if [ ! -f "$FIXTURE_ROOT/trusted" ]; then echo 'untrusted temporary formula' >&2; return 42; fi
+      if [ ! -f "$XDG_CONFIG_HOME/homebrew/trust.json" ]; then echo 'untrusted temporary formula' >&2; return 42; fi
       case "$1" in
         audit) [ "$*" = 'audit --strict --new --online --formula ${formula}' ] || return 95 ;;
         install) [ "$*" = 'install --build-from-source ${formula}' ] || return 96 ;;
@@ -47,7 +61,10 @@ brew() {
       [ "$FAILURE" != "$1" ] || return 17 ;;
     list) [ "$*" = 'list --formula codex-router' ] || return 97; [ "$EXISTING_FORMULA" = true ] ;;
     test|uninstall) [ "$2" = '${formula}' ] || return 98; [ "$FAILURE" != "$1" ] || return 17 ;;
-    untap) [ "$2" = local/codex-router-readiness ] || return 99; rm -rf "$FIXTURE_ROOT/tap" ;;
+    untap)
+      [ "$2" = local/codex-router-readiness ] || return 99
+      rm -f "$XDG_CONFIG_HOME/homebrew/trust.json"
+      rm -rf "$FIXTURE_ROOT/tap" ;;
     *) return 100 ;;
   esac
 }
@@ -57,9 +74,22 @@ brew() {
     const result = spawnSync(shell, ["-c", fixture, script.replaceAll("\\", "/"), ...(install ? ["--install"] : [])], {
       encoding: "utf8", timeout: 5_000,
       env: { ...process.env, FIXTURE_ROOT: root.replaceAll("\\", "/"), TMPDIR: path.join(root, "tmp").replaceAll("\\", "/"),
+        XDG_CONFIG_HOME: hostConfig.replaceAll("\\", "/"),
         FAILURE: failure, EXISTING_TAP: String(existingTap), EXISTING_FORMULA: String(existingFormula) },
     });
     const calls = readFileSync(path.join(root, "calls"), "utf8").trim().split("\n");
+    assert.equal(existsSync(hostTrustPath) ? readFileSync(hostTrustPath, "utf8") : undefined, hostTrust,
+      "the caller's existing trust store must remain byte-for-byte unchanged");
+    if (existsSync(path.join(root, "config-scopes"))) {
+      const scopes = readFileSync(path.join(root, "config-scopes"), "utf8").trim().split("\n").map(line => line.split("|")[1]);
+      assert.equal(new Set(scopes).size, 1, "trust and subsequent brew commands must share one configuration");
+      assert.equal(realpathSync(path.dirname(scopes[0])), realpathSync(path.join(root, "tmp")));
+      assert.ok(path.basename(scopes[0]).startsWith("codex-router-homebrew-core."));
+    }
+    if (existsSync(path.join(root, "trust-path"))) {
+      const trustPath = readFileSync(path.join(root, "trust-path"), "utf8").trim();
+      assert.equal(existsSync(trustPath), false, "cleanup must remove the check's temporary trust store");
+    }
     return { ...result, calls, tapExists: existsSync(path.join(root, "tap")),
       probeExists: readdirSync(path.join(root, "tmp")).length !== 0 };
   } finally {
@@ -87,6 +117,10 @@ test("the old untrusted readiness path fails audit and still cleans its temporar
   assert.equal(result.calls.at(-1), "untap local/codex-router-readiness");
   assert.equal(result.tapExists, false);
   assert.equal(result.probeExists, false);
+});
+
+test("the old persistent-trust path is rejected by the caller-store sentinel", { skip: !shell }, () => {
+  assert.throws(() => runFixture({ withoutIsolation: true }), /caller's existing trust store must remain byte-for-byte unchanged/);
 });
 
 test("Homebrew readiness refuses a pre-existing tap before mutation or trust", { skip: !shell }, () => {

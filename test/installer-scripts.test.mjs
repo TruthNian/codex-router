@@ -842,7 +842,8 @@ test("the documented rollback behaviour matches the exit-2 contract", () => {
     path.join(root, "docs-site", "src", "content", "docs", "reference", "install.md"),
     "utf8",
   );
-  for (const source of [docs, site]) {
+  const siteLinksToReference = /\[installation reference\]\(https:\/\/github\.com\/duolahypercho\/codex-router\/blob\/main\/docs\/INSTALL\.md\)/.test(site);
+  for (const source of siteLinksToReference ? [docs] : [docs, site]) {
     assert.match(source, /exits 2/);
     assert.match(source, /the update is kept/);
     assert.match(source, /leaving HEAD\s+detached at that commit/);

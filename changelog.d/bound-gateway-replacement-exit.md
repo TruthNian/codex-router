@@ -1,0 +1,1 @@
+- Bound gateway replacement shutdown through TERM, KILL, and the existing spawn-time exit observation. An unconfirmed exit now ends supervision with an explicit failure instead of hanging or starting another gateway over an unproven owner.

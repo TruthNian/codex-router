@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import http from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { openPort } from "./port-pool.mjs";
 import { commandCodeCredentialVerifier, ROUTE_RECHECK_MS } from "../src/commandcode-plan.mjs";
 import { upsertProviderApiKey } from "../src/provider-api-key-pool.mjs";
+import { seedEnvironmentCredentialPool } from "./helpers/seed-environment-credential-pool.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const internalKey = "test-commandcode-internal-service-key-with-length";
@@ -247,29 +248,7 @@ test("pooled Command Code failover uses the winning key for its plan route", asy
   const cliHome = mkdtempSync(path.join(os.tmpdir(), "commandcode-forwarder-pool-home-"));
   const credentialStorePath = path.join(stateDir, "provider-credentials.json");
   const poolStatePath = path.join(stateDir, "provider-api-key-pools.json");
-  const routerPort = await openPort();
-  for (const name of ["COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"]) {
-    execFileSync(process.execPath, [
-      path.join(root, "src", "control.mjs"),
-      "key-pool",
-      "commandcode",
-      "add-env",
-      name,
-    ], {
-      cwd: root,
-      env: {
-        ...process.env,
-        MODEL_ROUTER_TARGET: "codex",
-        MODEL_ROUTER_STATE_DIR: stateDir,
-        MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
-        MODEL_ROUTER_API_KEY_POOL_PATH: poolStatePath,
-        CODEX_ROUTER_PORT: String(routerPort),
-        CODEX_ROUTER_SERVICE_PLATFORM: "darwin",
-        MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(stateDir, "launch-agents"),
-      },
-      stdio: "ignore",
-    });
-  }
+  seedEnvironmentCredentialPool("commandcode", ["COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"], { stateDir, credentialStorePath, poolStatePath });
   const upstreamPort = await openPort();
   const forwarderPort = await openPort();
   const calls = [];
@@ -374,29 +353,7 @@ test("an intermediate pooled plan limit stays per-key until the winning response
   const cliHome = mkdtempSync(path.join(os.tmpdir(), "commandcode-forwarder-plan-rotate-home-"));
   const credentialStorePath = path.join(stateDir, "provider-credentials.json");
   const poolStatePath = path.join(stateDir, "provider-api-key-pools.json");
-  const routerPort = await openPort();
-  for (const name of ["COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"]) {
-    execFileSync(process.execPath, [
-      path.join(root, "src", "control.mjs"),
-      "key-pool",
-      "commandcode",
-      "add-env",
-      name,
-    ], {
-      cwd: root,
-      env: {
-        ...process.env,
-        MODEL_ROUTER_TARGET: "codex",
-        MODEL_ROUTER_STATE_DIR: stateDir,
-        MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
-        MODEL_ROUTER_API_KEY_POOL_PATH: poolStatePath,
-        CODEX_ROUTER_PORT: String(routerPort),
-        CODEX_ROUTER_SERVICE_PLATFORM: "darwin",
-        MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(stateDir, "launch-agents"),
-      },
-      stdio: "ignore",
-    });
-  }
+  seedEnvironmentCredentialPool("commandcode", ["COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"], { stateDir, credentialStorePath, poolStatePath });
   const references = JSON.parse(readFileSync(credentialStorePath, "utf8")).credentials;
   const firstId = references.find((entry) => entry.secretRef.name === "COMMAND_CODE_API_KEY").id;
   const secondId = references.find((entry) => entry.secretRef.name === "COMMANDCODE_API_KEY").id;
@@ -535,29 +492,7 @@ test("pooled Command Code recheck success is cached against the exact winning ke
   const cliHome = mkdtempSync(path.join(os.tmpdir(), "commandcode-forwarder-recheck-home-"));
   const credentialStorePath = path.join(stateDir, "provider-credentials.json");
   const poolStatePath = path.join(stateDir, "provider-api-key-pools.json");
-  const routerPort = await openPort();
-  for (const name of ["COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"]) {
-    execFileSync(process.execPath, [
-      path.join(root, "src", "control.mjs"),
-      "key-pool",
-      "commandcode",
-      "add-env",
-      name,
-    ], {
-      cwd: root,
-      env: {
-        ...process.env,
-        MODEL_ROUTER_TARGET: "codex",
-        MODEL_ROUTER_STATE_DIR: stateDir,
-        MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
-        MODEL_ROUTER_API_KEY_POOL_PATH: poolStatePath,
-        CODEX_ROUTER_PORT: String(routerPort),
-        CODEX_ROUTER_SERVICE_PLATFORM: "darwin",
-        MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(stateDir, "launch-agents"),
-      },
-      stdio: "ignore",
-    });
-  }
+  seedEnvironmentCredentialPool("commandcode", ["COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"], { stateDir, credentialStorePath, poolStatePath });
   const references = JSON.parse(readFileSync(credentialStorePath, "utf8")).credentials;
   const firstId = references.find((entry) => entry.secretRef.name === "COMMAND_CODE_API_KEY").id;
   const secondId = references.find((entry) => entry.secretRef.name === "COMMANDCODE_API_KEY").id;

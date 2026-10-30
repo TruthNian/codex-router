@@ -15,12 +15,13 @@ test("service install completes its readiness phase before returning success", a
   const end = source.indexOf("export async function runServiceCli(", start);
   assert.ok(start >= 0 && end > start);
   const events = [];
+  const platformInstall = () => { events.push("platform-install"); return { status: 0 }; };
   const run = vm.runInNewContext(source.slice(start, end).replace("export ", "") + "\nrunServiceCommandUnlocked", {
     process: { env: {}, execPath: "synthetic-node" }, path, SOURCE_ROOT: "/synthetic", script: "service-macos.mjs",
     operationDeadline: undefined, remainingOperationMs: () => undefined, environmentProxyOptedIn: () => false,
     readinessCommands: new Set(["install", "start", "restart"]), shutdownCommands: new Set(["stop", "uninstall"]),
     serviceAppConnectorEnvironment: () => events.push("preflight"), resetStartupAttempts: () => events.push("reset"),
-    runProcessTree: async () => { events.push("platform-install"); return { status: 0 }; },
+    spawnSync: platformInstall, runProcessTree: async () => platformInstall(),
     waitForServiceReadiness: async ({ timeoutMs }) => { assert.equal(timeoutMs, 300_000); events.push("readiness"); return { ok: true }; },
     PLATFORM_COMMAND_RESERVE_MS: 10_000, READINESS_TIMEOUT_MS: 300_000,
   });

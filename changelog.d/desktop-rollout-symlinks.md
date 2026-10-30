@@ -1,0 +1,1 @@
+- Skip individual symlinks when listing desktop sessions so unrelated normal and archived rollout files remain visible.

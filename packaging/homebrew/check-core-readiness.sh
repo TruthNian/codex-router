@@ -51,6 +51,9 @@ cp "$formula_path" "$tap_root/Formula/codex-router.rb"
 # formula into an isolated official-looking path so local checks exercise the
 # same style policy as homebrew/core CI.
 official_probe_root=$(mktemp -d "${TMPDIR:-/tmp}/codex-router-homebrew-core.XXXXXX")
+# Keep the check's formula authorization in its own cleaned-up configuration.
+export XDG_CONFIG_HOME="$official_probe_root"
+brew trust --formula "$tap_name/codex-router"
 official_formula_dir="$official_probe_root/Taps/homebrew/homebrew-core/Formula/c"
 mkdir -p "$official_formula_dir"
 cp "$formula_path" "$official_formula_dir/codex-router.rb"

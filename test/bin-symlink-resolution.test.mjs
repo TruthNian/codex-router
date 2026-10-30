@@ -145,7 +145,7 @@ for (const probe of probes) {
 }
 
 test("a packaged keg layout reaches its commands through the dispatcher", { skip: posixOnly }, () => {
-  // The shape packaging/homebrew/codex-router.rb produces: a generated wrapper in
+  // The shape Formula/codex-router.rb produces: a generated wrapper in
   // the formula's bin/ exports CODEX_ROUTER_SOURCE_ROOT and execs the dispatcher
   // under `opt/<formula>`, a symlink to the versioned keg. Nothing on that path is
   // a link the walk can see, so the physical root is the whole of what makes the

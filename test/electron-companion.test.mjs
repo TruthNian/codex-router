@@ -28,6 +28,7 @@ import {
 } from "../src/tray-install.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const shell = posixShell();
 
 test("the packaged Control Center resolves per platform", () => {
   assert.equal(
@@ -144,11 +145,14 @@ test("Control Center packaging runs npm from its project directory", () => {
   assert.doesNotMatch(windows, /npm (?:ci|run|test).*--prefix/);
 });
 
-test("the Linux packager can stage without touching the live package", () => {
+test("the Linux packager is valid POSIX shell", { skip: !shell }, () => {
   const scriptPath = path.join(root, "scripts", "build-electron-companion.sh");
-  const script = readFileSync(scriptPath, "utf8");
-  const syntax = spawnSync("sh", ["-n", scriptPath], { encoding: "utf8" });
+  const syntax = spawnSync(shell, ["-n", scriptPath], { encoding: "utf8" });
   assert.equal(syntax.status, 0, syntax.stderr);
+});
+
+test("the Linux packager can stage without touching the live package", () => {
+  const script = readFileSync(path.join(root, "scripts", "build-electron-companion.sh"), "utf8");
   assert.match(script, /--stage-only DESTINATION/);
   assert.match(script, /if \[ "\$build_mode" = stage-only \]/);
   assert.match(script, /Refusing to overwrite staged Control Center destination/);

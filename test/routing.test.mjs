@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { gzipSync, zstdCompressSync, zstdDecompressSync } from "node:zlib";
 
 import { callerBaseUrl } from "../src/caller-auth.mjs";
+import { seedEnvironmentCredentialPool } from "./helpers/seed-environment-credential-pool.mjs";
 import {
   CHECKPOINT_WARNING,
   decodeCompaction,
@@ -5567,33 +5568,11 @@ test("API forwarder never replays embeddings through a provider API-key pool", a
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "routing-embedding-pool-state-"));
   const credentialStorePath = path.join(stateDir, "provider-credentials.json");
   const poolStatePath = path.join(stateDir, "provider-api-key-pools.json");
-  const inactiveRouterPort = await openPort();
   const credentials = [
     ["OPENCODE_API_KEY", "POOL_EMBEDDING_KEY_ONE"],
     ["OPENCODE_GO_API_KEY", "POOL_EMBEDDING_KEY_TWO"],
   ];
-  for (const [name] of credentials) {
-    execFileSync(process.execPath, [
-      path.join(root, "src", "control.mjs"),
-      "key-pool",
-      "opencode-go",
-      "add-env",
-      name,
-    ], {
-      cwd: root,
-      env: {
-        ...process.env,
-        MODEL_ROUTER_TARGET: "codex",
-        MODEL_ROUTER_STATE_DIR: stateDir,
-        MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
-        MODEL_ROUTER_API_KEY_POOL_PATH: poolStatePath,
-        CODEX_ROUTER_PORT: String(inactiveRouterPort),
-        CODEX_ROUTER_SERVICE_PLATFORM: "darwin",
-        MODEL_ROUTER_LAUNCH_AGENTS_DIR: path.join(stateDir, "launch-agents"),
-      },
-      stdio: "ignore",
-    });
-  }
+  seedEnvironmentCredentialPool("opencode-go", credentials.map(([name]) => name), { stateDir, credentialStorePath, poolStatePath });
   const upstreamRequests = [];
   const upstream = await mockServer(async (request, response) => {
     upstreamRequests.push({

@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { freePort } from "./port-pool.mjs";
+import { stoppedServiceStatusEnvironment } from "./helpers/stopped-service-status.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const root = mkdtempSync(path.join(os.tmpdir(), "codex-router-api-key-control-"));
@@ -260,6 +261,7 @@ test("a live foreground router blocks environment pool publication before metada
     const result = await runControl(
       ["key-pool", "opencode-go", "add-env", "OPENCODE_API_KEY"],
       {
+        ...stoppedServiceStatusEnvironment(),
         MODEL_ROUTER_PORT: String(foregroundRouterPort),
         CODEX_ROUTER_PORT: String(foregroundRouterPort),
         OPENCODE_API_KEY: "secret-live-foreground-test",
@@ -288,7 +290,7 @@ test("key-pool status stays read-only while mutations wait for publication owner
     assert.equal(JSON.parse(status.stdout).readiness.reason, "pool_not_configured");
     assert.equal(existsSync(poolStatePath), false, "status must not create pool state");
 
-    mutation = runControl(["key-pool", "opencode-go", "add-env", "OPENCODE_API_KEY"]);
+    mutation = runControl(["key-pool", "opencode-go", "add-env", "OPENCODE_API_KEY"], stoppedServiceStatusEnvironment());
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(mutation.child.exitCode, null, "the mutation must wait for the model publication lock");
     assert.equal(existsSync(poolStatePath), false, "pool state must not change before publication ownership");
@@ -303,7 +305,7 @@ test("an environment-backed mutation waits for service ownership through publica
   rmSync(poolStatePath, { force: true });
   let mutation;
   await withServiceOperationLock(async () => {
-    mutation = runControl(["key-pool", "opencode-go", "add-env", "OPENCODE_GO_API_KEY"]);
+    mutation = runControl(["key-pool", "opencode-go", "add-env", "OPENCODE_GO_API_KEY"], stoppedServiceStatusEnvironment());
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(mutation.child.exitCode, null, "the mutation must wait for the service-operation lock");
     assert.equal(existsSync(poolStatePath), false, "pool state must not change before service ownership");

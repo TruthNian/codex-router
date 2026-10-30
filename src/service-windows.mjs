@@ -5,6 +5,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import path from "node:path";
+import { normalizeServiceStatus } from "./service-status.mjs";
 
 import {
   CODEX_HOME,
@@ -421,10 +422,11 @@ function endTask({ taskDisabled = false } = {}) {
 // unregisters before it registers, so a failed registration leaves either the
 // previous definition or nothing at all, and `/Run` against a name that is gone
 // recovers nothing while reporting an error of its own.
-function taskExists({ strict = false } = {}) {
-  const deadline = Date.now() + TASK_STOP_TIMEOUT_MS;
+function taskExists({ strict = false, deadline = Date.now() + TASK_STOP_TIMEOUT_MS } = {}) {
   try {
-    schtasks(["/Query", "/TN", taskName], { quiet: true, timeout: TASK_STOP_TIMEOUT_MS });
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("The task query deadline expired.");
+    schtasks(["/Query", "/TN", taskName], { quiet: true, timeout: remaining });
     return true;
   } catch {
     // A failed query may be denied or unavailable, not an absent registration.
@@ -486,17 +488,20 @@ function taskState({ deadline } = {}) {
   return undefined;
 }
 
-async function taskRunning(state) {
+async function taskRunning(state, { deadline } = {}) {
   if (state === "running") return true;
   // Task Scheduler can answer Ready while its detached launcher is still
   // serving. Reuse the process-level probe that guards startup readiness, but
   // keep an unavailable query inconclusive so a restricted shell cannot turn
   // an idle task into a false running service.
+  const remaining = deadline === undefined ? TASK_STATE_TIMEOUT_MS : deadline - Date.now();
+  if (remaining <= 0) return undefined;
   const corroborated = await windowsScheduledTaskState({
     taskName,
     platform: effectivePlatform,
-    timeoutMs: TASK_STATE_TIMEOUT_MS,
+    timeoutMs: Math.min(TASK_STATE_TIMEOUT_MS, remaining),
   });
+  if (!Number.isSafeInteger(corroborated?.instanceCount) || typeof corroborated?.launcherAlive !== "boolean") return undefined;
   // Neither signal is sufficient alone: COM instances can outlive their
   // process, while the machine-wide launcher scan can also see a manually
   // started router. Only their conjunction corroborates this task.
@@ -629,19 +634,47 @@ if (command === "render") {
   process.stdout.write(`${JSON.stringify({ installed: false })}\n`);
 } else if (command === "status") {
   let installed = false;
-  let state = "stopped";
+  let state = "unknown";
   let loaded = false;
+  const inheritedDeadline = Number(process.env.CODEX_ROUTER_OPERATION_DEADLINE_MS);
+  const deadline = Math.min(Date.now() + TASK_STOP_TIMEOUT_MS,
+    Number.isSafeInteger(inheritedDeadline) && inheritedDeadline > 0 ? inheritedDeadline : Number.POSITIVE_INFINITY);
   try {
-    schtasks(["/Query", "/TN", taskName, "/FO", "LIST", "/V"]);
-    installed = true;
-    state = taskState() || "ready";
-    loaded = await taskRunning(state);
-    if (loaded) state = "running";
+    installed = taskExists({ strict: true, deadline });
+    if (!installed) {
+      state = "stopped";
+      // Unregistering a task does not terminate its managed process tree.
+      // Reuse only our existing record and shutdown ownership/port probes;
+      // an absent registration alone cannot authorize stopped-state writes.
+      const record = readServiceProcessState(undefined, { strict: true });
+      if (record) {
+        const ownership = probeOwnership(record, deadline);
+        if (ownership === "owned") {
+          loaded = true;
+          state = "running";
+        } else if (!serviceRecordSettled({
+          ownership,
+          portListening: ownership === "foreign" ? managedPortStillListening(record, deadline) : undefined,
+        })) state = "unknown";
+      }
+    }
+    else {
+      state = taskState({ deadline });
+      if (!["running", "ready", "disabled", "queued"].includes(state)) state = "unknown";
+      else {
+        const running = await taskRunning(state, { deadline });
+        if (running === undefined) state = "unknown";
+        else {
+          loaded = running;
+          if (loaded) state = "running";
+        }
+      }
+    }
   } catch {
-    // Missing task.
+    state = "unknown";
   }
   process.stdout.write(
-    `${JSON.stringify({ installed, loaded, state })}\n`,
+    `${JSON.stringify(normalizeServiceStatus({ installed, loaded, state }))}\n`,
   );
 } else if (command === "stop") {
   // A heartbeat trigger must not undo an explicit stop. Disable the task before

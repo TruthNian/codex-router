@@ -154,7 +154,7 @@ test("the POSIX dispatcher covers the Windows command set", () => {
   // spelling of `control signed-routing`, while the tray launcher owns the
   // companion build and supervision flow). Keep that mapping here so adding a
   // platform wrapper does not silently create two implementations to maintain.
-  const windows = readFileSync(path.join(root, "codex-router.ps1"), "utf8");
+  const windows = readFileSync(path.join(root, "src", "router-commands-windows.ps1"), "utf8");
   const declared = windows.match(/\$Commands = @\(([\s\S]*?)\)/);
   assert.ok(declared, "codex-router.ps1 must declare $Commands");
   const commands = [...declared[1].matchAll(/"([a-z-]+)"/g)].map((match) => match[1]);

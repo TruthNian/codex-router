@@ -6491,6 +6491,10 @@ private struct TrayView: View {
         rows.append(dependencyRow(id: id, label: label, service: service))
       }
     }
+    let represented = Set(rows.map(\.id))
+    for id in degraded.subtracting(represented).sorted() {
+      rows.append(dependencyRow(id: id, label: id, service: nil))
+    }
     return rows
   }
 

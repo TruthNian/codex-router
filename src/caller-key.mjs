@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +25,7 @@ import { runServiceCommandUnlocked } from "./service.mjs";
 import { CALLER_SECRET_PATH, PORTS } from "./paths.mjs";
 import { assertStateOwnership } from "./state-owner.mjs";
 import { ROUTED_HARNESS_IDS, routedHarnesses } from "./routed-harness-catalog.mjs";
+import { operationDeadlineFromEnvironment, runOperationProcessTree, runProcessTree } from "./process-tree.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const refreshCommand = Object.freeze({
@@ -129,31 +129,34 @@ function commandDetail(result, fallback) {
   return detail ? redactCallerUrl(detail.slice(-2_000)) : fallback;
 }
 
-export function runNodeCommand(script, args = []) {
-  const result = spawnSync(process.execPath, [path.join(ROOT, script), ...args], {
-    cwd: ROOT, env: process.env, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
+export async function runNodeCommand(script, args = []) {
+  const deadline = operationDeadlineFromEnvironment();
+  const run = deadline === undefined ? runProcessTree : runOperationProcessTree;
+  const result = await run(process.execPath, [path.join(ROOT, script), ...args], {
+    cwd: ROOT, env: process.env, encoding: "utf8", maxOutputBytes: 32 * 1024 * 1024,
+    deadline, childMayOwnProcessTrees: true,
   });
   if (result.error || result.status !== 0) throw new Error(commandDetail(result, `${script} failed.`));
   return String(result.stdout || "");
 }
 
-function parseJsonCommand(script, args, runNode = runNodeCommand) {
-  const output = runNode(script, args);
+async function parseJsonCommand(script, args, runNode = runNodeCommand) {
+  const output = await runNode(script, args);
   try { return JSON.parse(String(output || "")); }
   catch { throw new Error(`${script} returned invalid status JSON.`); }
 }
 
 export async function readManagedClientStatuses({ runNode = runNodeCommand } = {}) {
-  return {
-    codex: parseJsonCommand("src/config-manager.mjs", ["status"], runNode),
-    dsh: parseJsonCommand("src/dsh-config-manager.mjs", ["status"], runNode),
-    gemini: parseJsonCommand("src/gemini-config-manager.mjs", ["status"], runNode),
-    openclaw: parseJsonCommand("src/openclaw-config-manager.mjs", ["status"], runNode),
-    ...Object.fromEntries(ROUTED_HARNESS_IDS.map((id) => [
-      id,
-      parseJsonCommand("src/routed-harness-manager.mjs", [id, "status"], runNode),
-    ])),
-  };
+  const commands = [
+    ["codex", "src/config-manager.mjs", ["status"]],
+    ["dsh", "src/dsh-config-manager.mjs", ["status"]],
+    ["gemini", "src/gemini-config-manager.mjs", ["status"]],
+    ["openclaw", "src/openclaw-config-manager.mjs", ["status"]],
+    ...ROUTED_HARNESS_IDS.map((id) => [id, "src/routed-harness-manager.mjs", [id, "status"]]),
+  ];
+  const statuses = {};
+  for (const [id, script, args] of commands) statuses[id] = await parseJsonCommand(script, args, runNode);
+  return statuses;
 }
 
 export async function readRouterServiceStatus({ runNode = runNodeCommand } = {}) {

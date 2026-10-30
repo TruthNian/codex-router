@@ -123,6 +123,9 @@ async function run(platform, command, mode = 'success', { wrapper = false } = {}
       }
       events.push({ kind: 'platform-spawn' }); return { status: 0 };
     } },
+    './process-tree.mjs': { runProcessTree: async () => {
+      events.push({ kind: 'platform-spawn' }); return { status: 0 };
+    } },
     './paths.mjs': { CODEX_HOME: fixturePath.join(fixtureRoot, 'codex'), LOG_PATH: fixturePath.join(fixtureRoot, 'log'), PORTS: { router: 4200 }, SOURCE_ROOT: sourceRoot, STATE_DIR: stateDir, TARGET: 'codex', TARGET_DISPLAY_NAME: 'Codex Router', SERVICE_LABEL: 'io.github.codex-router', LAUNCH_AGENT_PATH: fixturePath.join(fixtureRoot, 'router.plist'), SERVICE_PROCESS_STATE_PATH: fixturePath.join(stateDir, 'service-process.json') },
     './file-security.mjs': {
       ensureCheckoutReadable: () => {}, protectPrivateFile: () => {},

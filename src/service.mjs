@@ -31,8 +31,8 @@ const shutdownCommands = new Set(["stop", "uninstall"]);
 // come up healthy seconds later.
 const READINESS_TIMEOUT_MS = 300_000;
 // The service is installed and running; only the health wait ran out. Both
-// installers read this to skip the service teardown in their rollback, so a
-// slow cold start no longer uninstalls a working install (#760). 75 is
+// installers read this to preserve the published client configuration, so a
+// slow cold start leaves it usable when startup finishes (#760). 75 is
 // EX_TEMPFAIL -- "try again", which is exactly the contract here.
 export const READINESS_TIMEOUT_EXIT_CODE = 75;
 // router-restart.mjs reserves this phase before the readiness wait. Check it
@@ -145,9 +145,8 @@ export async function runServiceCommandUnlocked(
         }
       : {}),
   }).catch((error) => {
-    // A crash loop or a dead launcher is broken and keeps rejecting, so the
-    // caller's rollback still runs for it. A readiness timeout or confirmed
-    // automatic cooldown preserves the installed service with status 75.
+    // A crash loop or a dead launcher remains a hard failure. A readiness
+    // timeout or confirmed automatic cooldown returns the retryable status 75.
     if (error?.startupDeferred === true) return { ok: false, startupDeferred: true, error: error.message };
     if (error?.readinessTimeout !== true) throw error;
     return { ok: false, readinessTimeout: true, error: error.message };

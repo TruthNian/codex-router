@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { assertBefore } from "./script-order.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   mkdirSync,
@@ -841,7 +842,8 @@ test("the documented rollback behaviour matches the exit-2 contract", () => {
     path.join(root, "docs-site", "src", "content", "docs", "reference", "install.md"),
     "utf8",
   );
-  for (const source of [docs, site]) {
+  const siteLinksToReference = /\[installation reference\]\(https:\/\/github\.com\/duolahypercho\/codex-router\/blob\/main\/docs\/INSTALL\.md\)/.test(site);
+  for (const source of siteLinksToReference ? [docs] : [docs, site]) {
     assert.match(source, /exits 2/);
     assert.match(source, /the update is kept/);
     assert.match(source, /leaving HEAD\s+detached at that commit/);
@@ -926,27 +928,19 @@ test("uninstall removes the managed skills", () => {
 // start -- retryable, not broken. The rollback used to disable the client
 // config and uninstall the LaunchAgent unconditionally, so that timeout took a
 // working, routed machine and left it unrouted with no service at all.
-test("installer rollback undoes only what the run created", () => {
+test("installer rollback preserves shared service definitions and only undoes its client changes", () => {
   const posix = readFileSync(path.join(root, "bin", "install"), "utf8");
   const windows = readFileSync(path.join(root, "install.ps1"), "utf8");
 
-  // Both installers must read the pre-existing state before they mutate it.
+  // Client restoration keeps its exact prior-state gate. A service snapshot
+  // cannot authorize deleting a registration potentially written by another run.
   assert.match(posix, /config_was_enabled=/);
-  assert.match(posix, /service_was_installed=/);
-  assert.ok(
-    posix.indexOf("service_was_installed=false") < posix.indexOf("rollback() {"),
-    "POSIX must capture prior state before defining the rollback that reads it",
-  );
   assert.match(windows, /\$ConfigWasEnabled\s*=/);
-  assert.match(windows, /\$ServiceWasInstalled\s*=/);
-
-  // ...and both teardowns must be gated on it.
-  assert.match(
-    posix,
-    /\[ "\$service_installed" = true \] && \[ "\$service_was_installed" != true \]/,
-  );
+  assert.doesNotMatch(posix, /node src\/service\.mjs uninstall/);
+  assert.doesNotMatch(windows, /& node src\/service\.mjs uninstall/);
+  assert.doesNotMatch(posix, /service_was_installed|service_installed=/);
+  assert.doesNotMatch(windows, /\$ServiceWasInstalled|\$ServiceInstalled/);
   assert.match(posix, /\[ "\$config_was_enabled" != true \]/);
-  assert.match(windows, /\$ServiceInstalled -and -not \$ServiceWasInstalled/);
   assert.match(windows, /-not \$ConfigWasEnabled/);
 });
 
@@ -957,27 +951,12 @@ test("installer rollback undoes only what the run created", () => {
 // the service step itself: the service refuses to boot while the manifest
 // still names another checkout, so a record that runs after the service step
 // -- which contains the health wait -- can never run at all.
-test("both installers record the manifest before waiting on health", () => {
+test("both installers record the manifest before the service-owned readiness wait", () => {
   const posix = readFileSync(path.join(root, "bin", "install"), "utf8");
   const windows = readFileSync(path.join(root, "install.ps1"), "utf8");
 
-  assert.ok(
-    posix.indexOf("install-manifest.mjs record") < posix.indexOf("wait-health.mjs"),
-    "POSIX must record the manifest before the health wait",
-  );
-  assert.ok(
-    windows.indexOf("install-manifest.mjs record") < windows.indexOf("wait-health.mjs"),
-    "Windows must record the manifest before the health wait",
-  );
-  assert.ok(
-    posix.indexOf("install-manifest.mjs record") < posix.indexOf("node src/service.mjs install"),
-    "POSIX must record the manifest before installing the service",
-  );
-  assert.ok(
-    windows.indexOf("install-manifest.mjs record") <
-      windows.indexOf("& node src/service.mjs install"),
-    "Windows must record the manifest before installing the service",
-  );
+  assertBefore(posix, "install-manifest.mjs record", "node src/service.mjs install", "POSIX must record the manifest before installing the service");
+  assertBefore(windows, "install-manifest.mjs record", "& node src/service.mjs install", "Windows must record the manifest before installing the service");
 });
 
 // The foreign-state override is what lets a checkout rebuild state that
@@ -1176,16 +1155,8 @@ test("a readiness timeout leaves the installed service and config in place", () 
   // still pointing at it.
   assert.match(posix, /if \[ "\$readiness_timeout" = true \]; then\s*\n\s*return/);
   assert.match(windows, /if \(\$ReadinessTimedOut\) \{ throw \}/);
-  assert.ok(
-    posix.indexOf('if [ "$readiness_timeout" = true ]') <
-      posix.indexOf("node src/service.mjs uninstall"),
-    "the POSIX timeout guard must precede the service teardown it skips",
-  );
-  assert.ok(
-    windows.indexOf("if ($ReadinessTimedOut) { throw }") <
-      windows.indexOf("& node src/service.mjs uninstall"),
-    "the Windows timeout guard must precede the service teardown it skips",
-  );
+  assertBefore(posix, 'if [ "$readiness_timeout" = true ]', 'if [ "$config_enabled" = true ]', "the POSIX timeout guard must precede client rollback");
+  assertBefore(windows, "if ($ReadinessTimedOut) { throw }", "if ($ConfigEnabled)", "the Windows timeout guard must precede client rollback");
 
   // The flag has to be set before the rollback can read it. Under `set -u` an
   // unset variable would abort the trap itself.
@@ -1199,14 +1170,8 @@ test("a readiness timeout leaves the installed service and config in place", () 
     "Windows must initialise the flag before the rollback guard that reads it",
   );
 
-  // A second full health wait on the same cold start can only fail the same
-  // way, so the timeout branch must stop rather than fall through to it.
-  assert.ok(
-    posix.indexOf('[ "$service_status" -eq 75 ]') < posix.indexOf("node src/wait-health.mjs"),
-    "POSIX must decide on the timeout before the second health wait",
-  );
-  assert.ok(
-    windows.indexOf("$LASTEXITCODE -eq 75") < windows.indexOf("& node src/wait-health.mjs"),
-    "Windows must decide on the timeout before the second health wait",
-  );
+  // service.mjs already owns the health wait, with no state change before
+  // these old second calls. Keep one readiness authority on success as well.
+  assert.doesNotMatch(posix, /node src\/wait-health\.mjs/);
+  assert.doesNotMatch(windows, /& node src\/wait-health\.mjs/);
 });

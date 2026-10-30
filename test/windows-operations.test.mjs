@@ -100,7 +100,7 @@ test("deploy and install preserve the existing tray opt-in", () => {
   assert.doesNotMatch(deploy, /tray-service\.mjs"\) restart/);
 
   const status = install.indexOf("$TrayWasInstalled = (Get-InstallerStateField");
-  const health = install.indexOf("src/wait-health.mjs");
+  const health = install.indexOf('if ($LASTEXITCODE -ne 0) { throw "Background-service installation failed." }');
   const refresh = install.indexOf("codex-router.ps1\") tray install");
   assert.ok(status >= 0 && status < health, "tray presence must be captured before installation");
   assert.ok(refresh > health, "an existing tray is refreshed only after router health");
@@ -116,9 +116,9 @@ test("deploy and install preserve the existing tray opt-in", () => {
 
 test("Windows refreshes managed Codex skills as a best-effort post-install step", () => {
   const install = readScript("install.ps1");
-  const health = install.indexOf("src/wait-health.mjs");
+  const health = install.indexOf('if ($LASTEXITCODE -ne 0) { throw "Background-service installation failed." }');
   const skills = install.indexOf("src/skills-install.mjs install");
-  assert.ok(skills > health, "skills must run after the healthy service transaction");
+  assert.ok(health >= 0 && skills > health, "skills must run after the healthy service transaction");
   assert.match(install, /if \(\$Target -eq "codex"\) \{/);
   assert.match(install, /\$SkillsExitCode\s*=\s*\$LASTEXITCODE/);
   assert.match(install, /Managed Codex skills could not be refreshed[\s\S]*the router is installed/);

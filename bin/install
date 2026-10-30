@@ -255,7 +255,6 @@ fi
 
 node src/secret.mjs ensure
 config_enabled=false
-service_installed=false
 # `service.mjs install` exits 75 when the service is installed and running but
 # the router did not answer /health inside the readiness budget. That is a slow
 # cold start, not a failed install, so the rollback must leave both the service
@@ -333,21 +332,15 @@ config_was_enabled=false
 if [ "$(node "$config_manager" status 2>/dev/null | json_field "$config_state_field")" = "$config_state_enabled" ]; then
   config_was_enabled=true
 fi
-service_was_installed=false
-if [ "$(node src/service.mjs status 2>/dev/null | json_field installed)" = true ]; then
-  service_was_installed=true
-fi
-
 rollback() {
+  # The platform controller owns its registration rollback. This outer run
+  # cannot prove it created the shared service, so it never uninstalls it.
   # A router that is merely slow to start is left exactly as installed. The
   # previous guard covered only a reinstall over a working router; a first
   # install on a clean machine still had its service and launchers deleted the
   # moment a cold start overran the wait, which is #760.
   if [ "$readiness_timeout" = true ]; then
     return
-  fi
-  if [ "$service_installed" = true ] && [ "$service_was_installed" != true ]; then
-    node src/service.mjs uninstall >/dev/null 2>&1 || true
   fi
   if [ "$config_enabled" = true ]; then
     if [ "$config_was_enabled" != true ]; then
@@ -431,14 +424,12 @@ fi
 # install over a foreign-owned state directory crash-loop for the whole
 # readiness budget while the ownership transfer it needed never ran.
 node src/install-manifest.mjs record >/dev/null
-service_installed=true
 service_status=0
 node src/service.mjs install || service_status=$?
 if [ "$service_status" -eq 75 ]; then
   # Installed and running, just not healthy yet. Stop here without rolling
   # anything back: the service keeps starting, and the operator re-checks
-  # rather than reinstalling. Skipping wait-health matters -- it would spend a
-  # second full budget and fail the same way on the same cold start.
+  # rather than reinstalling. The service command owns the readiness budget.
   readiness_timeout=true
   echo "The background service is installed and still starting; the router did not answer within the health wait."
   echo "Check './bin/status' in a few minutes. Do not re-run the installer -- nothing was rolled back."
@@ -446,7 +437,6 @@ if [ "$service_status" -eq 75 ]; then
 elif [ "$service_status" -ne 0 ]; then
   exit "$service_status"
 fi
-node src/wait-health.mjs
 # A companion that is never rebuilt drifts behind the router on every update
 # and keeps running its old binary. Rebuild only when one is already installed
 # -- an update must not add a tray the user never asked for -- and only when
@@ -504,7 +494,6 @@ case "$tray_plan" in
     ;;
 esac
 config_enabled=false
-service_installed=false
 trap - EXIT HUP INT TERM
 
 # The skill pack teaches custom routed models how to use the app's native

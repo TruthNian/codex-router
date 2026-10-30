@@ -1,5 +1,5 @@
 import { environmentProxyOptedIn } from "./proxy-environment.mjs";
-import { isPreTlsConnectionReset } from "./upstream-retry.mjs";
+import { isPreTlsConnectionReset, transportDeliveryState } from "./upstream-retry.mjs";
 
 // The router reaches every upstream through Undici's `fetch`, which reports a
 // socket failure as a bare `TypeError: fetch failed` and buries the code that
@@ -17,6 +17,8 @@ import { isPreTlsConnectionReset } from "./upstream-retry.mjs";
 const MAX_CAUSE_DEPTH = 8;
 
 export const PROVIDER_TRANSPORT_ERROR_TYPE = "provider_transport_error";
+// Minted by the local forwarder; origin replies must have this name stripped.
+export const PROVIDER_DELIVERY_STATE_HEADER = "x-codex-router-delivery-state";
 
 // `hostname` is set by Node's DNS errors, `host` by a pre-handshake TLS reset,
 // but neither is set by a refused or
@@ -164,6 +166,7 @@ export function providerTransportError(error) {
   return {
     type: PROVIDER_TRANSPORT_ERROR_TYPE,
     code: failure.code,
+    deliveryState: transportDeliveryState(error),
     message: "The provider connection failed before a response was available.",
   };
 }

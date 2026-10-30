@@ -7,7 +7,7 @@ import { upstreamFailureKind } from "./error-translation.mjs";
 import { isLocalToolArgumentConversionFailure } from "./invalid-function-call.mjs";
 import { PROVIDERS } from "./model-registry.mjs";
 import { cooldownScope } from "./provider-cooldown.mjs";
-import { hasProviderTransportError } from "./transport-failure.mjs";
+import { NATIVE_RETRY_POLICY } from "./upstream-retry.mjs";
 import {
   routedModelPreservesSearchContract,
   routedModelSearchMode,
@@ -83,10 +83,11 @@ function isoOrUndefined(value) {
 // would spend two more round trips to reprint the same failure with a different
 // model's name on it -- and for a credential in particular it would hide the one
 // fact the operator needs. A generic 5xx is excluded because the routed turn
-// path retries only the forwarder's reserved pre-response transport marker;
+// path retries only the forwarder's confined transport evidence;
 // masking any other provider outage costs the operator an incident they would
 // want to see.
-export function classifyRoutedFailure({ status, bodyText, retryAfterSeconds, now } = {}) {
+export function classifyRoutedFailure({ status, bodyText, retryAfterSeconds, now,
+  trustedDeliveryState, deliveryPolicy = NATIVE_RETRY_POLICY } = {}) {
   const code = Number(status);
   if (!Number.isFinite(code) || code < 400) return { swap: false };
   // A LiteLLM Anthropic-conversion parse of stored tool arguments is a local
@@ -94,13 +95,15 @@ export function classifyRoutedFailure({ status, bodyText, retryAfterSeconds, now
   // quota phrase, which would otherwise swap the turn onto another provider
   // for a request that cannot succeed (#796).
   if (isLocalToolArgumentConversionFailure(bodyText)) return { swap: false };
-  // The local provider forwarder writes this reserved marker only before it
-  // has committed a response. A generic provider 5xx remains an application
-  // failure and is never switched away silently.
+  // No provider response is weaker than no provider execution. Only positive
+  // evidence from the local forwarder's confined header permits a default
+  // replay; a body marker alone is ambiguous even when it names a connect code.
   if (code >= 500) {
-    return hasProviderTransportError(bodyText)
-      ? { swap: true, reason: "transport" }
-      : { swap: false };
+    if (trustedDeliveryState !== "not_sent" && trustedDeliveryState !== "possibly_sent") return { swap: false };
+    const deliveryState = trustedDeliveryState;
+    return deliveryState === "not_sent" || deliveryPolicy === "availability"
+      ? { swap: true, reason: "transport", deliveryState }
+      : { swap: false, reason: "transport_ambiguous", deliveryState };
   }
   const at = nowMs(now);
   const retryAfter = Number(retryAfterSeconds);

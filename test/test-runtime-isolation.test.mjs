@@ -18,6 +18,7 @@ test("all ordinary Node test entrypoints preload the same credential boundary", 
 });
 
 test("preloading isolation rejects inherited credential paths and never invokes host security", () => {
+  const browsers = path.join(process.env.CODEX_HOME, "installed-playwright-browsers");
   const script = `
     import assert from 'node:assert/strict';
     import { execFileSync } from 'node:child_process';
@@ -26,6 +27,7 @@ test("preloading isolation rejects inherited credential paths and never invokes 
     assert.equal(STATE_DIR.startsWith(isolatedRuntimeRoot), true);
     assert.equal(process.env.MODEL_ROUTER_STATE_DIR, undefined);
     assert.equal(process.env.MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE, undefined);
+    assert.equal(process.env.PLAYWRIGHT_BROWSERS_PATH, ${JSON.stringify(browsers)});
     for (const verb of ['find-generic-password', 'add-generic-password', 'delete-generic-password']) {
       for (const file of ['security', '/usr/bin/security']) {
         assert.throws(() => execFileSync(file, [verb, '-s', 'synthetic-service']));
@@ -41,6 +43,7 @@ test("preloading isolation rejects inherited credential paths and never invokes 
       CODEX_HOME: path.join(process.env.CODEX_HOME, "inherited-unreachable"),
       MODEL_ROUTER_STATE_DIR: path.join(process.env.CODEX_HOME, "inherited-state"),
       MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: path.join(process.env.CODEX_HOME, "inherited-store"),
+      PLAYWRIGHT_BROWSERS_PATH: browsers,
     },
     timeout: 15_000,
   });

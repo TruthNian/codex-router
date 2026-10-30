@@ -2579,13 +2579,11 @@ every Chat Completions route (measured on `commandcode/hy4-preview` and
    `The skill is loaded. This is a single concept-sheet generation: a
    GTA-style AAA` as `final_answer`. Hold the done event until the part
    close; if its text is the thinking or a prefix of it, withhold so
-   empty-completion retries. A held done that LiteLLM then closes as
-   `output_text` is still truncated when the snapshot is a mid-clause cut
-   (`I'll use the image generation` after the 14:12 empty-completion retry).
-   Punctuated answers stay answers. A single token with no whitespace
-   (`CODEX_ROUTER_STREAM_OK`) is a finished marker, not a mid-clause cut.
-   If the stream completes without a grown done, withhold the message so
-   empty-completion retries or fails rather than succeeding.
+   empty-completion retries. Only that structural `reasoning_text` conflict
+   authorizes withholding: canonical `output_text` stays byte-identical,
+   regardless of language, punctuation, length, or whether it sounds like a
+   plan. If a structural conflict completes without a grown done, withhold
+   the message so empty-completion retries or fails rather than succeeding.
 2. **Grok's gateway-error wording stays on Grok OAuth.** Only `grok-oauth`
    replaces an untyped LiteLLM error envelope with the fixed local error. Other
    routes relay that envelope byte-identical, after closing the reasoning item

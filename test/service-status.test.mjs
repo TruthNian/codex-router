@@ -10,6 +10,7 @@ import { normalizeServiceStatus } from "../src/service-status.mjs";
 import { managedServiceIsRunning, recoverPendingCallerKeyRotation, runCallerKeyRotation } from "../src/caller-key.mjs";
 import { routerServiceStatus } from "../src/router-restart.mjs";
 import { readServiceProcessState, serviceRecordSettled } from "../src/service-process.mjs";
+import { windowsScheduledTaskState } from "../src/windows-task-state.mjs";
 
 async function platformStatus(file, nextCommand, mocks) {
   const source = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
@@ -100,6 +101,42 @@ test("conclusive stopped and loaded observations remain distinct", async () => {
     taskExists: () => true, taskState: () => "ready", taskRunning: async () => undefined,
   });
   assert.equal(ambiguous.statusUnknown, true);
+});
+
+test("Windows Ready status needs a complete launcher observation and retains known stopped and running controls", async () => {
+  const source = readFileSync(new URL("../src/service-windows.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("async function taskRunning(");
+  const end = source.indexOf("\nif (\n", start);
+  assert.ok(start >= 0 && end > start);
+  for (const [name, output, state] of [
+    ["incomplete", "1|267009", "unknown"],
+    ["malformed", "not-task-state", "unknown"],
+    ["denied", new Error("fixture query denied"), "unknown"],
+    ["dead launcher with stale instance", "1|267014|0", "ready"],
+    ["no instance or launcher", "0|0|0", "ready"],
+    ["external launcher without task instance", "0|267009|1", "ready"],
+    ["task instance and live managed launcher", "1|267009|1", "running"],
+  ]) {
+    let probes = 0;
+    const taskRunning = vm.runInNewContext(`${source.slice(start, end)}\ntaskRunning`, {
+      taskName: "synthetic-task", effectivePlatform: "win32", TASK_STATE_TIMEOUT_MS: 1_000,
+      windowsScheduledTaskState: options => windowsScheduledTaskState({
+        ...options,
+        execFile: (_executable, _args, _options, callback) => {
+          probes += 1;
+          callback(output instanceof Error ? output : null, output instanceof Error ? "" : output);
+        },
+      }),
+    });
+    const status = await platformStatus("service-windows.mjs", "stop", {
+      taskExists: () => true, taskState: () => "ready", taskRunning,
+    });
+    assert.deepEqual(status, { installed: true, loaded: state === "running", state,
+      ...(state === "unknown" ? { statusUnknown: true } : {}) }, name);
+    assert.equal(probes, 1, `${name} must execute the parser's Windows probe boundary on every host`);
+    if (state === "unknown") assert.throws(() => managedServiceIsRunning(status), /could not be verified/, name);
+    else assert.equal(managedServiceIsRunning(status), state === "running", name);
+  }
 });
 
 test("service snapshot consumers retain unknown and keep a loaded job independent of its definition", async () => {

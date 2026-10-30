@@ -183,12 +183,12 @@ test("failed ChatGPT handoff releases the queue while its writer finalizes once"
   }
 });
 
-test("ChatGPT browser login reports a terminal retry after child close without auth", async () => {
+test("ChatGPT browser login reports a terminal retry after child close without auth", { timeout: 10_000 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "router-browser-login-"));
   const windows = process.platform === "win32";
   const executable = path.join(directory, windows ? "codex-test.cmd" : "codex-test");
   const openedUrls = [];
-  let exited = false;
+  const finished = Promise.withResolvers();
   const accountId = "acct_example_123456";
   const attempts = new Map([[accountId, { status: "pending", deadlineAt: Date.now() + 60_000 }]]);
   try {
@@ -203,14 +203,13 @@ test("ChatGPT browser login reports a terminal retry after child close without a
       environment: { PATH: windows ? process.env.PATH || "" : "/usr/bin:/bin:/usr/sbin:/sbin" },
       openExternal: async (url) => { openedUrls.push(url); },
       onExit: (outcome) => {
-        exited = true;
         attempts.set(accountId, { ...attempts.get(accountId), ...outcome, status: "finished" });
+        finished.resolve();
       },
     });
     assert.deepEqual(result, { opened: true, surface: "browser" });
     assert.deepEqual(openedUrls, ["https://auth.openai.com/oauth/authorize?state=test"]);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.equal(exited, true);
+    await finished.promise;
     const projected = projectChatGPTSubscriptionLoginAttempts({
       accounts: { [accountId]: { subscription: { usable: false } } },
     }, attempts);

@@ -59,16 +59,10 @@ async function serveRenderer() {
   return { url: `http://127.0.0.1:${server.address().port}/`, close };
 }
 
-const chromiumPath = [process.env.CODEX_ROUTER_TEST_CHROMIUM, chromium.executablePath(),
-  "/usr/bin/google-chrome", "/usr/bin/chromium", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, "Google/Chrome/Application/chrome.exe"),
-  process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], "Google/Chrome/Application/chrome.exe"),
-  process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Google/Chrome/Application/chrome.exe"),
-].find((candidate) => candidate && existsSync(candidate));
+const chromiumPath = process.env.CODEX_ROUTER_TEST_CHROMIUM;
 
 test("the compiled Dashboard and Status distinguish HTTP 200 failures and historical records", { timeout: 60_000 }, async () => {
   assert.ok(existsSync(path.join(dist, "index.html")), "build the Control Center before testing its renderer");
-  assert.ok(chromiumPath, "a Chromium executable is required for renderer verification");
   const events = ["completed", "failed", "incomplete", "canceled", "indeterminate", undefined].map((generationOutcome) => ({
     at: new Date().toISOString(), model: `custom/${generationOutcome ?? "historical"}-model`, provider: "custom",
     status: 200, ...(generationOutcome ? { httpStatus: 200, generationOutcome } : {}),

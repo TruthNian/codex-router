@@ -322,7 +322,8 @@ if [ -z "$repo_dir" ]; then
 fi
 
 if [ "$prepare_only" = true ]; then
-  "$repo_dir/bin/install" --prepare-only
+  "$repo_dir/bin/install" --prepare-only ||
+    restore_previous_revision "preparing dependencies failed; dependency preparation must be retried"
   exit 0
 fi
 

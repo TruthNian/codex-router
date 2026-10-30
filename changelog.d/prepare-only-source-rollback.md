@@ -1,0 +1,1 @@
+- Restore the previous managed source revision when prepare-only dependency preparation fails, and explain that dependency preparation still needs a retry.

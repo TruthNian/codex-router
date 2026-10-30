@@ -160,7 +160,7 @@ jobs:
       # testing against a matching Codex Router checkout/install.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       # Keep the locked browser available when tests isolate HOME and APPDATA.
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.test-playwright-browsers
     defaults:
       run:
         working-directory: apps/control-center

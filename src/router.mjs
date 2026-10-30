@@ -4949,9 +4949,8 @@ async function handleResponses(request, response, requestUrl) {
           toolResultAging = aged.stats;
         }
       }
-      // SF and other native multi-agent parents hit this path (model_provider
-      // openai). They have the same Working-badge bug, so inventory the tools
-      // and queue missing interrupt_agent closes the same way as routed turns.
+      // Native calls carry their own identity and are relayed without inference.
+      // Stored completion history does not authorize lifecycle invocations.
       flattenedNamespaces = flattenNamespaceTools(payload.tools, {
         bridgeToolSearch: false,
       }).namespaces;

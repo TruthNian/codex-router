@@ -1924,7 +1924,6 @@ for (const [language, copy] of [
 }
 
 test("Status keeps differently scoped cache facts without inventing a percentage", { timeout: 30_000 }, async () => {
-  assert.ok(chromiumPath, "No Chromium executable is available.");
   const { url, close } = await serveRenderer();
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
   try {
@@ -1941,7 +1940,6 @@ test("Status keeps differently scoped cache facts without inventing a percentage
 });
 
 test("null speed stays unmeasured while numeric zero remains a speed sample", { timeout: 30_000 }, async () => {
-  assert.ok(chromiumPath, "No Chromium executable is available.");
   const { url, close } = await serveRenderer();
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
   try {

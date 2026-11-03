@@ -669,11 +669,6 @@ export async function saveAntigravityToken(
   }, { signal });
 }
 
-// Backwards-compatible name for callers from the initial implementation.
-export async function writeAntigravityToken(token) {
-  return saveAntigravityToken(token);
-}
-
 export async function updateAntigravityToken(transform) {
   if (typeof transform !== "function") throw new TypeError("transform must be a function");
   return withTokenLock(async () => {
@@ -899,7 +894,7 @@ export async function removeAntigravityToken() {
     }
     removeAntigravityRefreshState();
     // Disconnect never needs to inspect the credential it is deleting. Clear
-    // the small in-memory project cache wholesale so this explicit removal is
+    // pending in-memory project discoveries so this explicit removal is
     // also safe while --no-discovery is active.
     invalidateAntigravityProjectCache();
     return existed;

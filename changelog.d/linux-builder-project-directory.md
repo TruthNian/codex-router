@@ -1,0 +1,1 @@
+- Run Linux Electron packaging from the Control Center project directory, so tray builds work when invoked from the checkout or another directory.

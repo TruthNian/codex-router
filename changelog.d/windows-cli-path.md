@@ -1,0 +1,1 @@
+- Preserve the original Windows search path when launching provider CLIs and npm, without emitting conflicting Path and PATH environment keys.

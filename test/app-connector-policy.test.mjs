@@ -269,7 +269,11 @@ test("service dispatcher rejects connector settings before its lock, reset and c
       serviceAppConnectorEnvironment: () => serviceAppConnectorEnvironment(environment),
       resetStartupAttempts: () => effects.push("reset"),
       withServiceOperationLock: callback => { effects.push("lock"); return callback(); },
-      spawnSync: () => { effects.push("child"); return { status: 1 }; },
+      runProcessTree: async () => {
+        effects.push("child");
+        await Promise.resolve();
+        return { status: 1 };
+      },
     };
     runInNewContext(source, context, { timeout: 1000 });
     return { effects, cli: context.runServiceCli, unlocked: context.runServiceCommandUnlocked };

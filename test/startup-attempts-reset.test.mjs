@@ -9,7 +9,7 @@ import { executeStartupFixture, startupFixturePaths } from './startup-attempts-f
 // Execute unchanged ESM sources with every filesystem/manager/probe replaced.
 // Only this host harness reads repository text and writes the requested report.
 const root = process.env.PR895_REVIEW_SOURCE_DIR || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const names = ['service.mjs', 'service-macos.mjs', 'service-linux.mjs', 'service-windows.mjs', 'service-process.mjs', 'startup-attempts.mjs', 'service-readiness.mjs', 'app-connector-policy.mjs'];
+const names = ['service.mjs', 'service-macos.mjs', 'service-linux.mjs', 'service-windows.mjs', 'service-process.mjs', 'service-status.mjs', 'startup-attempts.mjs', 'service-readiness.mjs', 'app-connector-policy.mjs'];
 const sources = Object.fromEntries(names.map(name => [name, readFileSync(path.join(root, 'src', name), 'utf8')]));
 const at = 1_700_000_000_000;
 const freshRecord = () => ({ version: 1, consecutiveFailures: 3, lastFailureAt: at, nextAttemptNotBefore: at + 240_000 });
@@ -123,6 +123,9 @@ async function run(platform, command, mode = 'success', { wrapper = false } = {}
       }
       events.push({ kind: 'platform-spawn' }); return { status: 0 };
     } },
+    './process-tree.mjs': { runProcessTree: async () => {
+      events.push({ kind: 'platform-spawn' }); return { status: 0 };
+    } },
     './paths.mjs': { CODEX_HOME: fixturePath.join(fixtureRoot, 'codex'), LOG_PATH: fixturePath.join(fixtureRoot, 'log'), PORTS: { router: 4200 }, SOURCE_ROOT: sourceRoot, STATE_DIR: stateDir, TARGET: 'codex', TARGET_DISPLAY_NAME: 'Codex Router', SERVICE_LABEL: 'io.github.codex-router', LAUNCH_AGENT_PATH: fixturePath.join(fixtureRoot, 'router.plist'), SERVICE_PROCESS_STATE_PATH: fixturePath.join(stateDir, 'service-process.json') },
     './file-security.mjs': {
       ensureCheckoutReadable: () => {}, protectPrivateFile: () => {},
@@ -162,7 +165,7 @@ async function run(platform, command, mode = 'success', { wrapper = false } = {}
     const evaluated = executeStartupFixture(sources[name], {
       globals, url: pathToFileURL(fixturePath.join(sourceRoot, 'src', name)).href,
       dependency: async specifier => {
-        if (['./startup-attempts.mjs', './service-process.mjs', './app-connector-policy.mjs'].includes(specifier)
+        if (['./startup-attempts.mjs', './service-process.mjs', './service-status.mjs', './app-connector-policy.mjs'].includes(specifier)
           || (specifier === './service-readiness.mjs' && mode.startsWith('clear-error-deferred'))) return load(path.basename(specifier));
         const exports = deps[specifier];
         assert.ok(exports, `Unmocked dependency ${specifier}`);

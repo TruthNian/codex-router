@@ -1,4 +1,5 @@
 import path from "node:path";
+import { normalizeServiceStatus } from "./service-status.mjs";
 
 import { SOURCE_ROOT } from "./paths.mjs";
 import {
@@ -137,11 +138,7 @@ export async function routerServiceStatus({
     ) {
       return { installed: false, statusUnknown: true };
     }
-    return {
-      installed: parsed.installed,
-      loaded: parsed.loaded,
-      state: parsed.state,
-    };
+    return normalizeServiceStatus(parsed);
   } catch {
     return { installed: false, statusUnknown: true };
   }

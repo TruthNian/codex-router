@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { normalizeServiceStatus } from "./service-status.mjs";
 
 import {
   CODEX_HOME,
@@ -263,18 +264,19 @@ if (!new Set(["install", "uninstall", "start", "stop", "restart", "status", "ren
 if (command === "render") {
   process.stdout.write(plist());
 } else if (command === "status") {
-  const description = loaded();
+  const observed = probeLoaded();
+  const description = observed.description;
   const installed = existsSync(LAUNCH_AGENT_PATH);
-  const isLoaded = Boolean(description) && installed;
+  const isLoaded = observed.state === "loaded";
   const state = isLoaded
     ? description?.match(/state = ([^\n]+)/)?.[1]?.trim() || "loaded"
-    : "stopped";
+    : observed.state === "absent" ? "stopped" : "unknown";
   process.stdout.write(
-    `${JSON.stringify({
+    `${JSON.stringify(normalizeServiceStatus({
       installed,
       loaded: isLoaded,
       state,
-    })}\n`,
+    }))}\n`,
   );
 } else if (command === "install") {
   serviceAppConnectorEnvironment();

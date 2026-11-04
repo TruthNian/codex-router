@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { spawnEnvironment } from "../src/npm-global-install.mjs";
 import { oauthLoginArgs } from "../src/provider-onboarding.mjs";
+import { seedEnvironmentCredentialPool } from "./helpers/seed-environment-credential-pool.mjs";
 import { freePort } from "./port-pool.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -190,15 +191,16 @@ test("provider onboarding follows authoritative pool readiness instead of a lega
   const testRoot = mkdtempSync(path.join(os.tmpdir(), "provider-pool-onboarding-"));
   const readyEnvironment = {
     ...isolatedEnvironment(testRoot),
+    MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: path.join(testRoot, "state", "provider-credentials.json"),
+    MODEL_ROUTER_API_KEY_POOL_PATH: path.join(testRoot, "state", "provider-api-key-pools.json"),
     OPENCODE_API_KEY: "TEST_ONBOARDING_POOL_KEY",
   };
   try {
-    const added = spawnSync(
-      process.execPath,
-      [path.join(root, "src", "control.mjs"), "key-pool", "opencode-go", "add-env", "OPENCODE_API_KEY"],
-      { cwd: root, encoding: "utf8", env: readyEnvironment },
-    );
-    assert.equal(added.status, 0, added.stderr);
+    seedEnvironmentCredentialPool("opencode-go", ["OPENCODE_API_KEY"], {
+      stateDir: readyEnvironment.MODEL_ROUTER_STATE_DIR,
+      credentialStorePath: readyEnvironment.MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE,
+      poolStatePath: readyEnvironment.MODEL_ROUTER_API_KEY_POOL_PATH,
+    });
     const ready = JSON.parse(execFileSync(
       process.execPath,
       [path.join(root, "src", "control.mjs"), "providers", "--json"],

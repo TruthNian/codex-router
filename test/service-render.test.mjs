@@ -995,7 +995,7 @@ test(
 );
 
 test(
-  "Windows status keeps Ready when launcher evidence is incomplete",
+  "Windows status retains registration but stays unknown when launcher evidence is incomplete",
   { skip: process.platform === "win32" },
   () => {
     const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-win-status-partial-"));
@@ -1008,7 +1008,8 @@ test(
       assert.deepEqual(JSON.parse(result.stdout), {
         installed: true,
         loaded: false,
-        state: "ready",
+        state: "unknown",
+        statusUnknown: true,
       });
     } finally {
       rmSync(testRoot, { recursive: true, force: true });
@@ -1017,7 +1018,7 @@ test(
 );
 
 test(
-  "Windows status keeps Ready when authoritative launcher state is inconclusive",
+  "Windows status retains registration but stays unknown when authoritative launcher state is inconclusive",
   { skip: process.platform === "win32" },
   async (context) => {
     for (const [name, options] of [
@@ -1033,7 +1034,8 @@ test(
           assert.deepEqual(JSON.parse(result.stdout), {
             installed: true,
             loaded: false,
-            state: "ready",
+            state: "unknown",
+            statusUnknown: true,
           });
         } finally {
           rmSync(testRoot, { recursive: true, force: true });

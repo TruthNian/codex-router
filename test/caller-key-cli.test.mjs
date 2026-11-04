@@ -58,7 +58,7 @@ test("caller-key rotation checks state ownership before any transaction work", a
       withMutationLocks: async (run) => run(),
       recoverPending: async () => order.push("recover"),
       readClientStatuses: async () => { order.push("clients"); return { codex: {}, dsh: {}, gemini: {} }; },
-      readServiceStatus: async () => { order.push("service"); return { installed: false, state: "stopped" }; },
+      readServiceStatus: async () => { order.push("service"); return { installed: false, loaded: false, state: "stopped" }; },
       beginJournal: async ({ previousSecretSha256 }) => ({ operationId: "a".repeat(32), phase: "prepared", targets: [], serviceWasRunning: false, previousSecretSha256 }),
       rotateSecret: async () => ({ previousSecret: oldKey, currentSecret: "n".repeat(48) }),
       updateJournal: async (state, phase) => ({ ...state, phase }),

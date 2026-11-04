@@ -1,0 +1,1 @@
+- Bound the status command's router health sample, including response-body reads, by reusing the shared one-shot health checker.

@@ -93,7 +93,7 @@ test("rotation preserves a stopped installed service and uses capability-only cl
       dsh: { routeInstalled: true, credentialInstalled: true },
       gemini: { installed: true, baseUrlManaged: true, envExists: true, documentReadable: true, conflicts: [], managedBlockPresent: true },
     }),
-    readServiceStatus: async () => ({ installed: true, state: "stopped" }),
+    readServiceStatus: async () => ({ installed: true, loaded: false, state: "stopped" }),
     runNode: async (script, args) => calls.push([script, ...args]),
     rotateSecret: async () => ({ previousSecret: oldKey, currentSecret: newKey }),
     beginJournal: async () => ({ operationId: "1".repeat(32), phase: "prepared", targets: ["codex", "dsh", "gemini"], serviceWasRunning: false }),
@@ -135,12 +135,12 @@ test("systemd active service is stopped before swap, then started and verified",
   ]);
 });
 
-test("an uninstalled service is never treated as running", () => {
+test("a loaded job without its service definition still requires a stop", () => {
   for (const status of [
     { installed: false, loaded: true, state: "active" },
     { installed: false, loaded: true, state: "running" },
   ]) {
-    assert.equal(cli.managedServiceIsRunning(status), false);
+    assert.equal(cli.managedServiceIsRunning(status), true);
   }
 });
 
@@ -161,7 +161,7 @@ test("rotation holds service lifecycle ownership through a stopped-service trans
     }),
     recoverPending: async () => {},
     readClientStatuses: async () => ({ codex: { mode: "router", config_protected: true }, dsh: {}, gemini: {} }),
-    readServiceStatus: async () => ({ installed: true, state: "stopped" }),
+    readServiceStatus: async () => ({ installed: true, loaded: false, state: "stopped" }),
     runNode: async () => {},
     rotateSecret: async () => {
       contender = serviceLock.withServiceOperationLock(async () => { contenderEntered = true; }, {
@@ -243,7 +243,7 @@ test("pending secret-swapped rotation restores the prior generation and refreshe
     const result = await cli.recoverPendingCallerKeyRotation({
       secretPath,
       readJournal: () => journal.readCallerKeyRotationJournal({ journalPath }),
-      readServiceStatus: async () => ({ installed: true, state: "stopped" }),
+      readServiceStatus: async () => ({ installed: true, loaded: false, state: "stopped" }),
       runNode: async (script, args) => calls.push([script, ...args]),
       secretIsProtected: () => true,
       clearJournal: ({ operationId }) => journal.clearCallerKeyRotationJournal({ operationId, journalPath }),
@@ -323,7 +323,7 @@ test("recovery holds service lifecycle ownership while restoring a stopped-servi
         stateDir, waitMs: 2_000, retryMs: 20, staleMs: 5_000,
       }),
       readJournal: () => journal.readCallerKeyRotationJournal({ journalPath }),
-      readServiceStatus: async () => ({ installed: true, state: "stopped" }),
+      readServiceStatus: async () => ({ installed: true, loaded: false, state: "stopped" }),
       runNode: async () => {
         if (!contender) {
           contender = serviceLock.withServiceOperationLock(async () => { contenderEntered = true; }, {
@@ -394,7 +394,7 @@ test("recovery never clears a journal for an unprotected live rollback capabilit
     await assert.rejects(cli.recoverPendingCallerKeyRotation({
       secretPath,
       readJournal: () => journal.readCallerKeyRotationJournal({ journalPath }),
-      readServiceStatus: async () => ({ installed: true, state: "running" }),
+      readServiceStatus: async () => ({ installed: true, loaded: true, state: "running" }),
       runServiceMutation: async (command) => serviceMutations.push(command),
       secretIsProtected: () => false,
       clearJournal: ({ operationId }) => journal.clearCallerKeyRotationJournal({ operationId, journalPath }),
@@ -458,7 +458,7 @@ test("recovery refuses an unprotected rollback generation and preserves the jour
     await assert.rejects(cli.recoverPendingCallerKeyRotation({
       secretPath,
       readJournal: () => journal.readCallerKeyRotationJournal({ journalPath }),
-      readServiceStatus: async () => ({ installed: true, state: "running" }),
+      readServiceStatus: async () => ({ installed: true, loaded: true, state: "running" }),
       runServiceMutation: async (command) => serviceMutations.push(command),
       secretIsProtected: (target) => target !== backup,
     }), /rollback generation is not private/i);

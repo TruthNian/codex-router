@@ -115,3 +115,26 @@ test("router health bounds a request by the remaining overall deadline", async (
   assert.equal(health.ok, false);
   assert.ok(Date.now() - startedAt < 250, "health request exceeded the overall timeout budget");
 });
+
+test("the status one-shot bounds a stalled response body without retrying", async () => {
+  let requests = 0;
+  const health = await waitForRouterHealth({
+    target: "codex", timeoutMs: 0, requestTimeoutMs: 20,
+    fetchImpl: async (_url, { signal }) => {
+      requests += 1;
+      return {
+        ok: true, status: 200,
+        text: () => new Promise((_resolve, reject) => {
+          const fallback = setTimeout(() => reject(new Error("body did not abort")), 1_000);
+          signal.addEventListener("abort", () => {
+            clearTimeout(fallback);
+            reject(signal.reason);
+          }, { once: true });
+        }),
+      };
+    },
+  });
+  assert.equal(requests, 1);
+  assert.equal(health.ok, false);
+  assert.match(health.error, /timeout|timed out/i);
+});

@@ -1,0 +1,1 @@
+- Preserve multibyte command output in Control Center by decoding each pipe as a stream, including incomplete EOF handling and the existing output limits.

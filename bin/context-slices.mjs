@@ -40,6 +40,16 @@ function parseArgs(argv) {
 }
 
 const { files, options } = parseArgs(process.argv.slice(2));
+// Plan names before creating the output directory or publishing any slice.
+// The CLI accepts several directories, so basename alone is not an identity.
+const outputStems = new Set();
+for (const source of files) {
+  const name = path.basename(source);
+  const outputName = `${name.replace(/\.[^.]+$/, "")}\0${path.extname(source) || ".txt"}`;
+  const stem = ["win32", "darwin"].includes(process.platform) ? outputName.toLowerCase() : outputName;
+  if (outputStems.has(stem)) throw new Error(`Input filenames would overwrite the same slices: ${name}`);
+  outputStems.add(stem);
+}
 mkdirSync(options.out, { recursive: true });
 const manifest = { generatedBy: "bin/context-slices.mjs", files: [] };
 for (const source of files) {

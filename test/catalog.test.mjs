@@ -398,6 +398,14 @@ test("routed models advertise original image detail only when the registry opts 
   assert.equal(capable.supports_image_detail_original, true);
 });
 
+test("Boyue publishes client tool discovery without granting hosted search to other custom routes", () => {
+  const boyue = { ...grok, provider: "custom", upstreamModel: "deepseek/deepseek-flash",
+    requestProfile: "boyue-deepseek-responses", endpoint: { protocol: "openai-responses" }, searchTool: undefined };
+  assert.equal(routedModel(template, boyue).supports_search_tool, true);
+  assert.equal(routedModel(template, { ...boyue, requestProfile: undefined }).supports_search_tool, false);
+  assert.equal(routedModel(template, { ...boyue, upstreamModel: "unrelated" }).supports_search_tool, false);
+});
+
 test("routed models can explicitly narrow inherited tool capabilities", () => {
   const plain = routedModel(template, grok);
   assert.equal(plain.supports_parallel_tool_calls, false);

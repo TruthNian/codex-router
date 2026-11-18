@@ -1,0 +1,26 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { recordRelayFailureCapture } from "../src/relay-failure-capture.mjs";
+test("raw rejected frame capture requires exact temporary consent and stops after three files", t => {
+  const stateDir=mkdtempSync(path.join(os.tmpdir(),'relay-capture-'));
+  t.after(()=>rmSync(stateDir,{recursive:true,force:true}));
+  const now=1000000, threadId='synthetic-thread', model='custom/deepseek/deepseek-flash';
+  const error=Object.assign(new Error('fixed message'),{code:'ERR_NAMESPACE_RELAY_COMMITTED_STREAM',relayFrame:{model,reason:'ambiguous function arguments',byteLength:7,sha256:'synthetic',prefix:Buffer.from('data: x')}});
+  const options={stateDir,now};
+  assert.equal(recordRelayFailureCapture(error,threadId,options),false);
+  const consent=extra=>writeFileSync(path.join(stateDir,'relay-failure-capture.json'),JSON.stringify({threadId,model,expiresAt:now+60000,...extra}));
+  consent();
+  assert.equal(recordRelayFailureCapture(error,'unrelated-thread',options),false);
+  assert.equal(recordRelayFailureCapture({...error,relayFrame:{...error.relayFrame,model:'other'}},threadId,options),false);
+  consent({expiresAt:now-1});assert.equal(recordRelayFailureCapture(error,threadId,options),false);
+  consent();
+  for(let i=0;i<3;i++)assert.equal(recordRelayFailureCapture(error,threadId,options),true);
+  assert.equal(recordRelayFailureCapture(error,threadId,options),false);
+  assert.equal(readdirSync(stateDir).length,4);
+  const row=JSON.parse(readFileSync(path.join(stateDir,'relay-failure-capture-1.json'),'utf8'));
+  assert.equal(Buffer.from(row.frameBase64,'base64').toString(),'data: x');
+  assert.equal('headers' in row,false);
+});

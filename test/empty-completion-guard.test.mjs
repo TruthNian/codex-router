@@ -83,6 +83,25 @@ async function runGuard(
   };
 }
 
+test("client tool discovery is actionable without assistant prose", async () => {
+  const item = { type: "tool_search_call", execution: "client", call_id: "discover_1", arguments: { query: "read project" } };
+  for (const eventType of ["response.output_item.added", "response.output_item.done", "response.completed"]) {
+    const data = { type: eventType, ...(eventType === "response.completed" ? { response: { output: [item] } } : { item }) };
+    const body = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+    const result = await runGuard(body, { chunkSize: 7 });
+    assert.equal(result.empty, false, eventType);
+    assert.equal(result.body, body);
+  }
+  for (const invalid of [
+    { ...item, execution: "server" }, { ...item, call_id: "" },
+    { ...item, arguments: null }, { ...item, arguments: "{}" },
+    { ...item, arguments: [] }, { type: "tool_search_output", tools: [] },
+  ]) {
+    const result = await runGuard(`event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { id: "resp_invalid_search", status: "completed", output: [invalid] } })}\n\n`);
+    assert.equal(result.empty, true, JSON.stringify(invalid));
+  }
+});
+
 const CONTENT_TURN = [
   'event: response.created',
   'data: {"type":"response.created","response":{"id":"r1"}}',

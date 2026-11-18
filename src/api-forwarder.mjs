@@ -1,3 +1,4 @@
+import { createBoyueToolCompletionTransform, createBoyueToolCompletionJsonTransform } from "./boyue-tool-completion.mjs";
 import { normalizeAzureOpenAIResponsesRequest } from "./azure-openai-compat.mjs";
 import http from "node:http";
 import {
@@ -12,8 +13,10 @@ import {
 } from "./chat-reasoning-replay.mjs";
 import { EFFORT_LADDER, declaredEffort } from "./effort-ladder.mjs";
 import {
+  boyueDeepSeekResponsesRequest,
   deepSeekResponsesEffort,
   deepSeekResponsesInput,
+  isBoyueDeepSeekResponses,
   usesDeepSeekResponses,
 } from "./deepseek-responses.mjs";
 
@@ -1105,6 +1108,7 @@ function normalizeBody(buffer, contentType, route) {
     }
     payload = normalizeOpenAIRequest(payload);
     payload = normalizeAzureOpenAIResponsesRequest(payload, { providerId: model.provider, route });
+    if (isBoyueDeepSeekResponses(model)) payload = boyueDeepSeekResponsesRequest(payload);
     if (usesDeepSeekResponses(model) && payload.reasoning.effort !== "none" &&
       (payload.tool_choice === "required" || (payload.tool_choice?.type === "function" &&
         typeof payload.tool_choice.name === "string" && payload.tool_choice.name) ||
@@ -1756,6 +1760,10 @@ async function relayUpstreamResponse(
         })
       : undefined,
     responsesJson ? createResponsesJsonTransform(flatToNative) : undefined,
+    responsesStream && isBoyueDeepSeekResponses(normalized.model)
+      ? createBoyueToolCompletionTransform() : undefined,
+    responsesJson && isBoyueDeepSeekResponses(normalized.model)
+      ? createBoyueToolCompletionJsonTransform() : undefined,
     zaiCacheUsageTransform(normalized.provider.id, upstreamContentType),
   ].filter(Boolean);
   const denylist = transform.length
@@ -2389,7 +2397,9 @@ const server = http.createServer((request, response) => {
     );
     if (!response.headersSent) {
       writeJson(response, status, {
-        error: transport || {
+        error: ["previous_response_not_found", "invalid_boyue_tool_choice"].includes(error.code) ? {
+          type: "invalid_request_error", code: error.code, message: error.message,
+        } : transport || {
           type: "provider_api_proxy_error",
           message: "The API-provider forwarder could not complete the request.",
         },

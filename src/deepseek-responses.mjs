@@ -1,9 +1,87 @@
 import { agentMessagesAsUserMessages } from "./namespace-relay.mjs";
 
-// The current direct Flash endpoint speaks Responses natively. Keep older
-// aliases and reseller routes on their separately verified wire contracts.
+// Reseller compatibility is an explicit per-model opt-in, never inferred from
+// an upstream name alone. Other custom endpoints retain their own contracts.
+export function isBoyueDeepSeekResponses(model) {
+  return model?.provider === "custom" &&
+    model.requestProfile === "boyue-deepseek-responses" &&
+    model.upstreamModel === "deepseek/deepseek-flash" &&
+    model.endpoint?.protocol === "openai-responses";
+}
+
+// The current direct Flash endpoint and the explicitly tested Boyue profile
+// share native Responses tools and reasoning replay. Legacy routes keep Chat.
 export function usesDeepSeekResponses(model) {
-  return model?.provider === "deepseek" && model?.upstreamModel === "deepseek-flash";
+  return (model?.provider === "deepseek" && model?.upstreamModel === "deepseek-flash") ||
+    isBoyueDeepSeekResponses(model);
+}
+
+function boyueRequestError(message, code, status = 400) {
+  return Object.assign(new Error(message), { code, status });
+}
+
+// Boyue forwards the native endpoint's stateless contract. Never make an
+// unknown response id look like a successful continuation with lost history.
+// WebSocket continuations are reconstructed by responses-websocket before this
+// boundary, and ordinary HTTP clients must resend their complete input.
+export function boyueDeepSeekResponsesRequest(payload) {
+  if (payload.previous_response_id != null && payload.previous_response_id !== "") {
+    throw boyueRequestError("Previous response is unavailable on this stateless route; resend the full input history.",
+      "previous_response_not_found", 409);
+  }
+  let next = { ...payload };
+  const choice = next.tool_choice;
+  if (choice?.type === "allowed_tools") {
+    const allowed = choice.tools;
+    if (!["auto", "required"].includes(choice.mode) || !Array.isArray(allowed) || !allowed.length ||
+        !allowed.every((tool) => ["function", "custom"].includes(tool?.type) &&
+          typeof tool.name === "string" && tool.name)) {
+      throw boyueRequestError("Invalid allowed-tools restriction.", "invalid_boyue_tool_choice");
+    }
+    const keys = allowed.map((tool) => `${tool.type}\0${tool.name}`);
+    const matches = allowed.map((tool) => next.tools?.filter((candidate) =>
+      candidate.type === tool.type && candidate.name === tool.name));
+    if (new Set(keys).size !== keys.length || !matches.every((group) => group?.length === 1)) {
+      throw boyueRequestError("Allowed tools must identify unique declared tools.", "invalid_boyue_tool_choice");
+    }
+    next.tools = matches.map((group) => group[0]);
+    next.tool_choice = choice.mode;
+  }
+  const forced = next.tool_choice === "required" ||
+    (["function", "custom"].includes(next.tool_choice?.type) &&
+      typeof next.tool_choice.name === "string" && next.tool_choice.name);
+  if (forced) {
+    // Do not change required to auto: that silently weakens the caller's
+    // contract. This upstream cannot think and force a tool in the same call.
+    next.reasoning = { ...(next.reasoning || {}), effort: "none" };
+  }
+  if (Array.isArray(next.input)) {
+    next.input = next.input.flatMap((item) => {
+      if (item?.role !== "developer") return [item];
+      // DeepSeek treats developer as user. Promote instructions, but never
+      // move images into system: the upstream explicitly rejects that role.
+      if (typeof item.content === "string") return [{ ...item, role: "system" }];
+      if (!Array.isArray(item.content)) return [item];
+      const text = item.content.filter((part) => ["input_text", "output_text"].includes(part?.type));
+      if (!text.length) return [item];
+      const other = item.content.filter((part) => !["input_text", "output_text"].includes(part?.type));
+      if (!other.length) return [{ ...item, role: "system" }];
+      return [{ type: "message", role: "system", content: text }, { ...item, content: other }];
+    });
+    // A forced/nonthinking call has no reasoning to replay. When thinking is
+    // re-enabled, mark that absence truthfully rather than fabricate a chain
+    // of thought, then reuse the existing turn/parallel exchange normalizer.
+    if (next.reasoning?.effort !== "none" && next.tools?.length &&
+        !next.input.some((item) => item?.type === "reasoning")) {
+      const first = next.input.findIndex((item) => isAssistantMessage(item) || TOOL_CALL_TYPES.has(item?.type));
+      if (first >= 0) next.input.splice(first, 0, {
+        type: "reasoning",
+        content: [{ type: "reasoning_text", text: "(prior reasoning unavailable: preceding response ran without thinking)" }],
+      });
+    }
+    next.input = deepSeekResponsesInput(next.input);
+  }
+  return next;
 }
 
 // Current native endpoint aliases, documented in DeepSeek's thinking guide.

@@ -279,6 +279,12 @@ function partHasContent(part) {
 function itemHasContent(item) {
   if (!item || typeof item !== "object") return false;
   if (item.type === "function_call" || item.type === "custom_tool_call") return true;
+  // The namespace relay restores deferred discovery before this guard runs.
+  // A client-executed search is an actionable tool call, even with no prose.
+  if (item.type === "tool_search_call") {
+    return item.execution === "client" && typeof item.call_id === "string" && item.call_id.length > 0 &&
+      item.arguments !== null && typeof item.arguments === "object" && !Array.isArray(item.arguments);
+  }
   if (item.type && item.type !== "message") return false;
   if (Array.isArray(item.content)) return item.content.some(partHasContent);
   return partHasContent(item);

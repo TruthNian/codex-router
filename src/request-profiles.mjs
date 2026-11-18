@@ -5,6 +5,7 @@ export const REQUEST_PROFILES = Object.freeze([
   "anthropic-reasoning",
   "antigravity",
   "auto-tool-choice",
+  "boyue-deepseek-responses",
   "clinepass",
   "codex-encrypted-schema",
   "dashscope-reasoning",
@@ -33,6 +34,7 @@ const PROFILE_SET = new Set(REQUEST_PROFILES);
 // compatibility observations an operator can make while curating a route.
 export const CURATABLE_REQUEST_PROFILES = Object.freeze([
   "auto-tool-choice",
+  "boyue-deepseek-responses",
   "codex-encrypted-schema",
   "dashscope-reasoning",
   "omit-tool-choice",

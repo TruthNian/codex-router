@@ -95,11 +95,13 @@ const EFFORT_DESCRIPTIONS = {
 // `src/api-forwarder.mjs` translate one upstream's parameter surface and are
 // inherited from that provider's registry models, never chosen here; these
 // describe a restriction the user observed on a model the repository does not
-// ship, so they are the only ones worth offering by hand.
+// ship, plus the explicitly gated Boyue custom Responses adapter.
 const AUTO_TOOL_CHOICE = "auto-tool-choice";
 const REQUEST_PROFILE_DESCRIPTIONS = {
   [AUTO_TOOL_CHOICE]:
     'reject a forced tool_choice ("required") while still calling tools under "auto"',
+  "boyue-deepseek-responses":
+    "adapt Boyue's deepseek/deepseek-flash custom Responses route for Codex tools and history; other models and protocols are rejected",
   "codex-encrypted-schema":
     "reject Codex's encrypted annotation on JSON-Schema nodes while accepting the same tool schema without it",
   "dashscope-reasoning":

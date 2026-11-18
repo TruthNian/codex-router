@@ -2254,9 +2254,45 @@ the most tools, and no mock gateway with a bare envelope shows it.
 
 ## DeepSeek Responses and Chat reasoning replay
 
-Only direct provider `deepseek` with upstream model `deepseek-flash` uses the
-existing API forwarder's native `/responses` route, including compaction.
-Legacy aliases and resellers retain Chat. LiteLLM 1.96's unknown-model fallback
+Boyue's `deepseek/deepseek-flash` may explicitly opt into
+`requestProfile: "boyue-deepseek-responses"` on a local `custom` model with
+`endpoint.protocol: "openai-responses"`. Do not infer this profile from a model
+name, apply it provider-wide, or publish a new checked-in Boyue model. It reuses
+the native tool/history adapters on ordinary and compact turns. Matched client
+tool-search discoveries are materialized before custom bridging so a discovered
+custom tool cannot shadow its own declaration. Preserve live declaration
+precedence, unique call/output pairing, exact call ids and namespace identity.
+
+This profile preserves forced tool choice by disabling thinking for that request
+instead of silently changing required to auto. When thinking resumes, replay an
+explicit unavailable-reasoning marker for prior nonthinking assistant turns;
+never fabricate thoughts or move them into visible text. Developer text becomes
+system instructions, while developer images stay in a supported role. HTTP
+response-id continuations are refused with 409: callers must send full history,
+or use the existing bounded WebSocket continuation reconstruction. A JSON-string
+custom bridge does not provide native grammar-constrained decoding. None of this
+authorizes production deployment or a service restart.
+
+Boyue may finish a token-limited function call with partial JSON before marking
+the item and response incomplete. Buffer JSON function lifecycles (at most 4 MiB)
+until the response terminal, omit only items explicitly marked incomplete under
+`max_output_tokens`, and preserve the terminal reason and usage. Never invent
+arguments or replay a generation to hide that limit. Completed malformed or
+duplicate-key arguments remain rejected; native custom-tool progress still streams.
+
+Rejected SSE events can be captured locally only with explicit temporary consent
+in `relay-failure-capture.json` in the router state directory: `threadId`, exact
+model slug in `model`, and numeric epoch milliseconds in `expiresAt` (within 24
+hours). The capture is off by default, excludes headers and unrelated threads,
+and writes at most three private `relay-failure-capture-N.json` files. Each stores
+at most 64 KiB of the namespace-relay input frame as base64 with its original
+length and SHA-256; this boundary follows upstream Responses normalization and
+is not a byte-identical recording of the provider's HTTP transport. Treat these
+files as private task content and never include them in logs or public fixtures.
+
+Direct provider `deepseek` with upstream model `deepseek-flash`, and the explicit
+Boyue profile above, use the existing API forwarder's native `/responses` route,
+including compaction. Legacy aliases and other resellers retain Chat. LiteLLM 1.96's unknown-model fallback
 removes upstream streaming and synthesizes SSE; setting its protocol alone is
 insufficient. Keep credentials, transport, usage, cancellation and pre-byte
 retry rules on the shared path.

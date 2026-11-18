@@ -38,3 +38,6 @@ bin/* text eol=lf
 # resolving it; see `changelog.d/README.md`. This driver stays for pull
 # requests opened before fragments landed.
 CHANGELOG.md merge=union
+
+# Preserve the captured SSE frame terminator and wire line endings on Windows.
+test/fixtures/boyue-truncated-tool.sse text eol=lf whitespace=-blank-at-eof

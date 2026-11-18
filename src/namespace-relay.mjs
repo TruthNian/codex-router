@@ -1570,13 +1570,13 @@ function validToolSearchHistoryArguments(value) {
   return limit === undefined || (Number.isInteger(limit) && limit > 0);
 }
 
-function discoveredProviderTools(toolSpecs, namespaces) {
+function discoveredProviderTools(toolSpecs, namespaces, { allowCustomTools = false } = {}) {
   if (!Array.isArray(toolSpecs)) return [];
   const discovered = [];
   for (const tool of toolSpecs) {
     if (tool?.type === "namespace" && typeof tool.name === "string" && Array.isArray(tool.tools)) {
       for (const fn of tool.tools) {
-        if (fn?.type !== "function" || !fn.name) continue;
+        if (!(fn?.type === "function" || (allowCustomTools && fn?.type === "custom" && typeof fn.name === "string")) || !fn.name) continue;
         discovered.push({
           tool: flattenNamespaceChild(
             tool.name,
@@ -1588,6 +1588,14 @@ function discoveredProviderTools(toolSpecs, namespaces) {
           identity: nativeToolKey(tool.name, fn.name),
         });
       }
+      continue;
+    }
+    if (allowCustomTools && tool?.type === "custom" && typeof tool.name === "string" && tool.name) {
+      const providerName = providerNameForNative(namespaces, undefined, tool.name);
+      discovered.push({
+        tool: { ...tool, name: providerName }, nativeName: tool.name,
+        identity: nativeToolKey(undefined, tool.name),
+      });
       continue;
     }
     if (tool?.type !== "function" || !providerFunctionName(tool)) continue;
@@ -1748,7 +1756,7 @@ export function flattenToolSearchHistory(
   input,
   tools,
   namespaces,
-  { maxTools = Infinity, recoverWithoutRelay = false, toolChoice } = {},
+  { maxTools = Infinity, recoverWithoutRelay = false, toolChoice, allowCustomTools = false } = {},
 ) {
   const relay = TOOL_SEARCH_RELAYS.get(namespaces);
   if (!Array.isArray(tools)) {
@@ -1854,7 +1862,7 @@ export function flattenToolSearchHistory(
     const item = input[index];
     if (!outputsByIndex.has(index)) continue;
     const records = [];
-    for (const candidate of discoveredProviderTools(item.tools, namespaces)) {
+    for (const candidate of discoveredProviderTools(item.tools, namespaces, { allowCustomTools })) {
       const name = providerFunctionName(candidate.tool);
       if (!name) continue;
       const wireName = candidate.native
@@ -3019,13 +3027,20 @@ function customToolInputDelta(
 }
 
 class NamespaceRelayCommittedStreamError extends Error {
-  constructor(reason) {
+  constructor(reason, frame, model) {
     super(
       `The provider response became unsafe to relay after namespace output was committed (${reason}).`,
     );
     this.name = "NamespaceRelayCommittedStreamError";
     this.code = "ERR_NAMESPACE_RELAY_COMMITTED_STREAM";
     this.status = 502;
+    // Kept in memory, never included in the error text or normal logs. The
+    // opt-in, thread-scoped diagnostic writer decides whether it may persist.
+    if (frame) Object.defineProperty(this, "relayFrame", { value: {
+      model, reason, byteLength: frame.length,
+      sha256: createHash("sha256").update(frame).digest("hex"),
+      prefix: Buffer.from(frame.subarray(0, 64 * 1024)),
+    } });
   }
 }
 
@@ -3547,7 +3562,7 @@ export class NamespaceToolCallTransform extends Transform {
 
   #unsafeSseFrame(frame, reason) {
     if (this.#semanticMutationCommitted || this.#requiresCodec) {
-      throw new NamespaceRelayCommittedStreamError(reason);
+      throw new NamespaceRelayCommittedStreamError(reason, frame, this.#sessionModel);
     }
     this.#disableSseRewriting();
     return [frame];

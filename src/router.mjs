@@ -1,3 +1,4 @@
+import { recordRelayFailureCapture } from "./relay-failure-capture.mjs";
 import { readFileSync } from "node:fs";
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
@@ -89,6 +90,7 @@ import { translatedToolMessageCompatTransform } from "./deepseek-tool-message-co
 import {
   deepSeekCustomToolNames,
   deepSeekResponsesInput,
+  isBoyueDeepSeekResponses,
   usesDeepSeekResponses,
 } from "./deepseek-responses.mjs";
 import { exactRouteProbeRequested } from "./exact-route-probe.mjs";
@@ -1154,7 +1156,7 @@ function normalizeAutoToolChoice(payload, route) {
 function routedSearchCompatibility(payload, route) {
   const searchMode = routedModelSearchMode(route);
   const provider = providerForModel(route);
-  const compatiblePayload = provider?.generic !== true || searchMode !== undefined
+  const compatiblePayload = (provider?.generic !== true && !isBoyueDeepSeekResponses(route)) || searchMode !== undefined
     ? payload
     : stripUnsupportedHostedSearch(payload, { model: route.slug });
   return { payload: compatiblePayload, searchMode };
@@ -3909,6 +3911,17 @@ async function buildRoutedRequest({ request, payload, route, agedInput }) {
   }
   let routedInput = input;
   let routedToolChoice = payload.tool_choice;
+  if (isBoyueDeepSeekResponses(route)) {
+    // Materialize uniquely paired client discoveries before reserving custom
+    // bridge identities. Otherwise the bridge shadows the very discovered
+    // definition that grants the tool and the upstream loses its declaration.
+    const discovered = flattenToolSearchHistory(routedInput, tools, flattenedNamespaces, {
+      toolChoice: routedToolChoice, recoverWithoutRelay: true, allowCustomTools: true,
+    });
+    routedInput = discovered.input;
+    tools = discovered.tools;
+    namespacesFlattened ||= discovered.flattened;
+  }
   let installedFacade = new Set();
   let facadeNameCollision = false;
   const patchHook = grokPatchHookEnabled(route, request.headers, process.env, request.codexRouterPatchHookCapability);
@@ -6760,6 +6773,7 @@ async function handleRequest(request, response) {
 const server = http.createServer((request, response) => {
   handleRequest(request, response).catch((error) => {
     const status = httpErrorStatus(error);
+    recordRelayFailureCapture(error, threadIdFromHeaders(request.headers));
     // The bare string this used to log made every mid-stream failure
     // indistinguishable in production, and stopping at the top error was the
     // second half of the same problem: a native connect failure logs

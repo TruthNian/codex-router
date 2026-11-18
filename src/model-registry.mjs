@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { usesDeepSeekResponses } from "./deepseek-responses.mjs";
+import { isBoyueDeepSeekResponses, usesDeepSeekResponses } from "./deepseek-responses.mjs";
 
 import {
   genericProviderRuntimeDescriptor,
@@ -669,6 +669,9 @@ function modelProblem(model, providers, slugs, gatewayModels) {
   }
   if (model.requestProfile !== undefined && !requestProfileKnown(model.requestProfile)) {
     return `model ${model.slug} has an invalid requestProfile`;
+  }
+  if (model.requestProfile === "boyue-deepseek-responses" && !isBoyueDeepSeekResponses(model)) {
+    return `model ${model.slug} Boyue profile requires custom deepseek/deepseek-flash with an openai-responses endpoint`;
   }
   if (model.goalContinuationGuard !== undefined && typeof model.goalContinuationGuard !== "boolean") {
     return `model ${model.slug} has an invalid goalContinuationGuard flag`;

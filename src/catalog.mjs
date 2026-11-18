@@ -66,6 +66,7 @@ import {
 import { discoveryDisabled } from "./discovery-mode.mjs";
 import { withCatalogPublicationLock } from "./catalog-publication-lock.mjs";
 import { routedModelSearchAvailable } from "./search-capability.mjs";
+import { isBoyueDeepSeekResponses } from "./deepseek-responses.mjs";
 import {
   readModelsCache,
 } from "./native-account-catalog.mjs";
@@ -713,7 +714,9 @@ export function routedModel(template, model, behaviorTemplate = template) {
     // executed by the provider backend; standalone search is executed by
     // Codex and its result is replayed through the routed conversation. An
     // absent declaration remains the conservative default.
-    supports_search_tool: routedModelSearchAvailable(model),
+    // Current Codex uses this flag to register client-executed tool discovery.
+    // The Boyue profile bridges that control; it does not grant hosted search.
+    supports_search_tool: routedModelSearchAvailable(model) || isBoyueDeepSeekResponses(model),
     supports_image_detail_original: model.supportsImageDetailOriginal === true,
     // A routed model must never inherit a native template's capability. Codex
     // now requires the key, and `false` is both schema-valid and conservative
